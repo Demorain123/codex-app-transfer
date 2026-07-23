@@ -1,0 +1,99 @@
+name: Build Sub2API Grok Compat Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - '.github/workflows/build-sub2api-grok-compat-windows.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: sub2api-grok-compat
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: sub2api-grok-compat-windows
+
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+
+      - name: Test Sub2API Grok compatibility patch
+        run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture
+
+      - name: Build Windows NSIS + MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage Windows bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          BDIR="target/x86_64-pc-windows-msvc/release/bundle"
+          mkdir -p staging
+          shopt -s nullglob
+          for f in "$BDIR"/nsis/*-setup.exe; do
+            cp "$f" "staging/Sub2API-Grok-Compat-Windows-x64-Setup.exe"
+          done
+          for f in "$BDIR"/msi/*.msi; do
+            cp "$f" "staging/Sub2API-Grok-Compat-Windows-x64.msi"
+          done
+          files=(staging/*)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No Windows bundles found"
+            find target -maxdepth 6 -type f | sort | tail -200 || true
+            exit 1
+          fi
+          ls -lh staging/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

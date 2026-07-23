@@ -59,6 +59,36 @@ use crate::types::{AdapterError, ByteStream, RequestPlan, ResponsePlan};
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct ResponsesPassthroughMapper;
 
+/// Enable the Grok Responses compatibility shim for a normal bearer provider
+/// (for example Sub2API) only when the current request actually targets a
+/// Grok model. This keeps mixed Sub2API providers safe: Luna/GPT requests stay
+/// byte-for-byte Responses passthrough while grok-* gets the existing
+/// custom/namespace/tool_search compatibility path.
+fn sub2api_grok_compat_enabled(provider: &Provider, body: &Bytes) -> bool {
+    let enabled = provider
+        .extra
+        .get("sub2apiGrokCompat")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !enabled {
+        return false;
+    }
+
+    let Ok(parsed) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    let Some(model) = parsed.get("model").and_then(Value::as_str) else {
+        return false;
+    };
+    let model = model.trim().to_ascii_lowercase();
+    model == "grok" || model.starts_with("grok-") || model.starts_with("grok/")
+}
+
+fn should_use_grok_compat(provider: &Provider, body: &Bytes) -> bool {
+    crate::mapper::grok_build::is_grok_build_provider(provider)
+        || sub2api_grok_compat_enabled(provider, body)
+}
+
 impl RequestMapper for ResponsesPassthroughMapper {
     fn map_request(
         &self,
@@ -66,10 +96,13 @@ impl RequestMapper for ResponsesPassthroughMapper {
         body: Bytes,
         provider: &Provider,
     ) -> Result<RequestPlan, AdapterError> {
+        let use_grok_compat = should_use_grok_compat(provider, &body);
         // [MOC-299] api_format=responses 但上游无 compaction 能力的第三方(grok):Codex 的 autocompact
         // (V1 /responses/compact 或 V2 compaction_trigger)grok 不认(404/422)。像 chat 路径一样本地摘要:
         // strip → 注入 summarize prompt → 走上游普通 /responses(stream:false)→ 响应侧包成单 compaction item。
-        if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider) {
+        if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider)
+            || use_grok_compat
+        {
             if let Some(kind) = crate::responses::compact::detect_compact(client_path, &body) {
                 let stripped = match kind {
                     crate::responses::compact::CompactKind::V1 => body.to_vec(),
@@ -106,12 +139,12 @@ impl RequestMapper for ResponsesPassthroughMapper {
         // tools 还带 custom/tool_search/namespace 类型;`adapt_grok_build_request_body` 之后它们全变
         // function,`grok_shim_request_context` 就认不出了(会得空 context → shim 永不 repack)。
         // 提取后 stash 进 adapter_metadata,response 侧从那读(而非从已适配的 request_plan.body 重推)。
-        let grok_shim_ctx = if crate::mapper::grok_build::is_grok_build_provider(provider) {
+        let grok_shim_ctx = if use_grok_compat {
             Some(crate::mapper::grok_build::grok_shim_request_context(&body))
         } else {
             None
         };
-        let body = if crate::mapper::grok_build::is_grok_build_provider(provider) {
+        let body = if use_grok_compat {
             crate::mapper::grok_build::adapt_grok_build_request_body(&body, provider)
                 .unwrap_or(body)
         } else {
@@ -227,7 +260,7 @@ impl ResponseMapper for ResponsesPassthroughMapper {
         // 并给发现的 namespace 工具补 `namespace`。**仅 grok**;其余 responses passthrough 仍严格 1:1。
         // cwd 供 apply_patch preflight;ctx 携带请求侧「哪些工具真被 lower + name→namespace」元数据
         // (review:只 repack 真被 lower 的、给 MCP 工具补 namespace)。
-        if crate::mapper::grok_build::is_grok_build_provider(provider) {
+        if should_use_grok_compat(provider, &request_plan.body) {
             let parsed = serde_json::from_slice::<Value>(&request_plan.body).ok();
             let cwd = parsed
                 .as_ref()
@@ -949,5 +982,55 @@ mod tests {
             text.contains("bad cancel request"),
             "应原样保留上游 JSON 错误体: {text}"
         );
+    }
+}
+
+#[cfg(test)]
+mod sub2api_grok_compat_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn provider(enabled: bool) -> Provider {
+        serde_json::from_value(json!({
+            "id": "sub2api",
+            "name": "Sub2API",
+            "baseUrl": "http://127.0.0.1:8089/v1",
+            "authScheme": "bearer",
+            "apiFormat": "responses",
+            "apiKey": "test",
+            "models": {},
+            "sub2apiGrokCompat": enabled
+        }))
+        .expect("provider fixture")
+    }
+
+    #[test]
+    fn sub2api_grok_compat_only_matches_grok_models() {
+        let p = provider(true);
+        assert!(sub2api_grok_compat_enabled(
+            &p,
+            &Bytes::from_static(br#"{"model":"grok-4.5"}"#)
+        ));
+        assert!(sub2api_grok_compat_enabled(
+            &p,
+            &Bytes::from_static(br#"{"model":"grok/something"}"#)
+        ));
+        assert!(!sub2api_grok_compat_enabled(
+            &p,
+            &Bytes::from_static(br#"{"model":"gpt-5.6-luna"}"#)
+        ));
+        assert!(!sub2api_grok_compat_enabled(
+            &p,
+            &Bytes::from_static(br#"{"model":"gpt-5.4"}"#)
+        ));
+    }
+
+    #[test]
+    fn sub2api_grok_compat_requires_explicit_opt_in() {
+        let p = provider(false);
+        assert!(!sub2api_grok_compat_enabled(
+            &p,
+            &Bytes::from_static(br#"{"model":"grok-4.5"}"#)
+        ));
     }
 }

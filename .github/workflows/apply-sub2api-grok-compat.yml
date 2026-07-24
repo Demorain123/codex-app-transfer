@@ -31,8 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Never silently validate a different branch. This makes upstream-sync
-          # candidate branches safe and reviewable.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
@@ -47,21 +45,13 @@ jobs:
             python3 scripts/apply_sub2api_grok_compat.py
           fi
 
-      - name: Apply UI/provider compat overlay
+      - name: Apply UI/provider and Codex-config compat overlay
         shell: bash
         run: |
-          if test -f frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
-            && grep -q 'Sub2ApiGrokCompatControls' frontend/src/components/provider/ProviderFormModal.vue \
-            && grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs \
-            && grep -q 'compat-build-badge' frontend/src/layout/TopTabBar.vue; then
-            echo 'Thin UI/provider compat overlay is already generated; validating existing source.'
-          elif grep -q 'pf__compat-card' frontend/src/components/provider/ProviderFormModal.vue \
-            && grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs; then
-            echo 'Legacy generated compat UI detected; migrating it to the overlay component.'
-            python3 scripts/migrate_sub2api_grok_ui_to_overlay.py
-          else
-            python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
-          fi
+          # Dispatcher is intentionally always run. It is idempotent for the UI,
+          # and also materializes the compat-only guards that preserve a user's
+          # external model catalog and sandbox/approval policy.
+          python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py
@@ -85,6 +75,9 @@ jobs:
 
       - name: Build frontend (TypeScript + Vite)
         run: npm --prefix frontend run build
+
+      - name: Test config integration
+        run: cargo test -p codex-app-transfer-codex-integration --lib -- --nocapture
 
       - name: Test all adapter regressions
         shell: bash
@@ -122,6 +115,8 @@ jobs:
             crates/adapters/src/mapper/mod.rs \
             crates/adapters/src/mapper/responses.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/codex_integration/src/apply.rs \
+            src-tauri/src/admin/services/desktop/snapshot.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
             frontend/src/api/types.ts \
@@ -143,17 +138,19 @@ jobs:
             frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
             SUB2API_GROK_COMPAT_VERSION.txt)"
           if git diff --quiet && test -z "$untracked_overlay"; then
-            echo "No generated changes to commit."
+            echo 'No generated changes to commit.'
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             Cargo.lock \
             src-tauri/Cargo.toml \
             crates/adapters/src/mapper/mod.rs \
             crates/adapters/src/mapper/responses.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/codex_integration/src/apply.rs \
+            src-tauri/src/admin/services/desktop/snapshot.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
             frontend/src/api/types.ts \
@@ -165,5 +162,5 @@ jobs:
             frontend/src/i18n/zh.ts \
             frontend/src/i18n/en.ts \
             SUB2API_GROK_COMPAT_VERSION.txt
-          git commit -m "refactor: apply Sub2API Grok compat revision [compat-generated]"
+          git commit -m 'refactor: apply Sub2API Grok compat revision [compat-generated]'
           git push origin "HEAD:${GITHUB_REF_NAME}"

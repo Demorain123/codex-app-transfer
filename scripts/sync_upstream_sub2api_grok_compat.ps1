@@ -97,6 +97,7 @@ $assets = @(
     'scripts/apply_sub2api_grok_compat_ui.py',
     'scripts/apply_sub2api_grok_compat_ui_dispatch.py',
     'scripts/apply_sub2api_grok_gateway_auth.py',
+    'scripts/apply_sub2api_grok_replay_compat.py',
     'scripts/apply_sub2api_grok_compat_revision.py',
     'scripts/migrate_sub2api_grok_ui_to_overlay.py',
     'scripts/build_sub2api_grok_compat_windows.ps1',
@@ -156,6 +157,7 @@ try {
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat.py'))
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_ui_dispatch.py'))
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_gateway_auth.py'))
+    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_replay_compat.py'))
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_revision.py'))
     Invoke-Checked -Command cargo -Arguments @('fmt', '--all')
 

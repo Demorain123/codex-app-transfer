@@ -47,6 +47,11 @@ pub struct DesktopConfigTarget {
     /// `ApplyConfig.is_qoder`,让 catalog 只在 qoder 上下文解析 qoder 网关 key 的 reasoning/context,
     /// 避免 `auto` 等通用别名撞 WorkBuddy 等同名 model。见 [`provider_is_qoder`]。
     pub is_qoder: bool,
+    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep an existing external Codex model catalog.
+    pub preserve_external_model_catalog: bool,
+    /// CAS-SUB2API-GROK-COMPAT-HOOK: when Transfer network access is off,
+    /// keep the user's existing sandbox/approval policy unchanged.
+    pub preserve_user_sandbox_policy: bool,
 }
 
 /// [MOC-69] 给 antigravity provider 构建 model id → displayName 反查表(JSON object),
@@ -189,6 +194,17 @@ pub fn desktop_config_target_for_provider(
         model_display_names: model_display_names_for_provider(provider, &api_format_lower),
         review_model_slot: provider_review_model_slot(provider),
         is_qoder: provider_is_qoder(provider),
+        // CAS-SUB2API-GROK-COMPAT-HOOK: wire shim, not a model-catalog owner.
+        preserve_external_model_catalog: api_format_lower == "responses"
+            && provider
+                .get("sub2apiGrokCompat")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        preserve_user_sandbox_policy: api_format_lower == "responses"
+            && provider
+                .get("sub2apiGrokCompat")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
     }
 }
 
@@ -279,6 +295,9 @@ fn apply_desktop_target_impl(
             app_version: APP_VERSION,
             codex_network_access: target.codex_network_access,
             preserve_chatgpt_auth,
+            // CAS-SUB2API-GROK-COMPAT-HOOK
+            preserve_external_model_catalog: target.preserve_external_model_catalog,
+            preserve_user_sandbox_policy: target.preserve_user_sandbox_policy,
         },
     )
     .map_err(|e| format!("apply 失败: {e}"))?;

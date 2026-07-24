@@ -32,6 +32,14 @@ def insert_after_once(text: str, anchor: str, addition: str, marker: str, label:
     return text.replace(anchor, anchor + addition, 1)
 
 
+def remove_if_present(text: str, old: str, label: str) -> str:
+    if old not in text:
+        print(f"[ok] {label}: already absent")
+        return text
+    print(f"[ok] {label}: removed")
+    return text.replace(old, "", 1)
+
+
 def overlay_complete() -> bool:
     """Semantic, formatting-insensitive completeness check for the UI/backend overlay."""
     return all(
@@ -94,15 +102,35 @@ def overlay_complete() -> bool:
 
 
 def apply_codex_config_preservation() -> None:
-    """Install compat-only guards around upstream Codex config ownership.
+    """Keep the user's external model catalog, but do not own sandbox policy.
 
-    The Sub2API Grok provider is a mixed-model Responses wire shim. It must not
-    silently replace a user-owned model catalog or erase a user-owned sandbox
-    policy. The only routing keys that must change are handled by upstream
-    apply_provider (openai_base_url/model_provider and optional relay keys).
+    The Sub2API Grok compat layer is a Responses wire shim. Its only Codex-config
+    exception is preserving an already configured external model_catalog_json.
+    Sandbox/approval settings are deliberately left to upstream Transfer behavior;
+    the compat overlay must never introduce a new sandbox ownership rule.
     """
     path = Path("src-tauri/src/admin/services/desktop/snapshot.rs")
     text = path.read_text(encoding="utf-8")
+
+    # r8 regression cleanup: this compat-only flag made a provider switch retain
+    # sandbox/approval values that r7/upstream would have cleared. That can surface
+    # Codex's Windows elevated-sandbox first-run/UAC setup unexpectedly. Remove the
+    # flag completely; Grok Responses compatibility does not need sandbox ownership.
+    text = remove_if_present(
+        text,
+        '''    /// CAS-SUB2API-GROK-COMPAT-HOOK: when Transfer network access is off,\n    /// keep the user's existing sandbox/approval policy unchanged.\n    pub preserve_user_sandbox_policy: bool,\n''',
+        "DesktopConfigTarget sandbox preservation flag",
+    )
+    text = remove_if_present(
+        text,
+        '''        preserve_user_sandbox_policy: api_format_lower == "responses"\n            && provider\n                .get("sub2apiGrokCompat")\n                .and_then(Value::as_bool)\n                .unwrap_or(false),\n''',
+        "compat sandbox preservation assignment",
+    )
+    text = remove_if_present(
+        text,
+        '''            preserve_user_sandbox_policy: target.preserve_user_sandbox_policy,\n''',
+        "ApplyConfig sandbox preservation pass-through",
+    )
 
     if "pub preserve_external_model_catalog: bool," not in text:
         text = replace_once(
@@ -111,13 +139,6 @@ def apply_codex_config_preservation() -> None:
             '''    pub is_qoder: bool,\n    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep an existing external Codex model catalog.\n    pub preserve_external_model_catalog: bool,\n}''',
             "DesktopConfigTarget preserve external catalog flag",
         )
-    text = insert_after_once(
-        text,
-        '''    pub preserve_external_model_catalog: bool,\n''',
-        '''    /// CAS-SUB2API-GROK-COMPAT-HOOK: when Transfer network access is off,\n    /// keep the user's existing sandbox/approval policy unchanged.\n    pub preserve_user_sandbox_policy: bool,\n''',
-        "pub preserve_user_sandbox_policy: bool,",
-        "DesktopConfigTarget preserve sandbox policy flag",
-    )
 
     if "preserve_external_model_catalog: api_format_lower" not in text:
         text = replace_once(
@@ -126,14 +147,6 @@ def apply_codex_config_preservation() -> None:
             '''        review_model_slot: provider_review_model_slot(provider),\n        is_qoder: provider_is_qoder(provider),\n        // CAS-SUB2API-GROK-COMPAT-HOOK: wire shim, not a model-catalog owner.\n        preserve_external_model_catalog: api_format_lower == "responses"\n            && provider\n                .get("sub2apiGrokCompat")\n                .and_then(Value::as_bool)\n                .unwrap_or(false),\n    }''',
             "derive preserve external catalog from compat provider",
         )
-    # Anchor on the just-installed compat field, not a generic bool expression.
-    text = insert_after_once(
-        text,
-        '''        preserve_external_model_catalog: api_format_lower == "responses"\n            && provider\n                .get("sub2apiGrokCompat")\n                .and_then(Value::as_bool)\n                .unwrap_or(false),\n''',
-        '''        preserve_user_sandbox_policy: api_format_lower == "responses"\n            && provider\n                .get("sub2apiGrokCompat")\n                .and_then(Value::as_bool)\n                .unwrap_or(false),\n''',
-        "preserve_user_sandbox_policy: api_format_lower",
-        "derive preserve sandbox policy from compat provider",
-    )
 
     if "preserve_external_model_catalog: target.preserve_external_model_catalog" not in text:
         text = replace_once(
@@ -142,18 +155,27 @@ def apply_codex_config_preservation() -> None:
             '''            codex_network_access: target.codex_network_access,\n            preserve_chatgpt_auth,\n            // CAS-SUB2API-GROK-COMPAT-HOOK\n            preserve_external_model_catalog: target.preserve_external_model_catalog,\n        },''',
             "pass preserve external catalog into ApplyConfig",
         )
-    text = insert_after_once(
-        text,
-        '''            preserve_external_model_catalog: target.preserve_external_model_catalog,\n''',
-        '''            preserve_user_sandbox_policy: target.preserve_user_sandbox_policy,\n''',
-        "preserve_user_sandbox_policy: target.preserve_user_sandbox_policy",
-        "pass preserve sandbox policy into ApplyConfig",
-    )
     path.write_text(text, encoding="utf-8")
     print(f"[ok] patched {path}")
 
     path = Path("crates/codex_integration/src/apply.rs")
     text = path.read_text(encoding="utf-8")
+
+    text = remove_if_present(
+        text,
+        '''    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user sandbox/approval policy when\n    /// the Transfer-specific network-access override is disabled.\n    #[serde(default)]\n    pub preserve_user_sandbox_policy: bool,\n''',
+        "ApplyConfig sandbox preservation flag",
+    )
+    if "} else if !cfg.preserve_user_sandbox_policy {" in text:
+        text = text.replace(
+            "} else if !cfg.preserve_user_sandbox_policy {",
+            "} else {",
+            1,
+        )
+        print("[ok] restored upstream/r7 sandbox else branch")
+    else:
+        print("[ok] upstream/r7 sandbox else branch already restored")
+
     if "pub preserve_external_model_catalog: bool," not in text:
         text = replace_once(
             text,
@@ -161,20 +183,6 @@ def apply_codex_config_preservation() -> None:
             '''    #[serde(default)]\n    pub preserve_chatgpt_auth: bool,\n    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user-owned model_catalog_json.\n    #[serde(default)]\n    pub preserve_external_model_catalog: bool,\n}''',
             "ApplyConfig preserve external catalog flag",
         )
-    text = insert_after_once(
-        text,
-        '''    pub preserve_external_model_catalog: bool,\n''',
-        '''    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user sandbox/approval policy when\n    /// the Transfer-specific network-access override is disabled.\n    #[serde(default)]\n    pub preserve_user_sandbox_policy: bool,\n''',
-        "pub preserve_user_sandbox_policy: bool,",
-        "ApplyConfig preserve sandbox policy flag",
-    )
-
-    text = replace_once(
-        text,
-        '''    } else {\n        sync_root_value(&paths.config_toml, "sandbox_mode", None)?;\n        sync_root_value(&paths.config_toml, "approval_policy", None)?;\n        sync_table_field(\n            &paths.config_toml,\n            "sandbox_workspace_write",\n            "network_access",\n            None,\n        )?;\n    }\n\n    // 3. config.toml: model_context_window''',
-        '''    } else if !cfg.preserve_user_sandbox_policy {\n        sync_root_value(&paths.config_toml, "sandbox_mode", None)?;\n        sync_root_value(&paths.config_toml, "approval_policy", None)?;\n        sync_table_field(\n            &paths.config_toml,\n            "sandbox_workspace_write",\n            "network_access",\n            None,\n        )?;\n    }\n\n    // 3. config.toml: model_context_window''',
-        "preserve existing sandbox policy when compat network override is off",
-    )
 
     anchor = '''    let models = catalog_models_for_provider_with_display_names(\n        cfg.provider_name,\n        cfg.default_model,\n        cfg.supports_1m,\n        cfg.model_mappings,\n        cfg.model_capabilities,\n        cfg.model_display_names,\n        cfg.review_model_slot,\n        cfg.is_qoder,\n    );\n    if models.is_empty() {'''
     replacement = '''    let models = catalog_models_for_provider_with_display_names(\n        cfg.provider_name,\n        cfg.default_model,\n        cfg.supports_1m,\n        cfg.model_mappings,\n        cfg.model_capabilities,\n        cfg.model_display_names,\n        cfg.review_model_slot,\n        cfg.is_qoder,\n    );\n\n    // CAS-SUB2API-GROK-COMPAT-HOOK: preserve a user-owned external catalog.\n    let preserve_external_model_catalog = if cfg.preserve_external_model_catalog {\n        let transfer_catalog = paths\n            .model_catalog_json\n            .to_string_lossy()\n            .replace('\\\\', "/")\n            .to_ascii_lowercase();\n        std::fs::read_to_string(&paths.config_toml)\n            .ok()\n            .and_then(|content| {\n                content\n                    .lines()\n                    .take_while(|line| !line.trim_start().starts_with('['))\n                    .find_map(|line| {\n                        crate::residual::parse_root_string_value(line.trim_start(), CODEX_MODEL_CATALOG_KEY)\n                    })\n            })\n            .is_some_and(|configured| {\n                let configured = configured.replace('\\\\', "/").to_ascii_lowercase();\n                !configured.trim().is_empty() && configured != transfer_catalog\n            })\n    } else {\n        false\n    };\n\n    if preserve_external_model_catalog {\n        // External catalog is authoritative: keep its path and model_context_window.\n    } else if models.is_empty() {'''
@@ -198,21 +206,16 @@ def apply_codex_config_preservation() -> None:
 
 
 def config_preservation_complete() -> bool:
+    snapshot = Path("src-tauri/src/admin/services/desktop/snapshot.rs").read_text(encoding="utf-8")
+    apply = Path("crates/codex_integration/src/apply.rs").read_text(encoding="utf-8")
     return all(
         [
-            contains(
-                "src-tauri/src/admin/services/desktop/snapshot.rs",
-                "preserve_external_model_catalog",
-                "preserve_user_sandbox_policy",
-                'get("sub2apiGrokCompat")',
-            ),
-            contains(
-                "crates/codex_integration/src/apply.rs",
-                "pub preserve_external_model_catalog: bool",
-                "pub preserve_user_sandbox_policy: bool",
-                "if preserve_external_model_catalog {",
-                "else if !cfg.preserve_user_sandbox_policy",
-            ),
+            "preserve_external_model_catalog" in snapshot,
+            'get("sub2apiGrokCompat")' in snapshot,
+            "preserve_user_sandbox_policy" not in snapshot,
+            "pub preserve_external_model_catalog: bool" in apply,
+            "if preserve_external_model_catalog {" in apply,
+            "preserve_user_sandbox_policy" not in apply,
         ]
     )
 
@@ -233,5 +236,5 @@ else:
 
 apply_codex_config_preservation()
 if not config_preservation_complete():
-    raise SystemExit("Codex config preservation overlay did not produce the required invariants")
-print("[ok] Codex external catalog + sandbox policy preservation installed and verified")
+    raise SystemExit("Codex external-catalog preservation / sandbox isolation invariants failed")
+print("[ok] Codex external catalog preservation installed; compat sandbox-policy ownership removed")

@@ -76,6 +76,8 @@ export function mapProvider(provider: Record<string, any>, activeId: string | nu
     extraHeaders: provider.extraHeaders || {},
     modelCapabilities: provider.modelCapabilities || {},
     requestOptions: provider.requestOptions || {},
+    sub2apiGrokCompat: !!provider.sub2apiGrokCompat,
+    sub2apiGrokFreeCacheCompat: !!provider.sub2apiGrokFreeCacheCompat,
     default: provider.id === activeId,
     isBuiltin: !!provider.isBuiltin,
     reviewModelSlot: provider.reviewModelSlot || '',
@@ -113,6 +115,8 @@ export function providerBody(payload: ProviderPayload, includeModels = true): Re
     extraHeaders: payload.extraHeaders || {},
     modelCapabilities: payload.modelCapabilities || {},
     requestOptions: payload.requestOptions || {},
+    sub2apiGrokCompat: !!payload.sub2apiGrokCompat,
+    sub2apiGrokFreeCacheCompat: !!payload.sub2apiGrokFreeCacheCompat,
   }
   if (payload.apiKey) body.apiKey = payload.apiKey
   if (includeModels) body.models = payload.models || {}

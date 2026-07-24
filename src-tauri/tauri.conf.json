@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Codex App Transfer",
+        "title": "Codex App Transfer — Sub2API Grok Compat",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "url": "cas://localhost/",

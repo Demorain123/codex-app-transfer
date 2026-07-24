@@ -11,6 +11,7 @@ import AppInput from '@/components/ui/AppInput.vue'
 import AppCombobox from '@/components/ui/AppCombobox.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import AppSwitch from '@/components/ui/AppSwitch.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import IconEye from '~icons/lucide/eye'
 import IconEyeOff from '~icons/lucide/eye-off'
@@ -114,6 +115,8 @@ const form = reactive({
   modelCapabilities: '',
   requestOptions: '',
   grokSso: '',
+  sub2apiGrokCompat: false,
+  sub2apiGrokFreeCacheCompat: false,
 })
 const saving = ref(false)
 const error = ref('')
@@ -153,6 +156,11 @@ const baseUrlOptions = computed(() =>
 // preset 决定(已由 applyPreset 填入 form 随保存发送)且被 healing 强制覆盖, 用户改也无效,
 // 故隐藏以保持显示统一。
 const isCustomProvider = computed(() => !isBuiltin.value && !matchedPreset.value)
+// 兼容开关只对自定义 Responses provider 有意义。真正请求侧还会按 model=grok-* 再 gate，
+// 所以同一个 Sub2API provider 里的 Luna/GPT 请求仍保持原生 Responses 直透。
+const showSub2apiGrokCompat = computed(
+  () => isCustomProvider.value && form.apiFormat === 'responses',
+)
 // 编辑内置/预设 provider 时 baseUrl 不可改:后端 update_provider 对 builtin 跳过 baseUrl,
 // 改了会被静默丢弃(含小米多集群切换)→ 设为只读, 如实反映后端行为(添加时仍可选集群)。
 const baseUrlReadonly = computed(() => isEdit.value && !isCustomProvider.value)
@@ -280,6 +288,8 @@ async function onTestConnection() {
       authScheme: form.authScheme,
       models,
       extraHeaders: extraHeaders as Record<string, string> | undefined,
+      sub2apiGrokCompat: form.sub2apiGrokCompat,
+      sub2apiGrokFreeCacheCompat: form.sub2apiGrokFreeCacheCompat,
     }
     const res = await providersApi.testProvider(draft)
     toast(res.message ?? '', res.ok ? 'info' : 'error')
@@ -308,6 +318,8 @@ function resetToCustom() {
   form.extraHeaders = ''
   form.modelCapabilities = ''
   form.requestOptions = ''
+  form.sub2apiGrokCompat = false
+  form.sub2apiGrokFreeCacheCompat = false
   availableModels.value = []
 }
 
@@ -342,6 +354,8 @@ function applyPreset(p: Preset) {
   form.extraHeaders = stringifyIfAny(p.extraHeaders)
   form.modelCapabilities = stringifyIfAny(p.modelCapabilities)
   form.requestOptions = stringifyIfAny(p.requestOptions as Record<string, unknown> | undefined)
+  form.sub2apiGrokCompat = false
+  form.sub2apiGrokFreeCacheCompat = false
   // 该上游若之前抓过模型, 带出缓存清单, 否则清空待用户「获取模型」
   availableModels.value = []
   loadCachedModels(form.baseUrl)
@@ -466,6 +480,8 @@ onMounted(async () => {
   form.extraHeaders = stringifyIfAny(p.extraHeaders)
   form.modelCapabilities = stringifyIfAny(p.modelCapabilities)
   form.requestOptions = stringifyIfAny(p.requestOptions)
+  form.sub2apiGrokCompat = !!p.sub2apiGrokCompat
+  form.sub2apiGrokFreeCacheCompat = !!p.sub2apiGrokFreeCacheCompat
   // 该上游之前抓过模型 → 带出本地缓存清单, 无需重新「获取模型」即可切换映射
   loadCachedModels(form.baseUrl)
   loadMsgFiltered(form.baseUrl)
@@ -522,6 +538,8 @@ async function save() {
     extraHeaders: extraHeaders as Record<string, string> | undefined,
     modelCapabilities,
     requestOptions,
+    sub2apiGrokCompat: form.sub2apiGrokCompat,
+    sub2apiGrokFreeCacheCompat: form.sub2apiGrokFreeCacheCompat,
   }
   // grok-web:粘贴的 SSO cookie 封进 grokWeb.cookies.sso(留空=编辑时保持原值)
   if (isGrokWeb.value && form.grokSso.trim()) {
@@ -618,6 +636,31 @@ async function save() {
       <SettingsRow v-if="isCustomProvider" :title="t('providerForm.authScheme')">
         <SegmentedControl v-model="form.authScheme" :options="authOptions" />
       </SettingsRow>
+
+      <div v-if="showSub2apiGrokCompat" class="pf__compat-card">
+        <div class="pf__compat-head">
+          <span>{{ t('providerForm.grokCompatSection') }}</span>
+          <span class="pf__compat-badge">COMPAT</span>
+        </div>
+        <SettingsRow
+          :title="t('providerForm.grokCompat')"
+          :description="t('providerForm.grokCompatHint')"
+        >
+          <AppSwitch v-model="form.sub2apiGrokCompat" />
+        </SettingsRow>
+        <SettingsRow
+          :title="t('providerForm.grokFreeCacheCompat')"
+          :description="t('providerForm.grokFreeCacheCompatHint')"
+        >
+          <AppSwitch
+            v-model="form.sub2apiGrokFreeCacheCompat"
+            :disabled="!form.sub2apiGrokCompat"
+          />
+        </SettingsRow>
+        <div v-if="form.sub2apiGrokFreeCacheCompat" class="pf__compat-warning">
+          {{ t('providerForm.grokFreeCacheCompatWarning') }}
+        </div>
+      </div>
 
       <div class="pf__section-row">
         <span class="pf__section">{{ t('providerForm.modelMapSection') }}</span>
@@ -748,6 +791,38 @@ async function save() {
   max-height: 68vh;
   overflow-y: auto;
   min-width: 460px;
+}
+.pf__compat-card {
+  margin: var(--space-3) 0 var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  overflow: hidden;
+}
+.pf__compat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--accent);
+}
+.pf__compat-badge {
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.pf__compat-warning {
+  margin: 0 var(--space-4) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
 }
 .pf__section {
   font-size: var(--fs-sm);

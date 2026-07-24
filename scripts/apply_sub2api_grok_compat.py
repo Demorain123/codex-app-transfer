@@ -6,6 +6,7 @@ MAPPER_MOD = Path("crates/adapters/src/mapper/mod.rs")
 COMPAT = Path("crates/adapters/src/mapper/sub2api_grok_compat.rs")
 COMPAT_TEMPLATE = Path("scripts/sub2api_grok_compat_overlay.rs")
 HOOK = "// CAS-SUB2API-GROK-COMPAT-HOOK"
+TOOL_DIAG_HOOK = "// CAS-SUB2API-GROK-TOOL-INVENTORY-DIAG-HOOK"
 
 
 def remove_rust_module(text: str, marker: str) -> str:
@@ -65,6 +66,174 @@ if not COMPAT_TEMPLATE.is_file():
 COMPAT.parent.mkdir(parents=True, exist_ok=True)
 COMPAT.write_text(COMPAT_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
 print(f"[ok] overlay module refreshed: {COMPAT}")
+
+# Diagnostic-only helper. Keep it installed by the overlay patcher rather than
+# upstream core so future official rebases remain thin. It logs only tool names,
+# types and counts — never prompts, arguments, schemas, API keys or file contents.
+# The app's tracing bridge already forwards workspace `tracing::*` events into
+# proxy_telemetry().logs, so these lines automatically appear in the existing
+# modified-version log UI/file without a second logging subsystem.
+diag_helper = r'''
+// CAS-SUB2API-GROK-TOOL-INVENTORY-DIAG-HOOK
+#[derive(Debug)]
+struct GrokToolInventoryDiag {
+    total: usize,
+    types: String,
+    apply_patch: String,
+    tool_search: String,
+    names: String,
+}
+
+fn grok_tool_name(tool: &Value) -> Option<&str> {
+    tool.get("name")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            tool.get("function")
+                .and_then(|v| v.get("name"))
+                .and_then(Value::as_str)
+        })
+}
+
+fn summarize_grok_tool_inventory(body: &Bytes) -> Result<(String, GrokToolInventoryDiag), String> {
+    let parsed = serde_json::from_slice::<Value>(body)
+        .map_err(|err| format!("invalid request JSON: {err}"))?;
+    let model = parsed
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>")
+        .to_owned();
+    let tools = parsed
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+
+    let mut type_counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut apply_patch_types = std::collections::BTreeSet::<String>::new();
+    let mut tool_search_types = std::collections::BTreeSet::<String>::new();
+    let mut names = std::collections::BTreeSet::<String>::new();
+
+    for tool in tools {
+        let kind = tool
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned();
+        *type_counts.entry(kind.clone()).or_insert(0) += 1;
+
+        let name = grok_tool_name(tool).unwrap_or("");
+        let display_name = if name.is_empty() { "<unnamed>" } else { name };
+        names.insert(format!("{kind}:{display_name}"));
+
+        if name == "apply_patch" {
+            apply_patch_types.insert(kind.clone());
+        }
+        if kind == "tool_search" || name == "tool_search" {
+            tool_search_types.insert(kind);
+        }
+    }
+
+    let types = if type_counts.is_empty() {
+        "none".to_owned()
+    } else {
+        type_counts
+            .iter()
+            .map(|(kind, count)| format!("{kind}:{count}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let apply_patch = if apply_patch_types.is_empty() {
+        "absent".to_owned()
+    } else {
+        apply_patch_types.into_iter().collect::<Vec<_>>().join("|")
+    };
+    let tool_search = if tool_search_types.is_empty() {
+        "absent".to_owned()
+    } else {
+        tool_search_types.into_iter().collect::<Vec<_>>().join("|")
+    };
+
+    // Tool inventories can be large when MCP namespaces are present. Keep the
+    // line useful but bounded so diagnostics never swamp the normal proxy log.
+    let all_names = names.into_iter().collect::<Vec<_>>();
+    let shown = all_names.len().min(24);
+    let mut names = all_names[..shown].join(",");
+    if all_names.len() > shown {
+        names.push_str(&format!(",…(+{})", all_names.len() - shown));
+    }
+    if names.is_empty() {
+        names = "none".to_owned();
+    }
+
+    Ok((
+        model,
+        GrokToolInventoryDiag {
+            total: tools.len(),
+            types,
+            apply_patch,
+            tool_search,
+            names,
+        },
+    ))
+}
+
+/// Compact request-side diagnostic for the exact question "did Codex advertise
+/// apply_patch, and did the Grok compatibility lowering preserve it?".
+///
+/// `stage=inbound` is the Codex request before Grok lowering.
+/// `stage=outbound` is the final body after Grok lowering/cache companions, i.e.
+/// what the proxy is about to send upstream.
+pub(crate) fn log_sub2api_grok_tool_inventory(stage: &str, body: &Bytes, provider: &Provider) {
+    let enabled = provider
+        .extra
+        .get("sub2apiGrokCompat")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+
+    match summarize_grok_tool_inventory(body) {
+        Ok((model, summary)) => {
+            let lower = model.trim().to_ascii_lowercase();
+            if !(lower == "grok" || lower.starts_with("grok-") || lower.starts_with("grok/")) {
+                return;
+            }
+            tracing::info!(
+                target: "adapters::grok_tool_diag",
+                stage = %stage,
+                provider = %provider.id,
+                model = %model,
+                tools = summary.total,
+                types = %summary.types,
+                apply_patch = %summary.apply_patch,
+                tool_search = %summary.tool_search,
+                names = %summary.names,
+                "Sub2API Grok tool inventory"
+            );
+        }
+        Err(reason) => {
+            tracing::warn!(
+                target: "adapters::grok_tool_diag",
+                stage = %stage,
+                provider = %provider.id,
+                reason = %reason,
+                "Sub2API Grok tool inventory unavailable"
+            );
+        }
+    }
+}
+'''
+compat_text = COMPAT.read_text(encoding="utf-8")
+test_anchor = "\n#[cfg(test)]\nmod tests {"
+if TOOL_DIAG_HOOK not in compat_text:
+    if test_anchor not in compat_text:
+        raise SystemExit("missing anchor: compat tests module for tool diagnostic helper")
+    compat_text = compat_text.replace(test_anchor, "\n" + diag_helper + test_anchor, 1)
+    COMPAT.write_text(compat_text, encoding="utf-8")
+    print("[ok] Grok tool inventory diagnostic helper: applied")
+else:
+    print("[ok] Grok tool inventory diagnostic helper: already applied")
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +322,33 @@ request_assignment_re = re.compile(
 )
 text = dedupe_regex(text, request_assignment_re, "request model gate")
 
+# ---- request-side tool inventory diagnostic -------------------------------
+def tool_diag_re(stage: str) -> re.Pattern[str]:
+    return re.compile(
+        r"(?ms)^[ \t]*crate::mapper::sub2api_grok_compat::"
+        r"log_sub2api_grok_tool_inventory\s*\(\s*\""
+        + re.escape(stage)
+        + r"\"\s*,\s*&body\s*,\s*provider\s*,?\s*\);[ \t]*\n?"
+    )
+
+
+inbound_diag_re = tool_diag_re("inbound")
+if not inbound_diag_re.search(text):
+    match = request_assignment_re.search(text)
+    if not match:
+        raise SystemExit("missing anchor: request model gate for inbound tool diagnostic")
+    call = (
+        f"        {HOOK}\n"
+        "        crate::mapper::sub2api_grok_compat::log_sub2api_grok_tool_inventory(\n"
+        "            \"inbound\", &body, provider,\n"
+        "        );\n"
+    )
+    text = text[: match.end()] + call + text[match.end() :]
+    print("[ok] inbound Grok tool inventory diagnostic: applied")
+else:
+    print("[ok] inbound Grok tool inventory diagnostic: already applied")
+text = dedupe_regex(text, inbound_diag_re, "inbound Grok tool inventory diagnostic")
+
 # ---- local compaction gate -------------------------------------------------
 old = "if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider) {"
 new = (
@@ -213,6 +409,24 @@ cache_assignment_re = re.compile(
     r"\(\s*body\s*,\s*provider\s*,?\s*\);[ \t]*\n?"
 )
 text = dedupe_regex(text, cache_assignment_re, "Free cache body routing")
+
+# ---- final outbound tool inventory diagnostic ------------------------------
+outbound_diag_re = tool_diag_re("outbound")
+if not outbound_diag_re.search(text):
+    match = cache_assignment_re.search(text)
+    if not match:
+        raise SystemExit("missing anchor: cache routing for outbound tool diagnostic")
+    call = (
+        f"        {HOOK}\n"
+        "        crate::mapper::sub2api_grok_compat::log_sub2api_grok_tool_inventory(\n"
+        "            \"outbound\", &body, provider,\n"
+        "        );\n"
+    )
+    text = text[: match.end()] + call + text[match.end() :]
+    print("[ok] outbound Grok tool inventory diagnostic: applied")
+else:
+    print("[ok] outbound Grok tool inventory diagnostic: already applied")
+text = dedupe_regex(text, outbound_diag_re, "outbound Grok tool inventory diagnostic")
 
 # ---- response-side tool-call shim gate ------------------------------------
 response_call_marker = (

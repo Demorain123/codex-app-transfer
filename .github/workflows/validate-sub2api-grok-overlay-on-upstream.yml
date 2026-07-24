@@ -100,8 +100,17 @@ jobs:
 
           if ! cmp -s /tmp/overlay-first.diff /tmp/overlay-second.diff; then
             echo '::error::Overlay patchers are not idempotent.'
-            diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff > /tmp/overlay-idempotence.diff || true
-            cat /tmp/overlay-idempotence.diff || true
+            {
+              echo '=== unified diff: first application vs second application ==='
+              diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff || true
+              echo
+              echo '=== git status after second application ==='
+              git status --short
+              echo
+              echo '=== git diff --stat after second application ==='
+              git diff --stat
+            } > "$GITHUB_WORKSPACE/overlay-idempotence.diff"
+            cat "$GITHUB_WORKSPACE/overlay-idempotence.diff" || true
             exit 1
           fi
 
@@ -110,8 +119,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: overlay-idempotence-failure
-          path: /tmp/overlay-idempotence.diff
-          if-no-files-found: ignore
+          path: overlay-idempotence.diff
+          if-no-files-found: error
           retention-days: 7
 
       - name: Build frontend from pristine upstream + overlay

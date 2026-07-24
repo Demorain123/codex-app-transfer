@@ -1,0 +1,296 @@
+name: r15 Grok terminal completion fix
+
+on:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r15
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sub2api-grok-compat-next-r15
+          fetch-depth: 0
+
+      - name: Install r15 overlay patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replay = Path('scripts/apply_sub2api_grok_replay_compat.py')
+          text = replay.read_text(encoding='utf-8')
+          marker = 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK'
+
+          block = r'''
+
+          # ---------------------------------------------------------------------------
+          # 3. Some Sub2API/Grok Responses streams end a function call through the
+          #    terminal response.completed envelope without emitting
+          #    response.output_item.done. A completed terminal is not an interruption:
+          #    recover terminal arguments and let the normal apply_patch validator
+          #    decide whether the call is safe to execute. response.incomplete/failed
+          #    remain fail-closed.
+          # ---------------------------------------------------------------------------
+          TERMINAL_COMPLETION_MARKER = "CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK"
+          text = read(SHIM)
+          if TERMINAL_COMPLETION_MARKER not in text:
+              doc_start = text.index('    /// 终帧(completed / incomplete / failed):')
+              fn_start = text.index('    fn on_terminal(', doc_start)
+              next_doc = text.index('    /// envelope `output[]`', fn_start)
+              replacement = r'''    /// 终帧(completed / incomplete / failed):同步重写 `response.output[]` 里的 apply_patch /
+              /// tool_search function_call → custom_tool_call / tool_search_call(与流式 done 一致)。
+              ///
+              /// CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK
+              /// Sub2API/Grok 真机流有时不会为 function_call 发 `response.output_item.done`,而是直接以
+              /// `response.completed` + terminal envelope 收尾。completed 是成功终帧,不能仅因为 pending
+              /// item 尚未收到 output_item.done 就判成 interrupted。此处优先从 terminal envelope 回收完整
+              /// arguments,再交给现有 apply_patch truncation/V4A validator 决定 completed/incomplete。
+              /// `response.incomplete` / `response.failed` 仍严格 fail-closed。
+              fn on_terminal(&mut self, event_name: &str, mut data: Value, out: &mut Vec<u8>) {
+                  let terminal_completed = event_name == "response.completed";
+                  let terminal_output = data
+                      .get("response")
+                      .and_then(|r| r.get("output"))
+                      .and_then(Value::as_array)
+                      .cloned()
+                      .unwrap_or_default();
+
+                  let mut interrupted: std::collections::HashSet<String> =
+                      std::collections::HashSet::new();
+                  if !self.items.is_empty() {
+                      let mut leftovers: Vec<(u64, Pending)> = self.items.drain().collect();
+                      leftovers.sort_by_key(|(idx, _)| *idx);
+                      self.id_to_index.clear();
+                      for (output_index, mut p) in leftovers {
+                          let indexed = usize::try_from(output_index)
+                              .ok()
+                              .and_then(|idx| terminal_output.get(idx))
+                              .filter(|item| {
+                                  item.get("type").and_then(Value::as_str) == Some("function_call")
+                              });
+                          let matched = indexed.or_else(|| {
+                              terminal_output.iter().find(|item| {
+                                  if item.get("type").and_then(Value::as_str)
+                                      != Some("function_call")
+                                  {
+                                      return false;
+                                  }
+                                  let id_matches = !p.item_id.is_empty()
+                                      && item.get("id").and_then(Value::as_str)
+                                          == Some(p.item_id.as_str());
+                                  let call_matches = !p.call_id.is_empty()
+                                      && item.get("call_id").and_then(Value::as_str)
+                                          == Some(p.call_id.as_str());
+                                  id_matches || call_matches
+                              })
+                          });
+                          let terminal_args = matched
+                              .and_then(|item| item.get("arguments"))
+                              .map(|args| function_arguments_to_string(Some(args)))
+                              .filter(|args| !args.is_empty());
+                          let recovered_terminal_args = terminal_args.is_some();
+                          if let Some(args) = terminal_args {
+                              p.args_acc = args;
+                          }
+
+                          let treat_as_interrupted = !terminal_completed;
+                          if treat_as_interrupted {
+                              interrupted.insert(p.item_id.clone());
+                          }
+
+                          tracing::info!(
+                              target: "adapters::grok_tool_diag",
+                              terminal = %event_name,
+                              tool = %p.name,
+                              output_index,
+                              recovered_terminal_args,
+                              args_len = p.args_acc.len(),
+                              missing_output_item_done = true,
+                              "closing Grok pending tool call at terminal response"
+                          );
+
+                          self.emit_tool_call_done(
+                              output_index,
+                              &p,
+                              treat_as_interrupted,
+                              out,
+                          );
+                      }
+                  }
+                  if let Some(output) = data
+                      .get_mut("response")
+                      .and_then(|r| r.get_mut("output"))
+                      .and_then(|o| o.as_array_mut())
+                  {
+                      for item in output.iter_mut() {
+                          let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                          self.rewrite_envelope_item(item);
+                          if let Some(id) = id {
+                              if interrupted.contains(&id) {
+                                  if let Some(o) = item.as_object_mut() {
+                                      o.insert("status".into(), Value::String("incomplete".into()));
+                                      if o.get("type").and_then(Value::as_str)
+                                          == Some("custom_tool_call")
+                                          && o.get("name").and_then(Value::as_str)
+                                              == Some("apply_patch")
+                                      {
+                                          if let Some(input) = o
+                                              .get("input")
+                                              .and_then(Value::as_str)
+                                              .map(str::to_owned)
+                                          {
+                                              o.insert(
+                                                  "input".into(),
+                                                  Value::String(block_incomplete_apply_patch(&input)),
+                                              );
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  emit_event(out, &mut self.seq, event_name, data);
+              }
+
+          '''
+              text = text[:doc_start] + replacement + text[next_doc:]
+
+              test_anchor = '''    #[test]
+              fn tool_search_function_call_rewritten_to_tool_search_call() {'''
+              tests = r'''    #[test]
+              fn completed_terminal_without_output_item_done_recovers_apply_patch() {
+                  let patch = "*** Begin Patch\n*** Add File: terminal-only.txt\n+ok\n*** End Patch\n";
+                  let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+                  let input = [
+                      frame(
+                          "response.output_item.added",
+                          json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                              "item":{"type":"function_call","id":"fc_terminal_only","call_id":"call_terminal_only","name":"apply_patch","arguments":""}}),
+                      ),
+                      frame(
+                          "response.completed",
+                          json!({"type":"response.completed","sequence_number":1,
+                              "response":{"output":[{"type":"function_call","id":"fc_terminal_only","call_id":"call_terminal_only","name":"apply_patch","arguments":args}]}}),
+                      ),
+                  ]
+                  .concat();
+                  let frames = run(&input);
+                  assert_eq!(
+                      events(&frames),
+                      vec![
+                          "response.output_item.added",
+                          "response.custom_tool_call_input.delta",
+                          "response.custom_tool_call_input.done",
+                          "response.output_item.done",
+                          "response.completed",
+                      ]
+                  );
+                  let done = &frames[3].1["item"];
+                  assert_eq!(done["status"], "completed");
+                  assert_eq!(done["input"], patch);
+                  assert!(!done["input"]
+                      .as_str()
+                      .unwrap()
+                      .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+                  assert_eq!(
+                      frames[4].1["response"]["output"][0]["status"],
+                      "completed"
+                  );
+              }
+
+              #[test]
+              fn incomplete_terminal_without_output_item_done_stays_fail_closed() {
+                  let patch = "*** Begin Patch\n*** Add File: must-not-run-terminal.txt\n+blocked\n*** End Patch\n";
+                  let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+                  let input = [
+                      frame(
+                          "response.output_item.added",
+                          json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                              "item":{"type":"function_call","id":"fc_terminal_incomplete","call_id":"call_terminal_incomplete","name":"apply_patch","arguments":args}}),
+                      ),
+                      frame(
+                          "response.incomplete",
+                          json!({"type":"response.incomplete","sequence_number":1,
+                              "response":{"output":[{"type":"function_call","id":"fc_terminal_incomplete","call_id":"call_terminal_incomplete","name":"apply_patch","arguments":args}]}}),
+                      ),
+                  ]
+                  .concat();
+                  let frames = run(&input);
+                  let done = &frames[1].1["item"];
+                  assert_eq!(done["status"], "incomplete");
+                  assert!(done["input"]
+                      .as_str()
+                      .unwrap()
+                      .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+                  assert_eq!(
+                      frames[2].1["response"]["output"][0]["status"],
+                      "incomplete"
+                  );
+              }
+
+              '''
+              if test_anchor not in text:
+                  raise SystemExit('anchor not found: r15 Grok terminal completion regression tests')
+              text = text.replace(test_anchor, tests + test_anchor, 1)
+              write(SHIM, text)
+              print("[ok] Grok terminal completion recovery: applied")
+          else:
+              print("[ok] Grok terminal completion recovery: already applied")
+          '''
+
+          if marker not in text:
+              replay.write_text(text.rstrip() + block + '\n', encoding='utf-8')
+              print('[ok] appended r15 terminal completion overlay')
+          else:
+              print('[ok] r15 terminal completion overlay already present')
+
+          Path('SUB2API_GROK_COMPAT_REVISION.txt').write_text('15\n', encoding='utf-8')
+          print('[ok] compat revision set to 15')
+          PY
+
+          python3 scripts/apply_sub2api_grok_replay_compat.py
+          python3 scripts/apply_sub2api_grok_compat_revision.py
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Grok shim regression tests
+        run: cargo test -p codex-app-transfer-adapters grok_tool_shim --lib -- --nocapture
+
+      - name: Full adapter regression tests
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+
+      - name: Verify r15 markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' scripts/apply_sub2api_grok_replay_compat.py
+          grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
+          test "$(tr -d '\r\n ' < SUB2API_GROK_COMPAT_REVISION.txt)" = '15'
+          grep -F -q 'compat_revision=15' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+15' SUB2API_GROK_COMPAT_VERSION.txt
+
+      - name: Commit r15 patch and remove bootstrap workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/r15-grok-terminal-completion-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --stat
+          git commit -m 'fix(grok): r15 recover completed terminal apply_patch calls'
+          git push origin HEAD:sub2api-grok-compat-next-r15

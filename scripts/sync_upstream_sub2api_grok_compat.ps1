@@ -17,7 +17,7 @@ Set-StrictMode -Version Latest
 function Invoke-Checked {
     param(
         [Parameter(Mandatory)][string]$Command,
-        [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
+        [string[]]$Arguments = @()
     )
     Write-Host "`n> $Command $($Arguments -join ' ')" -ForegroundColor Cyan
     & $Command @Arguments
@@ -34,10 +34,22 @@ function Require-CleanWorktree {
     }
 }
 
+function Resolve-Python {
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        return @{ Command = 'python'; Prefix = @() }
+    }
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        return @{ Command = 'py'; Prefix = @('-3') }
+    }
+    throw 'Python 3 was not found. Install Python 3 or make python/py available in PATH.'
+}
+
 $repoRoot = (git rev-parse --show-toplevel).Trim()
 if (-not $repoRoot) { throw 'Could not determine repository root.' }
 Set-Location $repoRoot
 Require-CleanWorktree
+
+$python = Resolve-Python
 
 if (-not $NewBranch) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -59,10 +71,12 @@ New-Item -ItemType Directory -Path $temp -Force | Out-Null
 $assets = @(
     'scripts/apply_sub2api_grok_compat.py',
     'scripts/apply_sub2api_grok_compat_ui.py',
+    'scripts/migrate_sub2api_grok_ui_to_overlay.py',
     'scripts/build_sub2api_grok_compat_windows.ps1',
     'scripts/sync_upstream_sub2api_grok_compat.ps1',
     '.github/workflows/apply-sub2api-grok-compat.yml',
     '.github/workflows/build-sub2api-grok-compat-windows.yml',
+    '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml',
     'SUB2API_GROK_COMPAT.md'
 )
 
@@ -79,18 +93,18 @@ try {
 
     $remoteExists = git remote | Where-Object { $_ -eq $RemoteName }
     if (-not $remoteExists) {
-        Invoke-Checked git 'remote' 'add' $RemoteName $UpstreamUrl
+        Invoke-Checked -Command git -Arguments @('remote', 'add', $RemoteName, $UpstreamUrl)
     } else {
         $current = (git remote get-url $RemoteName).Trim()
         if ($current -ne $UpstreamUrl) {
             Write-Host "Updating $RemoteName URL: $current -> $UpstreamUrl" -ForegroundColor Yellow
-            Invoke-Checked git 'remote' 'set-url' $RemoteName $UpstreamUrl
+            Invoke-Checked -Command git -Arguments @('remote', 'set-url', $RemoteName, $UpstreamUrl)
         }
     }
 
-    Invoke-Checked git 'fetch' $RemoteName '--prune' '--tags'
+    Invoke-Checked -Command git -Arguments @('fetch', $RemoteName, '--prune', '--tags')
     $baseRef = "$RemoteName/$UpstreamRef"
-    Invoke-Checked git 'rev-parse' '--verify' $baseRef
+    Invoke-Checked -Command git -Arguments @('rev-parse', '--verify', $baseRef)
 
     # Refuse to overwrite any existing branch. A sync must always create a fresh,
     # reviewable candidate so the currently working compat build remains intact.
@@ -99,7 +113,7 @@ try {
         throw "Branch already exists: $NewBranch. Choose another -NewBranch."
     }
 
-    Invoke-Checked git 'switch' '--create' $NewBranch $baseRef
+    Invoke-Checked -Command git -Arguments @('switch', '--create', $NewBranch, $baseRef)
 
     foreach ($asset in $assets) {
         $src = Join-Path $temp $asset
@@ -109,24 +123,24 @@ try {
     }
 
     Write-Host "`nApplying isolated overlay..." -ForegroundColor Green
-    Invoke-Checked python 'scripts/apply_sub2api_grok_compat.py'
-    Invoke-Checked python 'scripts/apply_sub2api_grok_compat_ui.py'
-    Invoke-Checked cargo 'fmt' '--all'
+    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat.py'))
+    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_ui.py'))
+    Invoke-Checked -Command cargo -Arguments @('fmt', '--all')
 
     if (-not $SkipFrontend) {
-        Invoke-Checked npm '--prefix' 'frontend' 'ci'
-        Invoke-Checked npm '--prefix' 'frontend' 'run' 'build'
+        Invoke-Checked -Command npm -Arguments @('--prefix', 'frontend', 'ci')
+        Invoke-Checked -Command npm -Arguments @('--prefix', 'frontend', 'run', 'build')
     }
 
     if (-not $SkipTests) {
-        Invoke-Checked cargo 'test' '-p' 'codex-app-transfer-adapters' '--lib' '--' '--nocapture'
+        Invoke-Checked -Command cargo -Arguments @('test', '-p', 'codex-app-transfer-adapters', '--lib', '--', '--nocapture')
     }
 
     $baseSha = (git rev-parse $baseRef).Trim()
     Set-Content -LiteralPath 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt' -Value "$baseRef`n$baseSha`n" -Encoding utf8NoBOM
 
-    Invoke-Checked git 'add' '-A'
-    Invoke-Checked git 'commit' '-m' "feat: apply Sub2API Grok compat overlay onto $baseRef ($baseSha)"
+    Invoke-Checked -Command git -Arguments @('add', '-A')
+    Invoke-Checked -Command git -Arguments @('commit', '-m', "feat: apply Sub2API Grok compat overlay onto $baseRef ($baseSha)")
 
     Write-Host "`nCandidate branch created successfully." -ForegroundColor Green
     Write-Host "  Branch : $NewBranch"

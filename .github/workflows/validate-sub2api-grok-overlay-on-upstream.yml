@@ -8,6 +8,7 @@ on:
       - 'sub2api-grok-compat-next-*'
     paths:
       - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
@@ -16,6 +17,7 @@ on:
       - main
     paths:
       - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
@@ -39,6 +41,7 @@ jobs:
           set -euo pipefail
           tmp="$(mktemp -d)"
           cp scripts/apply_sub2api_grok_compat.py "$tmp/"
+          cp scripts/sub2api_grok_compat_overlay.rs "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui.py "$tmp/"
 
           # Candidate branches created by the sync script carry the exact upstream
@@ -58,6 +61,7 @@ jobs:
 
           mkdir -p scripts
           cp "$tmp/apply_sub2api_grok_compat.py" scripts/
+          cp "$tmp/sub2api_grok_compat_overlay.rs" scripts/
           cp "$tmp/apply_sub2api_grok_compat_ui.py" scripts/
 
           python3 scripts/apply_sub2api_grok_compat.py
@@ -120,7 +124,7 @@ jobs:
         with:
           name: overlay-idempotence-failure
           path: overlay-idempotence.diff
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Build frontend from pristine upstream + overlay

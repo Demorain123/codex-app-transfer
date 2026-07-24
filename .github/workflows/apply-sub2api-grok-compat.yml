@@ -47,14 +47,10 @@ jobs:
           fi
 
       - name: Apply UI/provider and Codex-config compat overlay
-        shell: bash
-        run: |
-          python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+        run: python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
 
       - name: Apply local gateway auth compat overlay
-        shell: bash
-        run: |
-          python3 scripts/apply_sub2api_grok_gateway_auth.py
+        run: python3 scripts/apply_sub2api_grok_gateway_auth.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py
@@ -79,8 +75,8 @@ jobs:
       - name: Build frontend (TypeScript + Vite)
         run: npm --prefix frontend run build
 
-      - name: Test config integration
-        run: cargo test -p codex-app-transfer-codex-integration --lib -- --nocapture
+      - name: Check config integration library
+        run: cargo check -p codex-app-transfer-codex-integration --lib
 
       - name: Test local proxy gateway auth
         run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture

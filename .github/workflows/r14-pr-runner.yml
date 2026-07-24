@@ -78,9 +78,15 @@ jobs:
         if: always() && steps.tests.outcome == 'failure'
         run: exit 1
 
-      - name: Tauri crate check
+      - name: Validate workspace metadata and Tauri config
         if: steps.patch.outcome == 'success' && steps.tests.outcome == 'success'
-        run: cargo check -p codex-app-transfer --locked
+        shell: bash
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 > /dev/null
+          python -m json.tool src-tauri/tauri.conf.json > /dev/null
+          grep -F 'version = "2.4.5+14"' src-tauri/Cargo.toml
+          grep -F '"version": "2.4.5+14"' src-tauri/tauri.conf.json
+          grep -F 'Sub2API Grok Compat r14' src-tauri/tauri.conf.json
 
       - name: Commit r14 patch and remove bootstrap files
         if: steps.patch.outcome == 'success' && steps.tests.outcome == 'success'

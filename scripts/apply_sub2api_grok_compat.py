@@ -319,9 +319,18 @@ if legacy_start >= 0:
 
 text = remove_rust_module(text, "#[cfg(test)]\nmod sub2api_grok_compat_tests {")
 
-# Request gate: scope insertion to RequestMapper impl so future unrelated methods
-# with the same return type cannot steal the anchor.
-if "crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &body)" not in text:
+# Request gate: migrate an old unqualified assignment first. Only if neither
+# old nor new assignment exists do we insert a new hook. This avoids leaving two
+# shadowing `let use_grok_compat` lines during legacy -> overlay migration.
+legacy_request_gate = "let use_grok_compat = should_use_grok_compat(provider, &body);"
+qualified_request_gate = (
+    "let use_grok_compat = crate::mapper::sub2api_grok_compat::"
+    "should_use_grok_compat(provider, &body);"
+)
+if legacy_request_gate in text:
+    text = text.replace(legacy_request_gate, qualified_request_gate, 1)
+    print("[ok] request model gate: migrated legacy call")
+elif qualified_request_gate not in text:
     impl_pos = text.find(impl_anchor)
     if impl_pos < 0:
         raise SystemExit("missing anchor: RequestMapper impl")
@@ -333,20 +342,25 @@ if "crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &body)"
     text = (
         text[:insert_at]
         + f"        {HOOK}\n"
-        + "        let use_grok_compat = crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &body);\n"
+        + f"        {qualified_request_gate}\n"
         + text[insert_at:]
     )
     print("[ok] request model gate: applied")
 else:
-    # Migrate old unqualified call if present.
-    text = text.replace(
-        "let use_grok_compat = should_use_grok_compat(provider, &body);",
-        "let use_grok_compat = crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &body);",
-        1,
-    )
     print("[ok] request model gate: already applied")
 
-# Built-in upstream Grok gate → built-in OR explicit Sub2API grok-*.
+# Defensive cleanup for a legacy migration attempt that inserted the qualified
+# hook immediately before the old unqualified line. Keep exactly one assignment.
+qualified_line = f"        {qualified_request_gate}\n"
+legacy_line = f"        {legacy_request_gate}\n"
+while legacy_line in text:
+    text = text.replace(legacy_line, "", 1)
+while text.count(qualified_line) > 1:
+    first = text.find(qualified_line)
+    second = text.find(qualified_line, first + len(qualified_line))
+    text = text[:second] + text[second + len(qualified_line):]
+
+# Built-in upstream Grok gate -> built-in OR explicit Sub2API grok-*.
 old = "if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider) {"
 new = "if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider)\n            || use_grok_compat\n        {"
 if old in text:

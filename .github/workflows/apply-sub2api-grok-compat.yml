@@ -28,12 +28,13 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'sub2api-grok-compat' }}
           fetch-depth: 0
 
-      - name: Apply Responses compat patch
+      - name: Apply Responses compat overlay
         shell: bash
         run: |
-          if grep -q 'sub2apiGrokFreeCacheCompat' crates/adapters/src/mapper/responses.rs \
-            && grep -q 'fn should_use_grok_compat' crates/adapters/src/mapper/responses.rs; then
-            echo 'Responses compat source is already generated; validating existing source.'
+          if test -f crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            && grep -q 'CAS-SUB2API-GROK-COMPAT-HOOK' crates/adapters/src/mapper/responses.rs \
+            && grep -q 'mod sub2api_grok_compat' crates/adapters/src/mapper/mod.rs; then
+            echo 'Thin Responses compat overlay is already generated; validating existing source.'
           else
             python3 scripts/apply_sub2api_grok_compat.py
           fi
@@ -78,7 +79,9 @@ jobs:
         run: |
           git status --short
           git diff -- \
+            crates/adapters/src/mapper/mod.rs \
             crates/adapters/src/mapper/responses.rs \
+            crates/adapters/src/mapper/sub2api_grok_compat.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
             frontend/src/api/types.ts \
@@ -93,14 +96,16 @@ jobs:
         if: ${{ github.event_name == 'push' }}
         shell: bash
         run: |
-          if git diff --quiet; then
+          if git diff --quiet && test -z "$(git ls-files --others --exclude-standard crates/adapters/src/mapper/sub2api_grok_compat.rs)"; then
             echo "No generated changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
+            crates/adapters/src/mapper/mod.rs \
             crates/adapters/src/mapper/responses.rs \
+            crates/adapters/src/mapper/sub2api_grok_compat.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
             frontend/src/api/types.ts \
@@ -110,5 +115,5 @@ jobs:
             frontend/src/layout/AppLayout.vue \
             frontend/src/i18n/zh.ts \
             frontend/src/i18n/en.ts
-          git commit -m "feat: add visible Sub2API Grok compat controls [compat-generated]"
+          git commit -m "refactor: apply thin Sub2API Grok compat overlay [compat-generated]"
           git push origin HEAD:sub2api-grok-compat

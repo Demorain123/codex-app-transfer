@@ -10,6 +10,11 @@ on:
       - 'crates/**'
       - 'src-tauri/**'
       - 'frontend/**'
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
@@ -22,6 +27,11 @@ on:
       - 'crates/**'
       - 'src-tauri/**'
       - 'frontend/**'
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
@@ -40,9 +50,32 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # Build the exact commit that triggered the workflow. This is critical
-          # for future `sub2api-grok-compat-next-*` upstream-sync candidates.
+          # Build the triggering revision, but apply the whole compat overlay again
+          # inside this job before compiling. This removes the race with the
+          # separate source-generation workflow.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply complete compat overlay inside Windows build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/apply_sub2api_grok_compat.py
+          python scripts/apply_sub2api_grok_compat_ui_dispatch.py
+          python scripts/apply_sub2api_grok_compat_revision.py
+
+          # r3 invariant: the card is controlled directly by the exact same
+          # form.apiFormat value used by the Responses segmented control.
+          grep -F "v-if=\"form.apiFormat === 'responses'\"" \
+            frontend/src/components/provider/ProviderFormModal.vue
+          if grep -q 'showSub2apiGrokCompat' frontend/src/components/provider/ProviderFormModal.vue; then
+            echo '::error::Legacy compat-card visibility gate is still present'
+            exit 1
+          fi
 
       - name: Resolve visible compat version
         id: compat-version
@@ -100,6 +133,20 @@ jobs:
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run build
+
+      - name: Verify bundled compat UI before packaging
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.compat-version.outputs.app_version }}
+          REVISION: ${{ steps.compat-version.outputs.revision }}
+        run: |
+          set -euo pipefail
+          # Block publishing a package where the version/title changed but the
+          # actual Grok controls were omitted from the compiled Vite bundle.
+          grep -R -F -q 'Grok MCP / Tools' frontend/dist
+          grep -R -F -q "Sub2API Grok Compat r${REVISION}" frontend/dist
+          grep -R -F -q "v${APP_VERSION}" frontend/dist
+          echo "Verified bundle contains Grok controls + r${REVISION} + v${APP_VERSION}"
 
       - name: Test all adapter regressions
         run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture

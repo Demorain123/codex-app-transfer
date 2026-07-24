@@ -156,11 +156,10 @@ const baseUrlOptions = computed(() =>
 // preset 决定(已由 applyPreset 填入 form 随保存发送)且被 healing 强制覆盖, 用户改也无效,
 // 故隐藏以保持显示统一。
 const isCustomProvider = computed(() => !isBuiltin.value && !matchedPreset.value)
-// 兼容开关只对自定义 Responses provider 有意义。真正请求侧还会按 model=grok-* 再 gate，
-// 所以同一个 Sub2API provider 里的 Luna/GPT 请求仍保持原生 Responses 直透。
-const showSub2apiGrokCompat = computed(
-  () => isCustomProvider.value && form.apiFormat === 'responses',
-)
+// 所有 Responses provider 都显示兼容卡片，避免 preset/custom 分类变化把 UI 隐藏。
+// 真正请求侧仍会按 provider 开关 + model=grok/grok-*/grok/* 双重 gate，
+// 所以 Luna/GPT 以及未开启开关的 Responses provider 仍保持原生直透。
+const showSub2apiGrokCompat = computed(() => form.apiFormat === 'responses')
 // 编辑内置/预设 provider 时 baseUrl 不可改:后端 update_provider 对 builtin 跳过 baseUrl,
 // 改了会被静默丢弃(含小米多集群切换)→ 设为只读, 如实反映后端行为(添加时仍可选集群)。
 const baseUrlReadonly = computed(() => isEdit.value && !isCustomProvider.value)

@@ -29,10 +29,25 @@ jobs:
           fetch-depth: 0
 
       - name: Apply Responses compat patch
-        run: python3 scripts/apply_sub2api_grok_compat.py
+        shell: bash
+        run: |
+          if grep -q 'sub2apiGrokFreeCacheCompat' crates/adapters/src/mapper/responses.rs \
+            && grep -q 'fn should_use_grok_compat' crates/adapters/src/mapper/responses.rs; then
+            echo 'Responses compat source is already generated; validating existing source.'
+          else
+            python3 scripts/apply_sub2api_grok_compat.py
+          fi
 
       - name: Apply UI/provider compat patch
-        run: python3 scripts/apply_sub2api_grok_compat_ui.py
+        shell: bash
+        run: |
+          if grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs \
+            && grep -q 'sub2apiGrokFreeCacheCompat' frontend/src/components/provider/ProviderFormModal.vue \
+            && grep -q 'compat-build-badge' frontend/src/layout/TopTabBar.vue; then
+            echo 'UI/provider compat source is already generated; validating existing source.'
+          else
+            python3 scripts/apply_sub2api_grok_compat_ui.py
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

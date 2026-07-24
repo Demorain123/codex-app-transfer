@@ -105,7 +105,19 @@ fn is_chatgpt_access_token(token: &str) -> bool {
         })
 }
 '''
-text = replace_once(text, old_helper, new_helper, "broaden valid ChatGPT JWT claim shapes")
+
+# rustfmt legitimately reformats the generated helper, so use semantic markers
+# before falling back to exact first-install anchors. This makes repeated overlay
+# application safe on generated branches and on Windows packaging runs.
+helper_markers = (
+    "CAS-SUB2API-GROK-COMPAT-HOOK: OpenAI 当前存在不携带",
+    'non_empty_str(auth.get("user_id"))',
+    'auth.get("organizations")',
+)
+if all(marker in text for marker in helper_markers):
+    print("[ok] broaden valid ChatGPT JWT claim shapes: already applied (semantic)")
+else:
+    text = replace_once(text, old_helper, new_helper, "broaden valid ChatGPT JWT claim shapes")
 
 old_test_tail = '''        // ⑤ 3 段 JWT 但 payload 无 chatgpt_account_id claim → 拒(pin 住 is_chatgpt_access_token
         //    的 claim 校验:gate 放宽后这是唯一剩下的判别逻辑,防未来回归成"任意 3 段 token 放行")
@@ -156,6 +168,15 @@ new_test_tail = '''        // ⑤ 当前 OpenAI 也会签发不含 chatgpt_accou
             "无 OpenAI auth identity 的 3 段 JWT 不算 ChatGPT token,应拒"
         );
 '''
-text = replace_once(text, old_test_tail, new_test_tail, "add current ChatGPT JWT regression test")
+
+test_markers = (
+    "current_shape_payload",
+    "user_id/organizations 形态的有效 ChatGPT JWT 应被 Real relay 放行",
+    "无 OpenAI auth identity 的 3 段 JWT 不算 ChatGPT token,应拒",
+)
+if all(marker in text for marker in test_markers):
+    print("[ok] add current ChatGPT JWT regression test: already applied (semantic)")
+else:
+    text = replace_once(text, old_test_tail, new_test_tail, "add current ChatGPT JWT regression test")
 
 write(path, text)

@@ -1,1 +1,3 @@
 Trigger GitHub Actions for the Sub2API Grok compatibility patch.
+
+2026-07-24: re-run after adding Grok Free cache compatibility (preserve Codex prompt_cache_key + native web_search/x_search companions).

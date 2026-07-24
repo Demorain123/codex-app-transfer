@@ -34,6 +34,27 @@ base_version = raw_version.split("+", 1)[0]
 app_version = f"{base_version}+{revision}"
 display_revision = f"r{revision}"
 
+# UI layout invariant:
+# ProviderFormModal's .pf is a constrained-height column flex container. The
+# compat card also has overflow:hidden, which makes its automatic flex minimum
+# size zero; under vertical pressure WebView2 may therefore shrink the whole
+# card down to its border (the exact symptom is a single blue line). Prevent
+# that by making the card a non-shrinking flex item so the parent scrolls it.
+path = "frontend/src/components/provider/Sub2ApiGrokCompatControls.vue"
+text = read(path)
+if not re.search(r"\.compat-card\s*\{[^}]*\bflex-shrink\s*:\s*0\s*;", text, re.S):
+    text, n = re.subn(
+        r"(\.compat-card\s*\{\s*\n)",
+        r"\1  flex-shrink: 0;\n",
+        text,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("could not install non-shrinking compat-card layout invariant")
+if not re.search(r"\.compat-card\s*\{[^}]*\bflex-shrink\s*:\s*0\s*;", text, re.S):
+    raise SystemExit("compat card can still flex-collapse after revision patch")
+write(path, text)
+
 # UI visibility invariant:
 # The highlighted Responses segment and the compat card MUST read the exact same
 # reactive value. Do not introduce a second computed gate here; that made stale

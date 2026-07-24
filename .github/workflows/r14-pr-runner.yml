@@ -27,7 +27,8 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          python - <<'PY'
+          set +e
+          python - <<'PY' > .r14-patch.log 2>&1
           from pathlib import Path
           import textwrap
 
@@ -39,22 +40,19 @@ jobs:
           payload = textwrap.dedent(workflow[start:end])
           exec(compile(payload, 'r14-bootstrap-inline.py', 'exec'), {})
           PY
+          status=$?
+          cat .r14-patch.log
+          exit $status
 
       - name: Commit patch diagnostic on failure
         if: steps.patch.outcome == 'failure'
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import subprocess
-          note = Path('.r14-error.txt')
-          if not note.exists():
-              note.write_text('r14 bootstrap patch step failed; inspect Actions run logs for traceback.\n', encoding='utf-8')
-          PY
+          printf '%s\n' 'r14 bootstrap patch step failed; see .r14-patch.log.' > .r14-error.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .r14-error.txt
-          git commit -m "chore(r14): capture bootstrap failure"
+          git add .r14-error.txt .r14-patch.log
+          git commit -m "chore(r14): capture bootstrap failure details"
           git push origin HEAD:sub2api-grok-compat-r14
 
       - name: Stop after patch failure
@@ -77,7 +75,7 @@ jobs:
         if: steps.patch.outcome == 'success'
         shell: bash
         run: |
-          rm -f .github/workflows/r14-grok-apply-patch-fix.yml .github/workflows/r14-pr-runner.yml .r14-error.txt
+          rm -f .github/workflows/r14-grok-apply-patch-fix.yml .github/workflows/r14-pr-runner.yml .r14-error.txt .r14-patch.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

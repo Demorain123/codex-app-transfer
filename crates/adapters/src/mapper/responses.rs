@@ -59,119 +59,6 @@ use crate::types::{AdapterError, ByteStream, RequestPlan, ResponsePlan};
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct ResponsesPassthroughMapper;
 
-/// Enable the Grok Responses compatibility shim for a normal bearer provider
-/// (for example Sub2API) only when the current request actually targets a
-/// Grok model. This keeps mixed Sub2API providers safe: Luna/GPT requests stay
-/// byte-for-byte Responses passthrough while grok-* gets the existing
-/// custom/namespace/tool_search compatibility path.
-fn sub2api_grok_compat_enabled(provider: &Provider, body: &Bytes) -> bool {
-    let enabled = provider
-        .extra
-        .get("sub2apiGrokCompat")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if !enabled {
-        return false;
-    }
-
-    let Ok(parsed) = serde_json::from_slice::<Value>(body) else {
-        return false;
-    };
-    let Some(model) = parsed.get("model").and_then(Value::as_str) else {
-        return false;
-    };
-    let model = model.trim().to_ascii_lowercase();
-    model == "grok" || model.starts_with("grok-") || model.starts_with("grok/")
-}
-
-fn should_use_grok_compat(provider: &Provider, body: &Bytes) -> bool {
-    crate::mapper::grok_build::is_grok_build_provider(provider)
-        || sub2api_grok_compat_enabled(provider, body)
-}
-
-/// Optional cache-routing compatibility for Grok Free OAuth behind Sub2API.
-///
-/// Keep Codex's existing `prompt_cache_key` untouched. When explicitly enabled,
-/// append xAI native search tools in a deterministic order so a Grok Free request
-/// with client-side Codex/MCP tools can still qualify for the cache-capable route.
-/// This mirrors the body-side idea behind Sub2API's Grok client-tool cache switch.
-fn sub2api_grok_free_cache_compat_enabled(provider: &Provider, body: &Bytes) -> bool {
-    let enabled = provider
-        .extra
-        .get("sub2apiGrokFreeCacheCompat")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    enabled && sub2api_grok_compat_enabled(provider, body)
-}
-
-fn apply_sub2api_grok_free_cache_compat(body: Bytes, provider: &Provider) -> Bytes {
-    if !sub2api_grok_free_cache_compat_enabled(provider, &body) {
-        return body;
-    }
-
-    let Ok(mut parsed) = serde_json::from_slice::<Value>(&body) else {
-        return body;
-    };
-    let Some(obj) = parsed.as_object_mut() else {
-        return body;
-    };
-
-    // Codex 0.144+ already supplies a stable session/thread-scoped key. Do not
-    // synthesize, randomize, or replace it: that would destroy cache affinity.
-    if obj
-        .get("prompt_cache_key")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .is_none()
-    {
-        tracing::warn!(
-            target: "adapters::grok_cache",
-            "Sub2API Grok Free cache compat is enabled but prompt_cache_key is missing"
-        );
-    }
-
-    let had_client_tools = obj
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| !tools.is_empty());
-
-    let tools_value = obj
-        .entry("tools".to_owned())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(tools) = tools_value.as_array_mut() else {
-        return body;
-    };
-
-    fn has_tool_type(tools: &[Value], wanted: &str) -> bool {
-        tools.iter().any(|tool| {
-            tool.get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|kind| kind == wanted)
-        })
-    }
-
-    // Stable append order matters for prefix caching.
-    if !has_tool_type(tools, "web_search") {
-        tools.push(serde_json::json!({ "type": "web_search" }));
-    }
-    if !has_tool_type(tools, "x_search") {
-        tools.push(serde_json::json!({ "type": "x_search" }));
-    }
-
-    // If there were no client tools, the native tools exist only as a routing
-    // companion and must not alter model behavior. Tool-bearing turns keep the
-    // caller's existing tool_choice (normally `auto`) so MCP remains callable.
-    if !had_client_tools {
-        obj.insert("tool_choice".to_owned(), Value::String("none".to_owned()));
-    }
-
-    serde_json::to_vec(&parsed)
-        .ok()
-        .map(Bytes::from)
-        .unwrap_or(body)
-}
-
 impl RequestMapper for ResponsesPassthroughMapper {
     fn map_request(
         &self,
@@ -179,7 +66,8 @@ impl RequestMapper for ResponsesPassthroughMapper {
         body: Bytes,
         provider: &Provider,
     ) -> Result<RequestPlan, AdapterError> {
-        let use_grok_compat = should_use_grok_compat(provider, &body);
+        let use_grok_compat =
+            crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &body);
         // [MOC-299] api_format=responses 但上游无 compaction 能力的第三方(grok):Codex 的 autocompact
         // (V1 /responses/compact 或 V2 compaction_trigger)grok 不认(404/422)。像 chat 路径一样本地摘要:
         // strip → 注入 summarize prompt → 走上游普通 /responses(stream:false)→ 响应侧包成单 compaction item。
@@ -233,7 +121,10 @@ impl RequestMapper for ResponsesPassthroughMapper {
         } else {
             body
         };
-        let body = apply_sub2api_grok_free_cache_compat(body, provider);
+        // CAS-SUB2API-GROK-COMPAT-HOOK
+        let body = crate::mapper::sub2api_grok_compat::apply_sub2api_grok_free_cache_compat(
+            body, provider,
+        );
 
         // [MOC-234] 只读观测整合(gate=breakdown_enabled,默认关零开销):旁路 parse 一份
         // 副本算 responses 原生 context_breakdown + 喂会话观测镜像。返回的 adapter_metadata
@@ -344,7 +235,8 @@ impl ResponseMapper for ResponsesPassthroughMapper {
         // 并给发现的 namespace 工具补 `namespace`。**仅 grok**;其余 responses passthrough 仍严格 1:1。
         // cwd 供 apply_patch preflight;ctx 携带请求侧「哪些工具真被 lower + name→namespace」元数据
         // (review:只 repack 真被 lower 的、给 MCP 工具补 namespace)。
-        if should_use_grok_compat(provider, &request_plan.body) {
+        if crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &request_plan.body)
+        {
             let parsed = serde_json::from_slice::<Value>(&request_plan.body).ok();
             let cwd = parsed
                 .as_ref()
@@ -1066,111 +958,5 @@ mod tests {
             text.contains("bad cancel request"),
             "应原样保留上游 JSON 错误体: {text}"
         );
-    }
-}
-
-#[cfg(test)]
-mod sub2api_grok_compat_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn provider(enabled: bool, cache_enabled: bool) -> Provider {
-        serde_json::from_value(json!({
-            "id": "sub2api",
-            "name": "Sub2API",
-            "baseUrl": "http://127.0.0.1:8089/v1",
-            "authScheme": "bearer",
-            "apiFormat": "responses",
-            "apiKey": "test",
-            "models": {},
-            "sub2apiGrokCompat": enabled,
-            "sub2apiGrokFreeCacheCompat": cache_enabled
-        }))
-        .expect("provider fixture")
-    }
-
-    #[test]
-    fn sub2api_grok_compat_only_matches_grok_models() {
-        let p = provider(true, false);
-        assert!(sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"grok-4.5"}"#)
-        ));
-        assert!(sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"grok/something"}"#)
-        ));
-        assert!(!sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"gpt-5.6-luna"}"#)
-        ));
-        assert!(!sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"gpt-5.4"}"#)
-        ));
-    }
-
-    #[test]
-    fn sub2api_grok_compat_requires_explicit_opt_in() {
-        let p = provider(false, false);
-        assert!(!sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"grok-4.5"}"#)
-        ));
-    }
-
-    #[test]
-    fn free_cache_compat_preserves_prompt_cache_key_and_client_tools() {
-        let p = provider(true, true);
-        let key = "019f9082-3c25-7b00-84b4-3b4a14ff09f0";
-        let body = Bytes::from(
-            serde_json::to_vec(&json!({
-                "model": "grok-4.5",
-                "prompt_cache_key": key,
-                "tool_choice": "auto",
-                "tools": [{
-                    "type": "function",
-                    "name": "mcp__ask_user_questions__ask_user_questions",
-                    "description": "test",
-                    "parameters": {"type":"object","properties":{}}
-                }],
-                "input": []
-            }))
-            .unwrap(),
-        );
-
-        let out = apply_sub2api_grok_free_cache_compat(body, &p);
-        let v: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(v["prompt_cache_key"], key);
-        assert_eq!(v["tool_choice"], "auto");
-        let tools = v["tools"].as_array().unwrap();
-        assert!(tools.iter().any(|t| t["type"] == "function"));
-        assert!(tools.iter().any(|t| t["type"] == "web_search"));
-        assert!(tools.iter().any(|t| t["type"] == "x_search"));
-    }
-
-    #[test]
-    fn free_cache_compat_tool_free_turn_uses_native_tools_only_as_companions() {
-        let p = provider(true, true);
-        let body =
-            Bytes::from_static(br#"{"model":"grok-4.5","prompt_cache_key":"thread-1","input":[]}"#);
-        let out = apply_sub2api_grok_free_cache_compat(body, &p);
-        let v: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(v["prompt_cache_key"], "thread-1");
-        assert_eq!(v["tool_choice"], "none");
-        let tools = v["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
-        assert_eq!(tools[0]["type"], "web_search");
-        assert_eq!(tools[1]["type"], "x_search");
-    }
-
-    #[test]
-    fn free_cache_compat_never_touches_luna() {
-        let p = provider(true, true);
-        let body = Bytes::from_static(
-            br#"{"model":"gpt-5.6-luna","prompt_cache_key":"thread-1","tools":[]}"#,
-        );
-        let out = apply_sub2api_grok_free_cache_compat(body.clone(), &p);
-        assert_eq!(out, body);
     }
 }

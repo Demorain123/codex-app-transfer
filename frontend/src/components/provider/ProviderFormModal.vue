@@ -11,7 +11,7 @@ import AppInput from '@/components/ui/AppInput.vue'
 import AppCombobox from '@/components/ui/AppCombobox.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+import Sub2ApiGrokCompatControls from '@/components/provider/Sub2ApiGrokCompatControls.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import IconEye from '~icons/lucide/eye'
 import IconEyeOff from '~icons/lucide/eye-off'
@@ -637,30 +637,11 @@ async function save() {
         <SegmentedControl v-model="form.authScheme" :options="authOptions" />
       </SettingsRow>
 
-      <div v-if="showSub2apiGrokCompat" class="pf__compat-card">
-        <div class="pf__compat-head">
-          <span>{{ t('providerForm.grokCompatSection') }}</span>
-          <span class="pf__compat-badge">COMPAT</span>
-        </div>
-        <SettingsRow
-          :title="t('providerForm.grokCompat')"
-          :description="t('providerForm.grokCompatHint')"
-        >
-          <AppSwitch v-model="form.sub2apiGrokCompat" />
-        </SettingsRow>
-        <SettingsRow
-          :title="t('providerForm.grokFreeCacheCompat')"
-          :description="t('providerForm.grokFreeCacheCompatHint')"
-        >
-          <AppSwitch
-            v-model="form.sub2apiGrokFreeCacheCompat"
-            :disabled="!form.sub2apiGrokCompat"
-          />
-        </SettingsRow>
-        <div v-if="form.sub2apiGrokFreeCacheCompat" class="pf__compat-warning">
-          {{ t('providerForm.grokFreeCacheCompatWarning') }}
-        </div>
-      </div>
+      <Sub2ApiGrokCompatControls
+        v-if="showSub2apiGrokCompat"
+        v-model:enabled="form.sub2apiGrokCompat"
+        v-model:cache-enabled="form.sub2apiGrokFreeCacheCompat"
+      />
 
       <div class="pf__section-row">
         <span class="pf__section">{{ t('providerForm.modelMapSection') }}</span>
@@ -791,38 +772,6 @@ async function save() {
   max-height: 68vh;
   overflow-y: auto;
   min-width: 460px;
-}
-.pf__compat-card {
-  margin: var(--space-3) 0 var(--space-2);
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
-  overflow: hidden;
-}
-.pf__compat-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4) var(--space-1);
-  font-size: var(--fs-sm);
-  font-weight: 650;
-  color: var(--accent);
-}
-.pf__compat-badge {
-  padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: var(--radius-full);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-}
-.pf__compat-warning {
-  margin: 0 var(--space-4) var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--warning) 10%, transparent);
-  color: var(--text-secondary);
-  font-size: var(--fs-xs);
-  line-height: 1.45;
 }
 .pf__section {
   font-size: var(--fs-sm);

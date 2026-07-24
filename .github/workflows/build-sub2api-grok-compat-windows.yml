@@ -14,6 +14,7 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -31,6 +32,7 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -50,9 +52,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # Build the triggering revision, but apply the whole compat overlay again
-          # inside this job before compiling. This removes the race with the
-          # separate source-generation workflow.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
@@ -66,16 +65,16 @@ jobs:
           set -euo pipefail
           python scripts/apply_sub2api_grok_compat.py
           python scripts/apply_sub2api_grok_compat_ui_dispatch.py
+          python scripts/apply_sub2api_grok_gateway_auth.py
           python scripts/apply_sub2api_grok_compat_revision.py
 
-          # r3 invariant: the card is controlled directly by the exact same
-          # form.apiFormat value used by the Responses segmented control.
           grep -F "v-if=\"form.apiFormat === 'responses'\"" \
             frontend/src/components/provider/ProviderFormModal.vue
           if grep -q 'showSub2apiGrokCompat' frontend/src/components/provider/ProviderFormModal.vue; then
             echo '::error::Legacy compat-card visibility gate is still present'
             exit 1
           fi
+          grep -F -q 'user_id/organizations' crates/proxy/src/resolver.rs
 
       - name: Resolve visible compat version
         id: compat-version
@@ -141,12 +140,13 @@ jobs:
           REVISION: ${{ steps.compat-version.outputs.revision }}
         run: |
           set -euo pipefail
-          # Block publishing a package where the version/title changed but the
-          # actual Grok controls were omitted from the compiled Vite bundle.
           grep -R -F -q 'Grok MCP / Tools' frontend/dist
           grep -R -F -q "Sub2API Grok Compat r${REVISION}" frontend/dist
           grep -R -F -q "v${APP_VERSION}" frontend/dist
           echo "Verified bundle contains Grok controls + r${REVISION} + v${APP_VERSION}"
+
+      - name: Test local proxy gateway auth
+        run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
 
       - name: Test all adapter regressions
         run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture

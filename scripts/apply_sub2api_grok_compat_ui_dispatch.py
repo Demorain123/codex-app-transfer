@@ -41,8 +41,8 @@ def overlay_complete() -> bool:
             contains(
                 "frontend/src/components/provider/ProviderFormModal.vue",
                 "Sub2ApiGrokCompatControls",
-                "v-model:enabled=\"form.sub2apiGrokCompat\"",
-                "v-model:cache-enabled=\"form.sub2apiGrokFreeCacheCompat\"",
+                'v-model:enabled="form.sub2apiGrokCompat"',
+                'v-model:cache-enabled="form.sub2apiGrokFreeCacheCompat"',
             ),
             contains(
                 "frontend/src/layout/TopTabBar.vue",
@@ -53,9 +53,11 @@ def overlay_complete() -> bool:
                 "frontend/src/layout/AppLayout.vue",
                 "Codex App Transfer — Sub2API Grok Compat",
             ),
+            # Match the stable title prefix, not the full value: revision overlay
+            # appends `rN — vX.Y.Z+N` so exact old-title checks become stale.
             contains(
                 "src-tauri/tauri.conf.json",
-                '"title": "Codex App Transfer — Sub2API Grok Compat"',
+                "Codex App Transfer — Sub2API Grok Compat",
             ),
             contains(
                 "frontend/src/i18n/zh.ts",

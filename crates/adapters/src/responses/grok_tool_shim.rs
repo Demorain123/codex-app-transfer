@@ -134,8 +134,9 @@ impl GrokToolCallShim {
         out
     }
 
-    /// 流结束:flush 尾部残帧;任何仍 open 的被拦截项 = 流被中途切断 → emit incomplete
-    /// (防 Codex 把半截 patch 当完整执行)。
+    /// 流结束:flush 尾部残帧;任何仍 open 的被拦截项 = 流被中途切断 → emit incomplete。
+    /// 注意 Codex 0.144 不以 status 阻止工具 dispatch;apply_patch 的 incomplete input 会被显式
+    /// poison 成不可解析 V4A,以 parser fail-closed 阻止半截 patch 落盘。
     pub(crate) fn finish(&mut self) -> Vec<u8> {
         let mut out = Vec::new();
         if !self.buffer.is_empty() {
@@ -211,11 +212,7 @@ impl GrokToolCallShim {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_owned();
-        let args0 = item
-            .get("arguments")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_owned();
+        let args0 = function_arguments_to_string(item.get("arguments"));
         let new_item = match kind {
             ToolKind::Custom { .. } => json!({
                 "type": "custom_tool_call", "id": item_id, "call_id": call_id,
@@ -274,10 +271,9 @@ impl GrokToolCallShim {
         if let Some(&idx) = self.id_to_index.get(item_id) {
             if let Some(p) = self.items.get_mut(&idx) {
                 // done 携带完整 arguments,作权威值(delta 累积可能因 chunk 边界不全)。
-                if let Some(args) = data.get("arguments").and_then(|v| v.as_str()) {
-                    if !args.is_empty() {
-                        p.args_acc = args.to_owned();
-                    }
+                let args = function_arguments_to_string(data.get("arguments"));
+                if !args.is_empty() {
+                    p.args_acc = args;
                 }
                 return; // suppress
             }
@@ -295,8 +291,20 @@ impl GrokToolCallShim {
             .get("output_index")
             .and_then(Value::as_u64)
             .unwrap_or(0);
-        if let Some(p) = self.items.remove(&output_index) {
+        if let Some(mut p) = self.items.remove(&output_index) {
             self.id_to_index.remove(&p.item_id);
+            // r14: some Grok/Sub2API Responses streams omit arguments.done or emit a
+            // partial delta but include the authoritative complete arguments on
+            // output_item.done.item. Prefer that terminal value when present.
+            let final_args = data
+                .get("item")
+                .and_then(|item| item.get("arguments"))
+                .or_else(|| data.get("arguments"))
+                .map(|args| function_arguments_to_string(Some(args)))
+                .unwrap_or_default();
+            if !final_args.is_empty() {
+                p.args_acc = final_args;
+            }
             self.emit_tool_call_done(output_index, &p, false, out);
         } else {
             // 透传 function_call:补 namespace(同 added)。
@@ -326,6 +334,16 @@ impl GrokToolCallShim {
                     (generic_custom_input(&p.args_acc), interrupted)
                 };
                 if incomplete {
+                    // Codex 0.144's ToolRouter ignores CustomToolCall.status and will still
+                    // dispatch status=incomplete. apply_patch is destructive, so status is
+                    // not a safety boundary: poison the first line to guarantee parse_patch
+                    // rejects before touching the filesystem. Preserve the original patch
+                    // below the marker for diagnostics/model retry context.
+                    let input = if apply_patch {
+                        block_incomplete_apply_patch(&input)
+                    } else {
+                        input
+                    };
                     let item = json!({
                         "type": "custom_tool_call", "id": p.item_id, "call_id": p.call_id,
                         "name": p.name, "input": input, "status": "incomplete",
@@ -420,6 +438,21 @@ impl GrokToolCallShim {
                     if interrupted.contains(&id) {
                         if let Some(o) = item.as_object_mut() {
                             o.insert("status".into(), Value::String("incomplete".into()));
+                            // Keep the terminal envelope fail-closed too. Codex currently
+                            // executes output_item.done, but JSON/non-stream consumers may
+                            // use the envelope directly and must not rely on status either.
+                            if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                                && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                            {
+                                if let Some(input) =
+                                    o.get("input").and_then(Value::as_str).map(str::to_owned)
+                                {
+                                    o.insert(
+                                        "input".into(),
+                                        Value::String(block_incomplete_apply_patch(&input)),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -442,16 +475,17 @@ impl GrokToolCallShim {
             .to_owned();
         let call_id = item.get("call_id").cloned().unwrap_or(Value::Null);
         let id = item.get("id").cloned().unwrap_or(Value::Null);
-        let args = item
-            .get("arguments")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_owned();
+        let args = function_arguments_to_string(item.get("arguments"));
         if let Some(&apply_patch) = self.custom_lowered.get(&name) {
             let (input, incomplete) = if apply_patch {
                 finalize_apply_patch(&args, self.cwd.as_deref(), false)
             } else {
                 (generic_custom_input(&args), false)
+            };
+            let input = if apply_patch && incomplete {
+                block_incomplete_apply_patch(&input)
+            } else {
+                input
             };
             *item = json!({
                 "type": "custom_tool_call", "id": id, "call_id": call_id, "name": name,
@@ -472,11 +506,58 @@ impl GrokToolCallShim {
     }
 }
 
+/// Responses-compatible function_call.arguments is normally a JSON string, but Grok/Sub2API
+/// traffic in the wild can put the JSON object directly on `arguments`. Normalize both shapes
+/// into the string form consumed by the existing parser. Null/missing remains empty.
+fn function_arguments_to_string(value: Option<&Value>) -> String {
+    match value {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+    }
+}
+
+/// Grok gateways occasionally double-encode function arguments: instead of
+/// `{"input":"*** Begin Patch..."}` they return a JSON string containing that JSON object (or
+/// a JSON string containing raw V4A). Unwrap at most two string layers; bounded depth avoids
+/// turning arbitrary patch content into an open-ended parser while covering observed drift.
+fn normalize_apply_patch_arguments(args_acc: &str) -> String {
+    let mut current = args_acc.trim().to_owned();
+    for _ in 0..2 {
+        let Ok(Value::String(inner)) = serde_json::from_str::<Value>(&current) else {
+            break;
+        };
+        let trimmed = inner.trim_start();
+        if !trimmed.starts_with('{') && !inner.contains("*** Begin Patch") {
+            break;
+        }
+        current = inner;
+    }
+    current
+}
+
+const INCOMPLETE_APPLY_PATCH_PREFIX: &str = "*** BLOCKED INCOMPLETE APPLY_PATCH ***";
+
+/// `status:"incomplete"` is advisory in Codex 0.144: ToolRouter still dispatches the custom
+/// tool call. Prefix incomplete apply_patch input with an invalid V4A first line so the official
+/// parser fails before filesystem verification/application. Keep the original body underneath so
+/// logs/history retain the model's attempted patch and a subsequent retry can diagnose it.
+fn block_incomplete_apply_patch(input: &str) -> String {
+    if input.starts_with(INCOMPLETE_APPLY_PATCH_PREFIX) {
+        return input.to_owned();
+    }
+    if input.is_empty() {
+        return INCOMPLETE_APPLY_PATCH_PREFIX.to_owned();
+    }
+    format!("{INCOMPLETE_APPLY_PATCH_PREFIX}\n{input}")
+}
+
 /// apply_patch args(`{"input":"<V4A>"}`)→ 最终 V4A input + 是否 incomplete(截断 / 语法错 /
 /// interrupted)。复用 converter 的提取 + preflight + 校验(与 chat 路径同一套逻辑,DRY)。
 fn finalize_apply_patch(args_acc: &str, cwd: Option<&str>, interrupted: bool) -> (String, bool) {
-    let input = extract_apply_patch_input(args_acc);
-    let json_trunc = detect_json_truncation(args_acc);
+    let normalized_args = normalize_apply_patch_arguments(args_acc);
+    let input = extract_apply_patch_input(&normalized_args);
+    let json_trunc = detect_json_truncation(&normalized_args);
     let (input, _repairs) =
         apply_patch_preflight::optimize_patch(&input, cwd, json_trunc.is_none());
     let v4a_trunc = detect_v4a_truncation(&input);
@@ -801,6 +882,94 @@ mod tests {
         );
         // sequence_number 重新连续编号 0..5。
         assert_eq!(seqs(&frames), vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn apply_patch_prefers_output_item_done_arguments_when_args_done_is_missing() {
+        let patch = "*** Begin Patch\n*** Add File: terminal.txt\n+terminal\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_terminal","call_id":"call_terminal","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_terminal","call_id":"call_terminal","name":"apply_patch","arguments":args}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(done["input"], patch);
+    }
+
+    #[test]
+    fn apply_patch_accepts_object_arguments_from_output_item_done() {
+        let patch = "*** Begin Patch\n*** Add File: object.txt\n+object\n*** End Patch\n";
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_object","call_id":"call_object","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_object","call_id":"call_object","name":"apply_patch",
+                        "arguments":{"input":patch}}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(done["input"], patch);
+    }
+
+    #[test]
+    fn apply_patch_unwraps_double_encoded_arguments() {
+        let patch = "*** Begin Patch\n*** Add File: double.txt\n+double\n*** End Patch\n";
+        let once = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let twice = serde_json::to_string(&once).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_double","call_id":"call_double","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_double","call_id":"call_double","name":"apply_patch","arguments":twice}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(done["input"], patch);
+    }
+
+    #[test]
+    fn interrupted_apply_patch_is_poisoned_because_codex_ignores_incomplete_status() {
+        let patch = "*** Begin Patch\n*** Add File: must-not-run.txt\n+blocked\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let input = frame(
+            "response.output_item.added",
+            json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                "item":{"type":"function_call","id":"fc_interrupt","call_id":"call_interrupt","name":"apply_patch","arguments":args}}),
+        );
+        let frames = run(&input);
+        let done = &frames[1].1["item"];
+        assert_eq!(done["status"], "incomplete");
+        let blocked = done["input"].as_str().unwrap();
+        assert!(blocked.starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+        assert!(blocked.contains("*** Begin Patch"));
+        assert!(validate_v4a_syntax(blocked).is_err());
     }
 
     #[test]

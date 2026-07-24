@@ -51,12 +51,12 @@ jobs:
           printf '%s\n' 'r14 bootstrap patch step failed; see .r14-patch.log.' > .r14-error.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .r14-error.txt .r14-patch.log
+          git add -f .r14-error.txt .r14-patch.log
           git commit -m "chore(r14): capture bootstrap failure details"
           git push origin HEAD:sub2api-grok-compat-r14
 
       - name: Stop after patch failure
-        if: steps.patch.outcome == 'failure'
+        if: always() && steps.patch.outcome == 'failure'
         run: exit 1
 
       - name: Rustfmt check

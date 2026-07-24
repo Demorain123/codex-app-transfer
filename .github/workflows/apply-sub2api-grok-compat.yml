@@ -77,7 +77,19 @@ jobs:
         run: npm --prefix frontend run build
 
       - name: Test all adapter regressions
-        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+        shell: bash
+        run: |
+          set +e
+          cargo test -p codex-app-transfer-adapters --lib -- --nocapture > /tmp/adapter-tests.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo '::group::Adapter regression failure tail'
+            tail -n 220 /tmp/adapter-tests.log
+            echo '::endgroup::'
+            exit "$rc"
+          fi
+          grep -E 'test result:|running [0-9]+ tests' /tmp/adapter-tests.log | tail -n 20 || true
 
       - name: Show generated diff
         if: always()

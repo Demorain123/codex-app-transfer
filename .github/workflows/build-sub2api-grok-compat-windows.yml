@@ -10,6 +10,8 @@ on:
       - 'crates/**'
       - 'src-tauri/**'
       - 'frontend/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -20,6 +22,8 @@ on:
       - 'crates/**'
       - 'src-tauri/**'
       - 'frontend/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -29,9 +33,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Thin-overlay build: Sub2API-specific runtime/UI logic lives in isolated
-  # overlay modules; upstream core files contain only small hook points.
-  SUB2API_GROK_COMPAT_BUILD_REV: overlay-v1
 
 jobs:
   build-windows:
@@ -42,6 +43,29 @@ jobs:
           # Build the exact commit that triggered the workflow. This is critical
           # for future `sub2api-grok-compat-next-*` upstream-sync candidates.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve visible compat version
+        id: compat-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          BASE_VERSION="${APP_VERSION%%+*}"
+          if [[ "$APP_VERSION" == *+* ]]; then
+            REVISION="${APP_VERSION#*+}"
+          else
+            REVISION="0"
+          fi
+          SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building Sub2API Grok Compat v${APP_VERSION} (official ${BASE_VERSION}, r${REVISION})"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -88,16 +112,18 @@ jobs:
 
       - name: Stage Windows bundles
         shell: bash
+        env:
+          SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
         run: |
           set -euo pipefail
           BDIR="target/x86_64-pc-windows-msvc/release/bundle"
           mkdir -p staging
           shopt -s nullglob
           for f in "$BDIR"/nsis/*-setup.exe; do
-            cp "$f" "staging/Sub2API-Grok-Compat-Windows-x64-Setup.exe"
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
           done
           for f in "$BDIR"/msi/*.msi; do
-            cp "$f" "staging/Sub2API-Grok-Compat-Windows-x64.msi"
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
           done
           files=(staging/*)
           if (( ${#files[@]} == 0 )); then
@@ -109,7 +135,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sub2api-grok-compat-windows-x64-overlay-v1
+          name: sub2api-grok-compat-${{ steps.compat-version.outputs.safe_version }}-windows-x64
           path: staging/*
           if-no-files-found: error
           retention-days: 30

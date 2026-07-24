@@ -28,7 +28,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  SUB2API_GROK_COMPAT_BUILD_REV: cache-v2
+  SUB2API_GROK_COMPAT_BUILD_REV: ui-v1
 
 jobs:
   build-windows:
@@ -104,7 +104,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sub2api-grok-compat-windows-x64
+          name: sub2api-grok-compat-windows-x64-ui-v1
           path: staging/*
           if-no-files-found: error
           retention-days: 30

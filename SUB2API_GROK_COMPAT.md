@@ -1,6 +1,19 @@
-# Sub2API Grok Compat — Windows 使用与验收
+# Sub2API Grok Compat — Windows 使用、验收与上游同步
 
-本分支在 Codex App Transfer v2.4.5 的原生 Responses passthrough 上，为通过 Sub2API 使用 `grok-*` 模型增加 Codex 私有工具协议兼容；非 Grok 模型保持原生 Responses 直透。
+本分支在 Codex App Transfer 原生 Responses passthrough 上，为通过 Sub2API 使用 `grok-*` 模型增加 Codex 私有工具协议兼容；非 Grok 模型保持原生 Responses 直透。
+
+## 设计原则：薄 Overlay，而不是长期 Fork 核心
+
+为了方便后续持续跟随官方更新，Sub2API 专属逻辑尽量与官方源码隔离：
+
+- Rust 运行时兼容逻辑集中在 `crates/adapters/src/mapper/sub2api_grok_compat.rs`；
+- 官方 `mapper/responses.rs` 只保留少量带 `CAS-SUB2API-GROK-COMPAT-HOOK` 标记的 hook；
+- UI 卡片集中在 `frontend/src/components/provider/Sub2ApiGrokCompatControls.vue`；
+- Provider 表单/API/CRUD 只保留少量状态与持久化 hook；
+- `scripts/apply_sub2api_grok_compat.py` 与 `scripts/apply_sub2api_grok_compat_ui.py` 是可重复应用的 overlay patcher；
+- CI 会在 patch 后构建前端并运行 `codex-app-transfer-adapters` 全量 lib 回归测试。
+
+因此，官方更新时不应把旧 compat 分支整棵 merge 到新官方源码，而应以**最新官方源码为底**重新应用 overlay。
 
 ## 推荐拓扑
 
@@ -78,10 +91,48 @@ gpt-5.4       -> gpt-5.4
 - `Grok Free 缓存兼容` 是显式 fallback，不等于账号 Free 标签检测修复。
 - 最终缓存命中取决于 xAI/Sub2API 实际路由，无法仅靠本地单元测试保证。
 
-## 更新与回滚
+## 官方更新：推荐安全同步流程
+
+**不要直接在当前可用 compat 分支上 reset/rebase 到官方最新版。** 先创建一个全新的候选分支，让当前能用的版本始终可以回退。
+
+在本地仓库的 PowerShell 7 中运行：
+
+```powershell
+pwsh -File .\scripts\sync_upstream_sub2api_grok_compat.ps1
+```
+
+脚本会自动：
+
+```text
+Cmochance/codex-app-transfer 最新 upstream/main
+                    ↓
+sub2api-grok-compat-next-时间戳   （新候选分支）
+                    ↓
+复制 overlay patcher / build workflow / 文档
+                    ↓
+重新应用 Rust + UI overlay
+                    ↓
+cargo fmt
+前端 TypeScript/Vite build
+adapters 全量 lib tests
+                    ↓
+记录官方 base commit 并提交候选分支
+```
+
+它**不会覆盖**当前 `sub2api-grok-compat` 分支。
+
+候选分支名称匹配 `sub2api-grok-compat-next-*` 时，GitHub Actions 也会直接针对该候选 commit 运行 overlay 验证和 Windows 原生构建。候选版本只有在 AUQ、缓存和 Luna/GPT 回归三项真机测试通过后，才应替换当前正式使用的 compat 版本。
+
+需要指定某个官方 tag/分支时可使用：
+
+```powershell
+pwsh -File .\scripts\sync_upstream_sub2api_grok_compat.ps1 -UpstreamRef <tag-or-branch>
+```
+
+## 回滚
 
 修改版沿用原应用数据目录和 identifier，便于保留原 Provider/Usage 数据，因此不要同时运行官方版和修改版。
 
 要回滚：关闭 Transfer/Codex，安装官方 Codex App Transfer 即可；Provider 数据仍在原数据目录。官方新版覆盖安装后，本分支的 Grok Compat 代码也会被覆盖。
 
-内置 updater 的默认仓库随构建仓库决定。本分支没有正式 Release 之前，建议不要依赖应用内自动更新来升级 Compat 版；更新上游代码后应重新合并/构建本分支并重新做上述验收。
+由于你仍可能安装官方新版，应用内官方更新可以继续使用；但一旦安装官方版，Compat 功能会暂时消失。此时应基于该官方新版重新跑上面的安全同步流程并构建新的 overlay 版本，而不是把旧二进制或旧核心源码硬拷回去。

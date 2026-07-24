@@ -69,8 +69,8 @@ jobs:
       - name: Build frontend (TypeScript + Vite)
         run: npm --prefix frontend run build
 
-      - name: Test adapters
-        run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture
+      - name: Test all adapter regressions
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
 
       - name: Show generated diff
         if: always()

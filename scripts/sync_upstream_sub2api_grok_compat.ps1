@@ -100,6 +100,7 @@ $assets = @(
     'scripts/apply_sub2api_grok_compat.py',
     'scripts/sub2api_grok_compat_overlay.rs',
     'scripts/apply_sub2api_grok_compat_ui.py',
+    'scripts/apply_sub2api_grok_compat_ui_dispatch.py',
     'scripts/migrate_sub2api_grok_ui_to_overlay.py',
     'scripts/build_sub2api_grok_compat_windows.ps1',
     'scripts/sync_upstream_sub2api_grok_compat.ps1',
@@ -157,7 +158,7 @@ try {
 
     Write-Host "`nApplying isolated overlay..." -ForegroundColor Green
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat.py'))
-    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_ui.py'))
+    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_ui_dispatch.py'))
     Invoke-Checked -Command cargo -Arguments @('fmt', '--all')
 
     if (-not $SkipFrontend) {

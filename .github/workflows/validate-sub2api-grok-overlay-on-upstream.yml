@@ -11,6 +11,14 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
+      - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
 
 permissions:
   contents: read
@@ -21,7 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          # On PRs validate the real head, not GitHub's synthetic merge commit.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Preserve overlay assets and reset to the exact pristine base

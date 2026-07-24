@@ -30,14 +30,21 @@ jobs:
           set +e
           python - <<'PY' > .r14-patch.log 2>&1
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/r14-grok-apply-patch-fix.yml').read_text(encoding='utf-8')
           marker_start = "          python - <<'PY'\n"
           marker_end = "          PY\n\n      - name: Rustfmt check"
           start = workflow.index(marker_start) + len(marker_start)
           end = workflow.index(marker_end, start)
-          payload = textwrap.dedent(workflow[start:end])
+          raw = workflow[start:end]
+          # The bootstrap embeds Rust multiline strings whose contents intentionally
+          # start at column 0, so textwrap.dedent sees a zero-indent line and leaves the
+          # Python statements indented. Strip only the YAML run-block prefix from lines
+          # that actually have it; leave embedded string contents byte-for-byte intact.
+          payload = ''.join(
+              line[10:] if line.startswith('          ') else line
+              for line in raw.splitlines(keepends=True)
+          )
           exec(compile(payload, 'r14-bootstrap-inline.py', 'exec'), {})
           PY
           status=$?

@@ -1,0 +1,59 @@
+name: r14 PR runner
+
+on:
+  pull_request:
+    branches:
+      - sub2api-grok-compat
+
+permissions:
+  contents: write
+
+jobs:
+  run-r14-bootstrap:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sub2api-grok-compat-r14
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt
+
+      - name: Execute patch payload from bootstrap workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/r14-grok-apply-patch-fix.yml').read_text(encoding='utf-8')
+          marker_start = "          python - <<'PY'\n"
+          marker_end = "          PY\n\n      - name: Rustfmt check"
+          start = workflow.index(marker_start) + len(marker_start)
+          end = workflow.index(marker_end, start)
+          payload = textwrap.dedent(workflow[start:end])
+          exec(compile(payload, 'r14-bootstrap-inline.py', 'exec'), {})
+          PY
+
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check
+
+      - name: Grok shim regression tests
+        run: cargo test -p codex-app-transfer-adapters grok_tool_shim --lib
+
+      - name: Tauri crate check
+        run: cargo check -p codex-app-transfer --locked
+
+      - name: Commit r14 patch and remove bootstrap workflows
+        shell: bash
+        run: |
+          rm -f .github/workflows/r14-grok-apply-patch-fix.yml .github/workflows/r14-pr-runner.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --stat
+          git commit -m "fix(grok): r14 harden apply_patch argument recovery"
+          git push origin HEAD:sub2api-grok-compat-r14

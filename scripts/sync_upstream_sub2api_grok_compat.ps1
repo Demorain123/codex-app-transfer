@@ -50,7 +50,6 @@ function Resolve-UpstreamGitRef {
         [Parameter(Mandatory)][string]$RequestedRef
     )
 
-    # Prefer an explicit remote branch when both a branch and tag share a name.
     $remoteBranch = "refs/remotes/$Remote/$RequestedRef"
     & git show-ref --verify --quiet $remoteBranch
     if ($LASTEXITCODE -eq 0) {
@@ -63,7 +62,6 @@ function Resolve-UpstreamGitRef {
         return $tagRef
     }
 
-    # Finally accept an explicit commit-ish/SHA fetched into the repository.
     & git rev-parse --verify --quiet "$RequestedRef^{commit}" *> $null
     if ($LASTEXITCODE -eq 0) {
         return $RequestedRef
@@ -90,9 +88,6 @@ Write-Host "Upstream       : $UpstreamUrl ($UpstreamRef)"
 Write-Host "Overlay source : $SourceCompatBranch"
 Write-Host "New branch     : $NewBranch"
 
-# Keep the overlay assets outside the worktree while switching to a clean
-# upstream-based branch. The official source itself is never copied from the old
-# compat branch; only patch/build/docs assets are carried forward.
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("cat-sub2api-overlay-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp -Force | Out-Null
 
@@ -101,6 +96,7 @@ $assets = @(
     'scripts/sub2api_grok_compat_overlay.rs',
     'scripts/apply_sub2api_grok_compat_ui.py',
     'scripts/apply_sub2api_grok_compat_ui_dispatch.py',
+    'scripts/apply_sub2api_grok_gateway_auth.py',
     'scripts/apply_sub2api_grok_compat_revision.py',
     'scripts/migrate_sub2api_grok_ui_to_overlay.py',
     'scripts/build_sub2api_grok_compat_windows.ps1',
@@ -142,8 +138,6 @@ try {
     }
     Write-Host "Resolved base   : $baseRef @ $baseSha"
 
-    # Refuse to overwrite any existing branch. A sync must always create a fresh,
-    # reviewable candidate so the currently working compat build remains intact.
     & git show-ref --verify --quiet "refs/heads/$NewBranch"
     if ($LASTEXITCODE -eq 0) {
         throw "Branch already exists: $NewBranch. Choose another -NewBranch."
@@ -161,6 +155,7 @@ try {
     Write-Host "`nApplying isolated overlay..." -ForegroundColor Green
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat.py'))
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_ui_dispatch.py'))
+    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_gateway_auth.py'))
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_revision.py'))
     Invoke-Checked -Command cargo -Arguments @('fmt', '--all')
 
@@ -170,6 +165,8 @@ try {
     }
 
     if (-not $SkipTests) {
+        Invoke-Checked -Command cargo -Arguments @('test', '-p', 'codex-app-transfer-proxy', '--lib', '--', '--nocapture')
+        Invoke-Checked -Command cargo -Arguments @('test', '-p', 'codex-app-transfer-codex-integration', '--lib', '--', '--nocapture')
         Invoke-Checked -Command cargo -Arguments @('test', '-p', 'codex-app-transfer-adapters', '--lib', '--', '--nocapture')
     }
 

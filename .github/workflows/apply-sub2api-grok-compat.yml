@@ -39,13 +39,14 @@ jobs:
             python3 scripts/apply_sub2api_grok_compat.py
           fi
 
-      - name: Apply UI/provider compat patch
+      - name: Apply UI/provider compat overlay
         shell: bash
         run: |
-          if grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs \
-            && grep -q 'sub2apiGrokFreeCacheCompat' frontend/src/components/provider/ProviderFormModal.vue \
+          if test -f frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
+            && grep -q 'Sub2ApiGrokCompatControls' frontend/src/components/provider/ProviderFormModal.vue \
+            && grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs \
             && grep -q 'compat-build-badge' frontend/src/layout/TopTabBar.vue; then
-            echo 'UI/provider compat source is already generated; validating existing source.'
+            echo 'Thin UI/provider compat overlay is already generated; validating existing source.'
           else
             python3 scripts/apply_sub2api_grok_compat_ui.py
           fi
@@ -87,6 +88,7 @@ jobs:
             frontend/src/api/types.ts \
             frontend/src/api/providers.ts \
             frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
             frontend/src/layout/TopTabBar.vue \
             frontend/src/layout/AppLayout.vue \
             frontend/src/i18n/zh.ts \
@@ -96,7 +98,10 @@ jobs:
         if: ${{ github.event_name == 'push' }}
         shell: bash
         run: |
-          if git diff --quiet && test -z "$(git ls-files --others --exclude-standard crates/adapters/src/mapper/sub2api_grok_compat.rs)"; then
+          untracked_overlay="$(git ls-files --others --exclude-standard \
+            crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            frontend/src/components/provider/Sub2ApiGrokCompatControls.vue)"
+          if git diff --quiet && test -z "$untracked_overlay"; then
             echo "No generated changes to commit."
             exit 0
           fi
@@ -111,6 +116,7 @@ jobs:
             frontend/src/api/types.ts \
             frontend/src/api/providers.ts \
             frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
             frontend/src/layout/TopTabBar.vue \
             frontend/src/layout/AppLayout.vue \
             frontend/src/i18n/zh.ts \

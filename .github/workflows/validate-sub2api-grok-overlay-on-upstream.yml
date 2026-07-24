@@ -10,6 +10,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat.py'
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
   pull_request:
@@ -19,6 +20,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat.py'
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
 
@@ -43,6 +45,7 @@ jobs:
           cp scripts/apply_sub2api_grok_compat.py "$tmp/"
           cp scripts/sub2api_grok_compat_overlay.rs "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui.py "$tmp/"
+          cp scripts/apply_sub2api_grok_compat_ui_dispatch.py "$tmp/"
 
           # Candidate branches created by the sync script carry the exact upstream
           # commit in line 2. The long-lived compat branch falls back to fork main.
@@ -63,9 +66,10 @@ jobs:
           cp "$tmp/apply_sub2api_grok_compat.py" scripts/
           cp "$tmp/sub2api_grok_compat_overlay.rs" scripts/
           cp "$tmp/apply_sub2api_grok_compat_ui.py" scripts/
+          cp "$tmp/apply_sub2api_grok_compat_ui_dispatch.py" scripts/
 
           python3 scripts/apply_sub2api_grok_compat.py
-          python3 scripts/apply_sub2api_grok_compat_ui.py
+          python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
 
           echo "Pristine base SHA: $base_sha"
           git status --short
@@ -101,7 +105,7 @@ jobs:
 
             echo '=== second application ==='
             python3 scripts/apply_sub2api_grok_compat.py
-            python3 scripts/apply_sub2api_grok_compat_ui.py
+            python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
             cargo fmt --all
             git diff --check
             git diff --binary > /tmp/overlay-second.diff

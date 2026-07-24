@@ -98,6 +98,7 @@ New-Item -ItemType Directory -Path $temp -Force | Out-Null
 
 $assets = @(
     'scripts/apply_sub2api_grok_compat.py',
+    'scripts/sub2api_grok_compat_overlay.rs',
     'scripts/apply_sub2api_grok_compat_ui.py',
     'scripts/migrate_sub2api_grok_ui_to_overlay.py',
     'scripts/build_sub2api_grok_compat_windows.ps1',

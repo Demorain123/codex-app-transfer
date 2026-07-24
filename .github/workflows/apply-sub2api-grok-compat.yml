@@ -4,18 +4,25 @@ on:
   push:
     branches:
       - sub2api-grok-compat
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'crates/**'
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - '.github/workflows/apply-sub2api-grok-compat.yml'
 
 permissions:
   contents: write
 
 jobs:
   patch-and-test:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: sub2api-grok-compat
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'sub2api-grok-compat' }}
           fetch-depth: 0
 
       - name: Apply patch
@@ -29,10 +36,18 @@ jobs:
       - name: Format
         run: cargo fmt --all
 
+      - name: Show generated diff
+        if: always()
+        shell: bash
+        run: |
+          git status --short
+          git diff -- crates/adapters/src/mapper/responses.rs || true
+
       - name: Test adapters
         run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture
 
       - name: Commit generated source change
+        if: ${{ github.event_name == 'push' }}
         shell: bash
         run: |
           if git diff --quiet; then

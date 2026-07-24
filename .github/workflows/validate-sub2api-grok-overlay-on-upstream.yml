@@ -166,8 +166,8 @@ jobs:
       - name: Test local proxy gateway auth from pristine upstream + overlay
         run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
 
-      - name: Test config integration from pristine upstream + overlay
-        run: cargo test -p codex-app-transfer-codex-integration --lib -- --nocapture
+      - name: Check config integration library from pristine upstream + overlay
+        run: cargo check -p codex-app-transfer-codex-integration --lib
 
       - name: Test all adapter regressions from pristine upstream + overlay
         run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture

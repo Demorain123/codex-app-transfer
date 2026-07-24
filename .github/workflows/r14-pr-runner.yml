@@ -23,6 +23,8 @@ jobs:
           components: rustfmt
 
       - name: Execute patch payload from bootstrap workflow
+        id: patch
+        continue-on-error: true
         shell: bash
         run: |
           python - <<'PY'
@@ -38,19 +40,44 @@ jobs:
           exec(compile(payload, 'r14-bootstrap-inline.py', 'exec'), {})
           PY
 
+      - name: Commit patch diagnostic on failure
+        if: steps.patch.outcome == 'failure'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          note = Path('.r14-error.txt')
+          if not note.exists():
+              note.write_text('r14 bootstrap patch step failed; inspect Actions run logs for traceback.\n', encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .r14-error.txt
+          git commit -m "chore(r14): capture bootstrap failure"
+          git push origin HEAD:sub2api-grok-compat-r14
+
+      - name: Stop after patch failure
+        if: steps.patch.outcome == 'failure'
+        run: exit 1
+
       - name: Rustfmt check
+        if: steps.patch.outcome == 'success'
         run: cargo fmt --all -- --check
 
       - name: Grok shim regression tests
+        if: steps.patch.outcome == 'success'
         run: cargo test -p codex-app-transfer-adapters grok_tool_shim --lib
 
       - name: Tauri crate check
+        if: steps.patch.outcome == 'success'
         run: cargo check -p codex-app-transfer --locked
 
       - name: Commit r14 patch and remove bootstrap workflows
+        if: steps.patch.outcome == 'success'
         shell: bash
         run: |
-          rm -f .github/workflows/r14-grok-apply-patch-fix.yml .github/workflows/r14-pr-runner.yml
+          rm -f .github/workflows/r14-grok-apply-patch-fix.yml .github/workflows/r14-pr-runner.yml .r14-error.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

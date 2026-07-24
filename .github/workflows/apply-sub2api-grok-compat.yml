@@ -13,7 +13,9 @@ on:
       - 'src-tauri/**'
       - 'frontend/**'
       - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - '.github/workflows/apply-sub2api-grok-compat.yml'
 
@@ -56,7 +58,7 @@ jobs:
             echo 'Legacy generated compat UI detected; migrating it to the overlay component.'
             python3 scripts/migrate_sub2api_grok_ui_to_overlay.py
           else
-            python3 scripts/apply_sub2api_grok_compat_ui.py
+            python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
           fi
 
       - name: Install Rust

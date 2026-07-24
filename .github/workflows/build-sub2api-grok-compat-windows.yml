@@ -12,6 +12,16 @@ on:
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
       - 'Cargo.toml'
       - 'Cargo.lock'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - '.github/workflows/build-sub2api-grok-compat-windows.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 permissions:
   contents: read

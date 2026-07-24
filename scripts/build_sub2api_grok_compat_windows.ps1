@@ -35,12 +35,23 @@ function Require-Command {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $target = 'x86_64-pc-windows-msvc'
-$outDir = Join-Path $repoRoot 'dist\sub2api-grok-compat-windows'
+$tauriConfigPath = Join-Path $repoRoot 'src-tauri\tauri.conf.json'
+$tauriConfig = Get-Content -LiteralPath $tauriConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$appVersion = [string]$tauriConfig.version
+if ([string]::IsNullOrWhiteSpace($appVersion)) {
+    throw 'src-tauri/tauri.conf.json does not contain a version.'
+}
+$parts = $appVersion -split '\+', 2
+$baseVersion = $parts[0]
+$revision = if ($parts.Count -gt 1) { $parts[1] } else { '0' }
+$safeVersion = "$baseVersion-r$revision"
+$outDir = Join-Path $repoRoot "dist\sub2api-grok-compat-$safeVersion-windows-x64"
 
 Set-Location $repoRoot
 
 Write-Host 'Sub2API Grok Compat - Windows local build' -ForegroundColor Green
 Write-Host "Repository : $repoRoot"
+Write-Host "Version    : v$appVersion (official $baseVersion, r$revision)"
 Write-Host "Target     : $target"
 
 Require-Command git
@@ -118,7 +129,7 @@ $copied = [System.Collections.Generic.List[string]]::new()
 
 if (Test-Path $nsisDir) {
     Get-ChildItem -LiteralPath $nsisDir -File -Filter '*.exe' | ForEach-Object {
-        $dest = Join-Path $outDir 'Sub2API-Grok-Compat-Windows-x64-Setup.exe'
+        $dest = Join-Path $outDir "Codex-App-Transfer-Sub2API-Grok-Compat-$safeVersion-Windows-x64-Setup.exe"
         Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
         $copied.Add($dest)
     }
@@ -126,7 +137,7 @@ if (Test-Path $nsisDir) {
 
 if (Test-Path $msiDir) {
     Get-ChildItem -LiteralPath $msiDir -File -Filter '*.msi' | ForEach-Object {
-        $dest = Join-Path $outDir 'Sub2API-Grok-Compat-Windows-x64.msi'
+        $dest = Join-Path $outDir "Codex-App-Transfer-Sub2API-Grok-Compat-$safeVersion-Windows-x64.msi"
         Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
         $copied.Add($dest)
     }
@@ -137,6 +148,7 @@ if ($copied.Count -eq 0) {
 }
 
 Write-Host "`nBuild complete." -ForegroundColor Green
+Write-Host "Version: v$appVersion" -ForegroundColor Green
 Write-Host "Output directory: $outDir" -ForegroundColor Green
 foreach ($file in $copied) {
     $item = Get-Item -LiteralPath $file

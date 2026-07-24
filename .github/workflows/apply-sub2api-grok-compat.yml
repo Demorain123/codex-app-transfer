@@ -9,7 +9,10 @@ on:
       - main
     paths:
       - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
       - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
       - '.github/workflows/apply-sub2api-grok-compat.yml'
 
 permissions:
@@ -18,8 +21,7 @@ permissions:
 jobs:
   patch-and-test:
     # Avoid only this generator re-running on its own generated source commit.
-    # Do not use GitHub's global [skip ci] token because the Windows build must
-    # still run for the generated responses.rs commit.
+    # The Windows build is still allowed to run for generated commits.
     if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[compat-generated]') }}
     runs-on: ubuntu-latest
     steps:
@@ -28,28 +30,56 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'sub2api-grok-compat' }}
           fetch-depth: 0
 
-      - name: Apply patch
+      - name: Apply Responses compat patch
         run: python3 scripts/apply_sub2api_grok_compat.py
+
+      - name: Apply UI/provider compat patch
+        run: python3 scripts/apply_sub2api_grok_compat_ui.py
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 
-      - name: Format
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Format Rust
         run: cargo fmt --all
+
+      - name: Build frontend (TypeScript + Vite)
+        run: npm --prefix frontend run build
+
+      - name: Check Tauri backend
+        run: cargo check -p codex-app-transfer
+
+      - name: Test adapters
+        run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture
 
       - name: Show generated diff
         if: always()
         shell: bash
         run: |
           git status --short
-          git diff -- crates/adapters/src/mapper/responses.rs || true
+          git diff -- \
+            crates/adapters/src/mapper/responses.rs \
+            src-tauri/src/admin/handlers/providers/crud.rs \
+            src-tauri/tauri.conf.json \
+            frontend/src/api/types.ts \
+            frontend/src/api/providers.ts \
+            frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/layout/TopTabBar.vue \
+            frontend/src/layout/AppLayout.vue \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts || true
 
-      - name: Test adapters
-        run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture
-
-      - name: Commit generated source change
+      - name: Commit generated source changes
         if: ${{ github.event_name == 'push' }}
         shell: bash
         run: |
@@ -59,6 +89,16 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/adapters/src/mapper/responses.rs
-          git commit -m "feat: add Sub2API Grok Responses compatibility [compat-generated]"
+          git add \
+            crates/adapters/src/mapper/responses.rs \
+            src-tauri/src/admin/handlers/providers/crud.rs \
+            src-tauri/tauri.conf.json \
+            frontend/src/api/types.ts \
+            frontend/src/api/providers.ts \
+            frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/layout/TopTabBar.vue \
+            frontend/src/layout/AppLayout.vue \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts
+          git commit -m "feat: add visible Sub2API Grok compat controls [compat-generated]"
           git push origin HEAD:sub2api-grok-compat

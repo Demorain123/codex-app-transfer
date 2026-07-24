@@ -177,7 +177,7 @@ text = text[:finalize_start] + finalize_replacement + text[next_doc:]
 # ---------------------------------------------------------------------------
 # 4. Regression coverage:
 #    - complete apply_patch at raw EOF is allowed only after structural proof;
-#    - truncated EOF stays poisoned;
+#    - truncated JSON at EOF stays poisoned (cannot be repaired by V4A preflight);
 #    - exact Grok `*** Begin/End Patch ***` drift is canonicalized.
 # ---------------------------------------------------------------------------
 old_test_start = text.index(
@@ -208,8 +208,10 @@ replacement_tests = r'''    #[test]
 
     #[test]
     fn truncated_apply_patch_at_eof_stays_poisoned() {
-        let patch = "*** Begin Patch\n*** Add File: must-not-run.txt\n+blocked\n";
-        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        // Deliberately truncate the JSON string itself. A merely missing End Patch
+        // sentinel can be repaired by the existing non-destructive preflight, so it
+        // is not a reliable simulation of a transport-truncated function argument.
+        let args = r#"{"input":"*** Begin Patch\n*** Add File: must-not-run.txt\n+blocked"#;
         let input = frame(
             "response.output_item.added",
             json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,

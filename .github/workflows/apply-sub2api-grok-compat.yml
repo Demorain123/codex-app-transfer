@@ -13,6 +13,7 @@ on:
       - 'frontend/**'
       - 'scripts/apply_sub2api_grok_compat.py'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - '.github/workflows/apply-sub2api-grok-compat.yml'
 
 permissions:
@@ -47,6 +48,10 @@ jobs:
             && grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs \
             && grep -q 'compat-build-badge' frontend/src/layout/TopTabBar.vue; then
             echo 'Thin UI/provider compat overlay is already generated; validating existing source.'
+          elif grep -q 'pf__compat-card' frontend/src/components/provider/ProviderFormModal.vue \
+            && grep -q 'sub2apiGrokFreeCacheCompat' src-tauri/src/admin/handlers/providers/crud.rs; then
+            echo 'Legacy generated compat UI detected; migrating it to the overlay component.'
+            python3 scripts/migrate_sub2api_grok_ui_to_overlay.py
           else
             python3 scripts/apply_sub2api_grok_compat_ui.py
           fi

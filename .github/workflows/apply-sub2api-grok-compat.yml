@@ -16,6 +16,7 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
@@ -48,10 +49,12 @@ jobs:
       - name: Apply UI/provider and Codex-config compat overlay
         shell: bash
         run: |
-          # Dispatcher is intentionally always run. It is idempotent for the UI,
-          # and also materializes the compat-only guards that preserve a user's
-          # external model catalog and sandbox/approval policy.
           python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+
+      - name: Apply local gateway auth compat overlay
+        shell: bash
+        run: |
+          python3 scripts/apply_sub2api_grok_gateway_auth.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py
@@ -78,6 +81,9 @@ jobs:
 
       - name: Test config integration
         run: cargo test -p codex-app-transfer-codex-integration --lib -- --nocapture
+
+      - name: Test local proxy gateway auth
+        run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
 
       - name: Test all adapter regressions
         shell: bash
@@ -116,6 +122,7 @@ jobs:
             crates/adapters/src/mapper/responses.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
             crates/codex_integration/src/apply.rs \
+            crates/proxy/src/resolver.rs \
             src-tauri/src/admin/services/desktop/snapshot.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
@@ -150,6 +157,7 @@ jobs:
             crates/adapters/src/mapper/responses.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
             crates/codex_integration/src/apply.rs \
+            crates/proxy/src/resolver.rs \
             src-tauri/src/admin/services/desktop/snapshot.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \

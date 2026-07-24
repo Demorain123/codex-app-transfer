@@ -19,20 +19,12 @@ def write(path: str, text: str) -> None:
     print(f"patched {path}")
 
 
-def replace_once(text: str, old: str, new: str, label: str) -> str:
-    if old == new or new in text:
-        return text
-    if old not in text:
-        raise SystemExit(f"anchor not found: {label}")
-    return text.replace(old, new, 1)
-
-
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()
 if not revision.isdigit() or int(revision) < 1:
     raise SystemExit("SUB2API_GROK_COMPAT_REVISION.txt must contain a positive integer")
 
 # The Tauri/MSI build number must be numeric. Keep the official semantic version
-# as the base and use +N for the compat revision (for example 2.4.5+2).
+# as the base and use +N for the compat revision (for example 2.4.5+3).
 tauri_path = ROOT / "src-tauri/tauri.conf.json"
 tauri = json.loads(tauri_path.read_text(encoding="utf-8"))
 raw_version = str(tauri.get("version", "")).strip()
@@ -42,22 +34,33 @@ base_version = raw_version.split("+", 1)[0]
 app_version = f"{base_version}+{revision}"
 display_revision = f"r{revision}"
 
-# Make the compat card impossible to hide merely because a provider gets
-# classified as a preset/custom provider differently. Match the actual Vue
-# expression rather than surrounding comments/rustfmt layout so this remains
-# stable when replayed onto pristine/future upstream sources.
+# UI visibility invariant:
+# The highlighted Responses segment and the compat card MUST read the exact same
+# reactive value. Do not introduce a second computed gate here; that made stale
+# or partially-generated builds much harder to diagnose.
 path = "frontend/src/components/provider/ProviderFormModal.vue"
 text = read(path)
-visible_marker = "const showSub2apiGrokCompat = computed(() => form.apiFormat === 'responses')"
-if visible_marker not in text:
-    text, n = re.subn(
-        r"const\s+showSub2apiGrokCompat\s*=\s*computed\(\s*\(\)\s*=>\s*isCustomProvider\.value\s*&&\s*form\.apiFormat\s*===\s*'responses'\s*,?\s*\)",
-        visible_marker,
-        text,
-        count=1,
-    )
-    if n != 1:
-        raise SystemExit("failed to install Responses-only compat-card visibility rule")
+# Remove legacy/computed visibility declarations if present.
+text = re.sub(
+    r"\n//[^\n]*Responses provider[^\n]*\n(?://[^\n]*\n){0,3}const\s+showSub2apiGrokCompat\s*=\s*computed\([^\n]*\)\n",
+    "\n",
+    text,
+    count=1,
+)
+text = re.sub(
+    r"\nconst\s+showSub2apiGrokCompat\s*=\s*computed\(\(\)\s*=>\s*form\.apiFormat\s*===\s*'responses'\)\n",
+    "\n",
+    text,
+    count=1,
+)
+text = text.replace(
+    'v-if="showSub2apiGrokCompat"',
+    'v-if="form.apiFormat === \'responses\'"',
+)
+if 'v-if="form.apiFormat === \'responses\'"' not in text:
+    raise SystemExit("compat card is not directly gated by form.apiFormat === 'responses'")
+if "showSub2apiGrokCompat" in text:
+    raise SystemExit("legacy showSub2apiGrokCompat gate still exists after revision patch")
 write(path, text)
 
 # Tauri's version drives the app/package version. Keep the identifier unchanged

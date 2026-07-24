@@ -11,6 +11,7 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
@@ -23,6 +24,7 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
@@ -37,7 +39,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # On PRs validate the real head, not GitHub's synthetic merge commit.
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
@@ -50,11 +51,10 @@ jobs:
           cp scripts/sub2api_grok_compat_overlay.rs "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui.py "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui_dispatch.py "$tmp/"
+          cp scripts/apply_sub2api_grok_gateway_auth.py "$tmp/"
           cp scripts/apply_sub2api_grok_compat_revision.py "$tmp/"
           cp SUB2API_GROK_COMPAT_REVISION.txt "$tmp/"
 
-          # Candidate branches created by the sync script carry the exact upstream
-          # commit in line 2. The long-lived compat branch falls back to fork main.
           base_sha=""
           if test -f SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt; then
             base_sha="$(sed -n '2p' SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt | tr -d '\r' | xargs)"
@@ -73,11 +73,13 @@ jobs:
           cp "$tmp/sub2api_grok_compat_overlay.rs" scripts/
           cp "$tmp/apply_sub2api_grok_compat_ui.py" scripts/
           cp "$tmp/apply_sub2api_grok_compat_ui_dispatch.py" scripts/
+          cp "$tmp/apply_sub2api_grok_gateway_auth.py" scripts/
           cp "$tmp/apply_sub2api_grok_compat_revision.py" scripts/
           cp "$tmp/SUB2API_GROK_COMPAT_REVISION.txt" ./
 
           python3 scripts/apply_sub2api_grok_compat.py
           python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+          python3 scripts/apply_sub2api_grok_gateway_auth.py
           python3 scripts/apply_sub2api_grok_compat_revision.py
 
           echo "Pristine base SHA: $base_sha"
@@ -116,6 +118,7 @@ jobs:
             echo '=== second application ==='
             python3 scripts/apply_sub2api_grok_compat.py
             python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+            python3 scripts/apply_sub2api_grok_gateway_auth.py
             python3 scripts/apply_sub2api_grok_compat_revision.py
             cargo fmt --all
             git diff --check
@@ -151,7 +154,7 @@ jobs:
           path: |
             overlay-idempotence.log
             overlay-idempotence.diff
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Build frontend from pristine upstream + overlay
@@ -159,6 +162,12 @@ jobs:
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run build
+
+      - name: Test local proxy gateway auth from pristine upstream + overlay
+        run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
+
+      - name: Test config integration from pristine upstream + overlay
+        run: cargo test -p codex-app-transfer-codex-integration --lib -- --nocapture
 
       - name: Test all adapter regressions from pristine upstream + overlay
         run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture

@@ -17,7 +17,10 @@ permissions:
 
 jobs:
   patch-and-test:
-    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[skip ci]') }}
+    # Avoid only this generator re-running on its own generated source commit.
+    # Do not use GitHub's global [skip ci] token because the Windows build must
+    # still run for the generated responses.rs commit.
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[compat-generated]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,5 +60,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crates/adapters/src/mapper/responses.rs
-          git commit -m "feat: add Sub2API Grok Responses compatibility [skip ci]"
+          git commit -m "feat: add Sub2API Grok Responses compatibility [compat-generated]"
           git push origin HEAD:sub2api-grok-compat

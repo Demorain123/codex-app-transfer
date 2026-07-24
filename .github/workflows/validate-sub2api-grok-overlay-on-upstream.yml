@@ -5,9 +5,11 @@ on:
   push:
     branches:
       - sub2api-grok-compat
+      - 'sub2api-grok-compat-next-*'
     paths:
       - 'scripts/apply_sub2api_grok_compat.py'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
 
 permissions:
@@ -22,7 +24,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Preserve overlay assets, reset to pristine main, reapply
+      - name: Preserve overlay assets and reset to the exact pristine base
         shell: bash
         run: |
           set -euo pipefail
@@ -30,8 +32,19 @@ jobs:
           cp scripts/apply_sub2api_grok_compat.py "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui.py "$tmp/"
 
-          git fetch origin main
-          git reset --hard origin/main
+          # Candidate branches created by the sync script carry the exact upstream
+          # commit in line 2. The long-lived compat branch falls back to fork main.
+          base_sha=""
+          if test -f SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt; then
+            base_sha="$(sed -n '2p' SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt | tr -d '\r' | xargs)"
+          fi
+          if test -z "$base_sha"; then
+            git fetch origin main
+            base_sha="$(git rev-parse origin/main)"
+          fi
+
+          git cat-file -e "${base_sha}^{commit}"
+          git reset --hard "$base_sha"
           git clean -fdx
 
           mkdir -p scripts
@@ -41,7 +54,7 @@ jobs:
           python3 scripts/apply_sub2api_grok_compat.py
           python3 scripts/apply_sub2api_grok_compat_ui.py
 
-          echo "Pristine base: $(git rev-parse origin/main)"
+          echo "Pristine base SHA: $base_sha"
           git status --short
 
       - name: Install Rust
@@ -60,8 +73,22 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Format Rust
-        run: cargo fmt --all -- --check
+      - name: Format and verify overlay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          git diff --binary > /tmp/overlay-first.diff
+
+          # Reapplying the overlay must be a no-op after formatting. This catches
+          # patchers that duplicate hooks/fields on future upstream versions.
+          python3 scripts/apply_sub2api_grok_compat.py
+          python3 scripts/apply_sub2api_grok_compat_ui.py
+          cargo fmt --all
+          git diff --check
+          git diff --binary > /tmp/overlay-second.diff
+          cmp /tmp/overlay-first.diff /tmp/overlay-second.diff
 
       - name: Build frontend from pristine upstream + overlay
         shell: bash

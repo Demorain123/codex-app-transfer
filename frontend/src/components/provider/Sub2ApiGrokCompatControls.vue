@@ -49,6 +49,7 @@ function setEnabled(value: boolean) {
 
 <style scoped>
 .compat-card {
+  flex-shrink: 0;
   margin: var(--space-3) 0 var(--space-2);
   border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
   border-radius: var(--radius);

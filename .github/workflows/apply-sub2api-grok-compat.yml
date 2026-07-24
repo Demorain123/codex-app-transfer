@@ -87,12 +87,22 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
+            tail -n 220 /tmp/adapter-tests.log > adapter-regression-failure.txt
             echo '::group::Adapter regression failure tail'
-            tail -n 220 /tmp/adapter-tests.log
+            cat adapter-regression-failure.txt
             echo '::endgroup::'
             exit "$rc"
           fi
           grep -E 'test result:|running [0-9]+ tests' /tmp/adapter-tests.log | tail -n 20 || true
+
+      - name: Upload adapter failure diagnostic
+        if: failure() && hashFiles('adapter-regression-failure.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-regression-failure
+          path: adapter-regression-failure.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Show generated diff
         if: always()

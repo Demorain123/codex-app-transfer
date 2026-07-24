@@ -43,23 +43,21 @@ app_version = f"{base_version}+{revision}"
 display_revision = f"r{revision}"
 
 # Make the compat card impossible to hide merely because a provider gets
-# classified as a preset/custom provider differently. Runtime safety remains in
-# the Rust gate: only grok/grok-*/grok/* requests use the shim.
+# classified as a preset/custom provider differently. Match the actual Vue
+# expression rather than surrounding comments/rustfmt layout so this remains
+# stable when replayed onto pristine/future upstream sources.
 path = "frontend/src/components/provider/ProviderFormModal.vue"
 text = read(path)
-text = text.replace(
-    "// 兼容开关只对自定义 Responses provider 有意义。真正请求侧还会按 model=grok-* 再 gate，\n"
-    "// 所以同一个 Sub2API provider 里的 Luna/GPT 请求仍保持原生 Responses 直透。\n"
-    "const showSub2apiGrokCompat = computed(\n"
-    "  () => isCustomProvider.value && form.apiFormat === 'responses',\n"
-    ")",
-    "// 所有 Responses provider 都显示兼容卡片，避免 preset/custom 分类变化把 UI 隐藏。\n"
-    "// 真正请求侧仍会按 provider 开关 + model=grok/grok-*/grok/* 双重 gate，\n"
-    "// 所以 Luna/GPT 以及未开启开关的 Responses provider 仍保持原生直透。\n"
-    "const showSub2apiGrokCompat = computed(() => form.apiFormat === 'responses')",
-)
-if "const showSub2apiGrokCompat = computed(() => form.apiFormat === 'responses')" not in text:
-    raise SystemExit("failed to install Responses-only compat-card visibility rule")
+visible_marker = "const showSub2apiGrokCompat = computed(() => form.apiFormat === 'responses')"
+if visible_marker not in text:
+    text, n = re.subn(
+        r"const\s+showSub2apiGrokCompat\s*=\s*computed\(\s*\(\)\s*=>\s*isCustomProvider\.value\s*&&\s*form\.apiFormat\s*===\s*'responses'\s*,?\s*\)",
+        visible_marker,
+        text,
+        count=1,
+    )
+    if n != 1:
+        raise SystemExit("failed to install Responses-only compat-card visibility rule")
 write(path, text)
 
 # Tauri's version drives the app/package version. Keep the identifier unchanged

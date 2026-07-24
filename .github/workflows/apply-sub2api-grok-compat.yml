@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - sub2api-grok-compat
     paths:
       - 'crates/**'
       - 'src-tauri/**'

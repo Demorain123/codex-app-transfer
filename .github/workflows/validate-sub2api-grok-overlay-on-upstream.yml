@@ -100,11 +100,19 @@ jobs:
 
           if ! cmp -s /tmp/overlay-first.diff /tmp/overlay-second.diff; then
             echo '::error::Overlay patchers are not idempotent.'
-            echo '::group::Difference between first and second application'
-            diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff || true
-            echo '::endgroup::'
+            diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff > /tmp/overlay-idempotence.diff || true
+            cat /tmp/overlay-idempotence.diff || true
             exit 1
           fi
+
+      - name: Upload overlay idempotence diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-idempotence-failure
+          path: /tmp/overlay-idempotence.diff
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build frontend from pristine upstream + overlay
         shell: bash

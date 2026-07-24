@@ -17,6 +17,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
+      - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
@@ -51,6 +52,9 @@ jobs:
 
       - name: Apply local gateway auth compat overlay
         run: python3 scripts/apply_sub2api_grok_gateway_auth.py
+
+      - name: Apply Grok replay and tool_search compat overlay
+        run: python3 scripts/apply_sub2api_grok_replay_compat.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py
@@ -116,7 +120,9 @@ jobs:
             src-tauri/Cargo.toml \
             crates/adapters/src/mapper/mod.rs \
             crates/adapters/src/mapper/responses.rs \
+            crates/adapters/src/mapper/grok_build.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/adapters/src/responses/grok_tool_shim.rs \
             crates/codex_integration/src/apply.rs \
             crates/proxy/src/resolver.rs \
             src-tauri/src/admin/services/desktop/snapshot.rs \
@@ -151,7 +157,9 @@ jobs:
             src-tauri/Cargo.toml \
             crates/adapters/src/mapper/mod.rs \
             crates/adapters/src/mapper/responses.rs \
+            crates/adapters/src/mapper/grok_build.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/adapters/src/responses/grok_tool_shim.rs \
             crates/codex_integration/src/apply.rs \
             crates/proxy/src/resolver.rs \
             src-tauri/src/admin/services/desktop/snapshot.rs \

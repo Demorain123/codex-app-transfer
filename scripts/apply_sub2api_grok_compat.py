@@ -1,242 +1,10 @@
 from pathlib import Path
+import re
 
 RESPONSES = Path("crates/adapters/src/mapper/responses.rs")
 MAPPER_MOD = Path("crates/adapters/src/mapper/mod.rs")
 COMPAT = Path("crates/adapters/src/mapper/sub2api_grok_compat.rs")
-
-COMPAT_SOURCE = r'''//! Sub2API Grok compatibility overlay.
-//!
-//! This file intentionally contains all Sub2API-specific runtime logic so that
-//! upstream `mapper/responses.rs` only needs a handful of stable hook calls.
-//! Keeping the overlay isolated makes future upstream syncs/rebases much less
-//! conflict-prone.
-
-use bytes::Bytes;
-use codex_app_transfer_registry::Provider;
-use serde_json::Value;
-
-/// Explicit opt-in for a normal bearer Responses provider (for example
-/// Sub2API), gated again by the actual request model. Mixed providers therefore
-/// keep Luna/GPT as native Responses passthrough while only grok-* reuses the
-/// upstream Grok tool compatibility machinery.
-pub(crate) fn sub2api_grok_compat_enabled(provider: &Provider, body: &Bytes) -> bool {
-    let enabled = provider
-        .extra
-        .get("sub2apiGrokCompat")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if !enabled {
-        return false;
-    }
-
-    let Ok(parsed) = serde_json::from_slice::<Value>(body) else {
-        return false;
-    };
-    let Some(model) = parsed.get("model").and_then(Value::as_str) else {
-        return false;
-    };
-    let model = model.trim().to_ascii_lowercase();
-    model == "grok" || model.starts_with("grok-") || model.starts_with("grok/")
-}
-
-/// Built-in Grok Build continues to work exactly as upstream intended; this
-/// overlay only broadens the same path to explicitly opted-in Sub2API grok-*.
-pub(crate) fn should_use_grok_compat(provider: &Provider, body: &Bytes) -> bool {
-    crate::mapper::grok_build::is_grok_build_provider(provider)
-        || sub2api_grok_compat_enabled(provider, body)
-}
-
-fn sub2api_grok_free_cache_compat_enabled(provider: &Provider, body: &Bytes) -> bool {
-    let enabled = provider
-        .extra
-        .get("sub2apiGrokFreeCacheCompat")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    enabled && sub2api_grok_compat_enabled(provider, body)
-}
-
-/// Optional cache-routing compatibility for Grok Free OAuth behind Sub2API.
-///
-/// Codex's existing `prompt_cache_key` is deliberately preserved byte-for-byte.
-/// When explicitly enabled, native xAI search tools are appended in a stable
-/// order so a request that also exposes client/MCP tools can qualify for the
-/// cache-capable route. This remains opt-in because native tools may affect
-/// automatic tool selection.
-pub(crate) fn apply_sub2api_grok_free_cache_compat(body: Bytes, provider: &Provider) -> Bytes {
-    if !sub2api_grok_free_cache_compat_enabled(provider, &body) {
-        return body;
-    }
-
-    let Ok(mut parsed) = serde_json::from_slice::<Value>(&body) else {
-        return body;
-    };
-    let Some(obj) = parsed.as_object_mut() else {
-        return body;
-    };
-
-    // Never synthesize/randomize/replace the Codex cache key.
-    if obj
-        .get("prompt_cache_key")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .is_none()
-    {
-        tracing::warn!(
-            target: "adapters::grok_cache",
-            "Sub2API Grok Free cache compat is enabled but prompt_cache_key is missing"
-        );
-    }
-
-    let had_client_tools = obj
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| !tools.is_empty());
-
-    let tools_value = obj
-        .entry("tools".to_owned())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(tools) = tools_value.as_array_mut() else {
-        return body;
-    };
-
-    fn has_tool_type(tools: &[Value], wanted: &str) -> bool {
-        tools.iter().any(|tool| {
-            tool.get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|kind| kind == wanted)
-        })
-    }
-
-    // Stable append order matters for prefix caching and prevents duplicates if
-    // Sub2API/the client already supplied a native tool.
-    if !has_tool_type(tools, "web_search") {
-        tools.push(serde_json::json!({ "type": "web_search" }));
-    }
-    if !has_tool_type(tools, "x_search") {
-        tools.push(serde_json::json!({ "type": "x_search" }));
-    }
-
-    // Tool-free turns use native tools only as routing companions. Tool-bearing
-    // turns retain the caller's tool_choice (normally auto) so MCP remains usable.
-    if !had_client_tools {
-        obj.insert("tool_choice".to_owned(), Value::String("none".to_owned()));
-    }
-
-    serde_json::to_vec(&parsed)
-        .ok()
-        .map(Bytes::from)
-        .unwrap_or(body)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn provider(enabled: bool, cache_enabled: bool) -> Provider {
-        serde_json::from_value(json!({
-            "id": "sub2api",
-            "name": "Sub2API",
-            "baseUrl": "http://127.0.0.1:8089/v1",
-            "authScheme": "bearer",
-            "apiFormat": "responses",
-            "apiKey": "test",
-            "models": {},
-            "sub2apiGrokCompat": enabled,
-            "sub2apiGrokFreeCacheCompat": cache_enabled
-        }))
-        .expect("provider fixture")
-    }
-
-    #[test]
-    fn only_matches_grok_models() {
-        let p = provider(true, false);
-        assert!(sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"grok-4.5"}"#)
-        ));
-        assert!(sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"grok/something"}"#)
-        ));
-        assert!(!sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"gpt-5.6-luna"}"#)
-        ));
-        assert!(!sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"gpt-5.4"}"#)
-        ));
-    }
-
-    #[test]
-    fn requires_explicit_opt_in() {
-        let p = provider(false, false);
-        assert!(!sub2api_grok_compat_enabled(
-            &p,
-            &Bytes::from_static(br#"{"model":"grok-4.5"}"#)
-        ));
-    }
-
-    #[test]
-    fn cache_compat_preserves_prompt_cache_key_and_client_tools() {
-        let p = provider(true, true);
-        let key = "019f9082-3c25-7b00-84b4-3b4a14ff09f0";
-        let body = Bytes::from(
-            serde_json::to_vec(&json!({
-                "model": "grok-4.5",
-                "prompt_cache_key": key,
-                "tool_choice": "auto",
-                "tools": [{
-                    "type": "function",
-                    "name": "mcp__ask_user_questions__ask_user_questions",
-                    "description": "test",
-                    "parameters": {"type":"object","properties":{}}
-                }],
-                "input": []
-            }))
-            .unwrap(),
-        );
-
-        let out = apply_sub2api_grok_free_cache_compat(body, &p);
-        let v: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(v["prompt_cache_key"], key);
-        assert_eq!(v["tool_choice"], "auto");
-        let tools = v["tools"].as_array().unwrap();
-        assert!(tools.iter().any(|t| t["type"] == "function"));
-        assert!(tools.iter().any(|t| t["type"] == "web_search"));
-        assert!(tools.iter().any(|t| t["type"] == "x_search"));
-    }
-
-    #[test]
-    fn cache_compat_tool_free_turn_uses_native_tools_only_as_companions() {
-        let p = provider(true, true);
-        let body = Bytes::from_static(
-            br#"{"model":"grok-4.5","prompt_cache_key":"thread-1","input":[]}"#,
-        );
-        let out = apply_sub2api_grok_free_cache_compat(body, &p);
-        let v: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(v["prompt_cache_key"], "thread-1");
-        assert_eq!(v["tool_choice"], "none");
-        let tools = v["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
-        assert_eq!(tools[0]["type"], "web_search");
-        assert_eq!(tools[1]["type"], "x_search");
-    }
-
-    #[test]
-    fn cache_compat_never_touches_luna() {
-        let p = provider(true, true);
-        let body = Bytes::from_static(
-            br#"{"model":"gpt-5.6-luna","prompt_cache_key":"thread-1","tools":[]}"#,
-        );
-        let out = apply_sub2api_grok_free_cache_compat(body.clone(), &p);
-        assert_eq!(out, body);
-    }
-}
-'''
-
+COMPAT_TEMPLATE = Path("scripts/sub2api_grok_compat_overlay.rs")
 HOOK = "// CAS-SUB2API-GROK-COMPAT-HOOK"
 
 
@@ -248,6 +16,7 @@ def remove_rust_module(text: str, marker: str) -> str:
     brace = text.find("{", start)
     if brace < 0:
         raise SystemExit(f"malformed module at {marker}")
+
     depth = 0
     i = brace
     in_str = False
@@ -277,21 +46,30 @@ def remove_rust_module(text: str, marker: str) -> str:
     raise SystemExit(f"unterminated module at {marker}")
 
 
-def replace_once(text: str, old: str, new: str, label: str) -> str:
-    if new in text:
-        print(f"[ok] {label}: already applied")
+def dedupe_regex(text: str, pattern: re.Pattern[str], label: str) -> str:
+    """Keep the first semantic hook and remove later duplicates, rustfmt-safe."""
+    matches = list(pattern.finditer(text))
+    if len(matches) <= 1:
         return text
-    if old not in text:
-        raise SystemExit(f"missing anchor: {label}")
-    print(f"[ok] {label}: applied")
-    return text.replace(old, new, 1)
+    for match in reversed(matches[1:]):
+        text = text[: match.start()] + text[match.end() :]
+    print(f"[ok] {label}: removed {len(matches) - 1} duplicate(s)")
+    return text
 
 
-# 1) Isolated overlay module: authoritative source of all Sub2API runtime logic.
-COMPAT.write_text(COMPAT_SOURCE, encoding="utf-8")
+# ---------------------------------------------------------------------------
+# 1. Authoritative runtime lives in a standalone Rust overlay template.
+# ---------------------------------------------------------------------------
+if not COMPAT_TEMPLATE.is_file():
+    raise SystemExit(f"missing overlay template: {COMPAT_TEMPLATE}")
+COMPAT.parent.mkdir(parents=True, exist_ok=True)
+COMPAT.write_text(COMPAT_TEMPLATE.read_text(encoding="utf-8"), encoding="utf-8")
 print(f"[ok] overlay module refreshed: {COMPAT}")
 
-# 2) One-line module registration in upstream mapper/mod.rs.
+
+# ---------------------------------------------------------------------------
+# 2. One-line module registration in upstream mapper/mod.rs.
+# ---------------------------------------------------------------------------
 mod_text = MAPPER_MOD.read_text(encoding="utf-8")
 mod_line = "pub(crate) mod sub2api_grok_compat;\n"
 if mod_line not in mod_text:
@@ -304,11 +82,20 @@ else:
     print("[ok] mapper module hook: already applied")
 MAPPER_MOD.write_text(mod_text, encoding="utf-8")
 
-# 3) Thin hooks in upstream responses.rs.
+
+# ---------------------------------------------------------------------------
+# 3. Thin hooks in upstream responses.rs.
+#    IMPORTANT: detect hooks by semantic call markers, not complete source lines.
+#    rustfmt may wrap assignments across lines; line-based detection is not
+#    idempotent after formatting.
+# ---------------------------------------------------------------------------
 text = RESPONSES.read_text(encoding="utf-8")
 
-# Migrate old inline implementation from earlier compat builds.
-legacy_start = text.find("/// Enable the Grok Responses compatibility shim for a normal bearer provider")
+# Migrate the earlier inline implementation if a user upgrades from the first
+# compat build instead of starting from pristine upstream.
+legacy_start = text.find(
+    "/// Enable the Grok Responses compatibility shim for a normal bearer provider"
+)
 impl_anchor = "impl RequestMapper for ResponsesPassthroughMapper {\n"
 if legacy_start >= 0:
     impl_pos = text.find(impl_anchor, legacy_start)
@@ -319,18 +106,21 @@ if legacy_start >= 0:
 
 text = remove_rust_module(text, "#[cfg(test)]\nmod sub2api_grok_compat_tests {")
 
-# Request gate: migrate an old unqualified assignment first. Only if neither
-# old nor new assignment exists do we insert a new hook. This avoids leaving two
-# shadowing `let use_grok_compat` lines during legacy -> overlay migration.
-legacy_request_gate = "let use_grok_compat = should_use_grok_compat(provider, &body);"
-qualified_request_gate = (
-    "let use_grok_compat = crate::mapper::sub2api_grok_compat::"
-    "should_use_grok_compat(provider, &body);"
+# ---- request model gate ----------------------------------------------------
+legacy_request_assignment = (
+    "let use_grok_compat = should_use_grok_compat(provider, &body);"
 )
-if legacy_request_gate in text:
-    text = text.replace(legacy_request_gate, qualified_request_gate, 1)
+qualified_request_call = (
+    "crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &body)"
+)
+qualified_request_assignment = f"let use_grok_compat = {qualified_request_call};"
+
+if legacy_request_assignment in text:
+    text = text.replace(
+        legacy_request_assignment, qualified_request_assignment, 1
+    )
     print("[ok] request model gate: migrated legacy call")
-elif qualified_request_gate not in text:
+elif qualified_request_call not in text:
     impl_pos = text.find(impl_anchor)
     if impl_pos < 0:
         raise SystemExit("missing anchor: RequestMapper impl")
@@ -342,32 +132,40 @@ elif qualified_request_gate not in text:
     text = (
         text[:insert_at]
         + f"        {HOOK}\n"
-        + f"        {qualified_request_gate}\n"
+        + f"        {qualified_request_assignment}\n"
         + text[insert_at:]
     )
     print("[ok] request model gate: applied")
 else:
     print("[ok] request model gate: already applied")
 
-# Defensive cleanup for a legacy migration attempt that inserted the qualified
-# hook immediately before the old unqualified line. Keep exactly one assignment.
-qualified_line = f"        {qualified_request_gate}\n"
-legacy_line = f"        {legacy_request_gate}\n"
-while legacy_line in text:
-    text = text.replace(legacy_line, "", 1)
-while text.count(qualified_line) > 1:
-    first = text.find(qualified_line)
-    second = text.find(qualified_line, first + len(qualified_line))
-    text = text[:second] + text[second + len(qualified_line):]
+# Remove any stale unqualified assignment left by a legacy migration.
+text = re.sub(
+    r"(?m)^[ \t]*let use_grok_compat = should_use_grok_compat\(provider, &body\);[ \t]*\n?",
+    "",
+    text,
+)
+# And repair branches that were hit by the old rustfmt-sensitive patcher.
+request_assignment_re = re.compile(
+    r"(?m)^[ \t]*let use_grok_compat\s*=\s*(?:\n[ \t]*)?"
+    r"crate::mapper::sub2api_grok_compat::should_use_grok_compat"
+    r"\(provider,\s*&body\);[ \t]*\n?"
+)
+text = dedupe_regex(text, request_assignment_re, "request model gate")
 
-# Built-in upstream Grok gate -> built-in OR explicit Sub2API grok-*.
+# ---- local compaction gate -------------------------------------------------
 old = "if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider) {"
-new = "if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider)\n            || use_grok_compat\n        {"
+new = (
+    "if crate::mapper::grok_build::responses_upstream_lacks_compaction(provider)\n"
+    "            || use_grok_compat\n"
+    "        {"
+)
 if old in text:
     text = text.replace(old, new, 1)
-elif new not in text:
+elif "responses_upstream_lacks_compaction(provider)" not in text or "|| use_grok_compat" not in text:
     raise SystemExit("missing anchor: Grok compaction gate")
 
+# ---- request-side Grok shim context + body adapter -------------------------
 old = "let grok_shim_ctx = if crate::mapper::grok_build::is_grok_build_provider(provider) {"
 new = "let grok_shim_ctx = if use_grok_compat {"
 if old in text:
@@ -382,15 +180,18 @@ if old in text:
 elif new not in text:
     raise SystemExit("missing anchor: request Grok adapter gate")
 
-cache_call = (
+# ---- optional Grok Free cache companion -----------------------------------
+cache_call_marker = (
+    "crate::mapper::sub2api_grok_compat::apply_sub2api_grok_free_cache_compat"
+)
+cache_assignment = (
     "        let body = crate::mapper::sub2api_grok_compat::"
     "apply_sub2api_grok_free_cache_compat(body, provider);\n"
 )
-if cache_call not in text:
-    # Migrate old unqualified call first.
+if cache_call_marker not in text:
     old_call = "        let body = apply_sub2api_grok_free_cache_compat(body, provider);\n"
     if old_call in text:
-        text = text.replace(old_call, f"        {HOOK}\n" + cache_call, 1)
+        text = text.replace(old_call, f"        {HOOK}\n" + cache_assignment, 1)
     else:
         observe_comment = "        // [MOC-234] 只读观测整合"
         idx_comment = text.find(observe_comment)
@@ -401,19 +202,36 @@ if cache_call not in text:
         if block_end < 0:
             raise SystemExit("missing anchor: Grok body adapter closing block")
         insert_at = block_end + len("        };\n")
-        text = text[:insert_at] + f"        {HOOK}\n" + cache_call + text[insert_at:]
+        text = text[:insert_at] + f"        {HOOK}\n" + cache_assignment + text[insert_at:]
     print("[ok] Free cache body routing: applied")
 else:
     print("[ok] Free cache body routing: already applied")
 
-old = "if crate::mapper::grok_build::is_grok_build_provider(provider) {"
-new = "if crate::mapper::sub2api_grok_compat::should_use_grok_compat(provider, &request_plan.body) {"
-legacy = "if should_use_grok_compat(provider, &request_plan.body) {"
-if legacy in text:
-    text = text.replace(legacy, new, 1)
-elif old in text:
-    text = text.replace(old, new, 1)
-elif new not in text:
+cache_assignment_re = re.compile(
+    r"(?m)^[ \t]*let body\s*=\s*"
+    r"crate::mapper::sub2api_grok_compat::apply_sub2api_grok_free_cache_compat"
+    r"\(\s*body\s*,\s*provider\s*,?\s*\);[ \t]*\n?"
+)
+text = dedupe_regex(text, cache_assignment_re, "Free cache body routing")
+
+# ---- response-side tool-call shim gate ------------------------------------
+response_call_marker = (
+    "crate::mapper::sub2api_grok_compat::should_use_grok_compat"
+    "(provider, &request_plan.body)"
+)
+legacy_response_gate = "if should_use_grok_compat(provider, &request_plan.body) {"
+upstream_response_gate = (
+    "if crate::mapper::grok_build::is_grok_build_provider(provider) {"
+)
+qualified_response_gate = f"if {response_call_marker} {{"
+
+if legacy_response_gate in text:
+    text = text.replace(legacy_response_gate, qualified_response_gate, 1)
+elif response_call_marker in text:
+    pass
+elif upstream_response_gate in text:
+    text = text.replace(upstream_response_gate, qualified_response_gate, 1)
+else:
     raise SystemExit("missing anchor: response Grok shim gate")
 
 RESPONSES.write_text(text, encoding="utf-8")

@@ -20,8 +20,6 @@ permissions:
 
 jobs:
   patch-and-test:
-    # Avoid only this generator re-running on its own generated source commit.
-    # The Windows build is still allowed to run for generated commits.
     if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[compat-generated]') }}
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +38,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: x86_64-pc-windows-msvc
 
       - uses: actions/setup-node@v4
         with:
@@ -56,8 +55,14 @@ jobs:
       - name: Build frontend (TypeScript + Vite)
         run: npm --prefix frontend run build
 
-      - name: Check Tauri backend
-        run: cargo check -p codex-app-transfer
+      - name: Check Tauri backend for Windows
+        shell: bash
+        run: |
+          set +e
+          cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc > /tmp/cargo-check.log 2>&1
+          code=$?
+          tail -120 /tmp/cargo-check.log
+          exit $code
 
       - name: Test adapters
         run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture

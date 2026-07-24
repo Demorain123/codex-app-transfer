@@ -11,6 +11,8 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
   pull_request:
@@ -21,6 +23,8 @@ on:
       - 'scripts/sub2api_grok_compat_overlay.rs'
       - 'scripts/apply_sub2api_grok_compat_ui.py'
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
       - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
 
@@ -46,6 +50,8 @@ jobs:
           cp scripts/sub2api_grok_compat_overlay.rs "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui.py "$tmp/"
           cp scripts/apply_sub2api_grok_compat_ui_dispatch.py "$tmp/"
+          cp scripts/apply_sub2api_grok_compat_revision.py "$tmp/"
+          cp SUB2API_GROK_COMPAT_REVISION.txt "$tmp/"
 
           # Candidate branches created by the sync script carry the exact upstream
           # commit in line 2. The long-lived compat branch falls back to fork main.
@@ -67,11 +73,15 @@ jobs:
           cp "$tmp/sub2api_grok_compat_overlay.rs" scripts/
           cp "$tmp/apply_sub2api_grok_compat_ui.py" scripts/
           cp "$tmp/apply_sub2api_grok_compat_ui_dispatch.py" scripts/
+          cp "$tmp/apply_sub2api_grok_compat_revision.py" scripts/
+          cp "$tmp/SUB2API_GROK_COMPAT_REVISION.txt" ./
 
           python3 scripts/apply_sub2api_grok_compat.py
           python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+          python3 scripts/apply_sub2api_grok_compat_revision.py
 
           echo "Pristine base SHA: $base_sha"
+          cat SUB2API_GROK_COMPAT_VERSION.txt
           git status --short
 
       - name: Install Rust
@@ -106,6 +116,7 @@ jobs:
             echo '=== second application ==='
             python3 scripts/apply_sub2api_grok_compat.py
             python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+            python3 scripts/apply_sub2api_grok_compat_revision.py
             cargo fmt --all
             git diff --check
             git diff --binary > /tmp/overlay-second.diff

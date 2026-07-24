@@ -89,42 +89,54 @@ jobs:
       - name: Format and verify overlay idempotence
         shell: bash
         run: |
-          set -euo pipefail
-          cargo fmt --all
-          git diff --check
-          git diff --binary > /tmp/overlay-first.diff
+          log="$GITHUB_WORKSPACE/overlay-idempotence.log"
+          rm -f "$GITHUB_WORKSPACE/overlay-idempotence.diff"
+          set +e
+          (
+            set -euo pipefail
+            echo '=== first application: rustfmt + diff ==='
+            cargo fmt --all
+            git diff --check
+            git diff --binary > /tmp/overlay-first.diff
 
-          # Reapplying the overlay must be a no-op after formatting. This catches
-          # patchers that duplicate hooks/fields on future upstream versions.
-          python3 scripts/apply_sub2api_grok_compat.py
-          python3 scripts/apply_sub2api_grok_compat_ui.py
-          cargo fmt --all
-          git diff --check
-          git diff --binary > /tmp/overlay-second.diff
+            echo '=== second application ==='
+            python3 scripts/apply_sub2api_grok_compat.py
+            python3 scripts/apply_sub2api_grok_compat_ui.py
+            cargo fmt --all
+            git diff --check
+            git diff --binary > /tmp/overlay-second.diff
 
-          if ! cmp -s /tmp/overlay-first.diff /tmp/overlay-second.diff; then
-            echo '::error::Overlay patchers are not idempotent.'
-            {
-              echo '=== unified diff: first application vs second application ==='
-              diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff || true
-              echo
-              echo '=== git status after second application ==='
-              git status --short
-              echo
-              echo '=== git diff --stat after second application ==='
-              git diff --stat
-            } > "$GITHUB_WORKSPACE/overlay-idempotence.diff"
-            cat "$GITHUB_WORKSPACE/overlay-idempotence.diff" || true
-            exit 1
-          fi
+            echo '=== compare ==='
+            if ! cmp -s /tmp/overlay-first.diff /tmp/overlay-second.diff; then
+              echo 'Overlay patchers are not idempotent.'
+              {
+                echo '=== unified diff: first application vs second application ==='
+                diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff || true
+                echo
+                echo '=== git status after second application ==='
+                git status --short
+                echo
+                echo '=== git diff --stat after second application ==='
+                git diff --stat
+              } > "$GITHUB_WORKSPACE/overlay-idempotence.diff"
+              exit 1
+            fi
+            echo 'Overlay patchers are idempotent after rustfmt.'
+          ) > "$log" 2>&1
+          rc=$?
+          set -e
+          cat "$log"
+          exit "$rc"
 
       - name: Upload overlay idempotence diagnostic
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: overlay-idempotence-failure
-          path: overlay-idempotence.diff
-          if-no-files-found: ignore
+          path: |
+            overlay-idempotence.log
+            overlay-idempotence.diff
+          if-no-files-found: error
           retention-days: 7
 
       - name: Build frontend from pristine upstream + overlay

@@ -18,7 +18,7 @@ jobs:
           ref: sub2api-grok-compat-r14
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
 

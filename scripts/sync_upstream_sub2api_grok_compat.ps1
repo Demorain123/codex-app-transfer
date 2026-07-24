@@ -44,6 +44,34 @@ function Resolve-Python {
     throw 'Python 3 was not found. Install Python 3 or make python/py available in PATH.'
 }
 
+function Resolve-UpstreamGitRef {
+    param(
+        [Parameter(Mandatory)][string]$Remote,
+        [Parameter(Mandatory)][string]$RequestedRef
+    )
+
+    # Prefer an explicit remote branch when both a branch and tag share a name.
+    $remoteBranch = "refs/remotes/$Remote/$RequestedRef"
+    & git show-ref --verify --quiet $remoteBranch
+    if ($LASTEXITCODE -eq 0) {
+        return "$Remote/$RequestedRef"
+    }
+
+    $tagRef = "refs/tags/$RequestedRef"
+    & git show-ref --verify --quiet $tagRef
+    if ($LASTEXITCODE -eq 0) {
+        return $tagRef
+    }
+
+    # Finally accept an explicit commit-ish/SHA fetched into the repository.
+    & git rev-parse --verify --quiet "$RequestedRef^{commit}" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        return $RequestedRef
+    }
+
+    throw "Could not resolve upstream ref '$RequestedRef' as $Remote branch, tag, or commit SHA."
+}
+
 $repoRoot = (git rev-parse --show-toplevel).Trim()
 if (-not $repoRoot) { throw 'Could not determine repository root.' }
 Set-Location $repoRoot
@@ -103,8 +131,12 @@ try {
     }
 
     Invoke-Checked -Command git -Arguments @('fetch', $RemoteName, '--prune', '--tags')
-    $baseRef = "$RemoteName/$UpstreamRef"
-    Invoke-Checked -Command git -Arguments @('rev-parse', '--verify', $baseRef)
+    $baseRef = Resolve-UpstreamGitRef -Remote $RemoteName -RequestedRef $UpstreamRef
+    $baseSha = (git rev-parse "$baseRef^{commit}").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $baseSha) {
+        throw "Could not resolve commit for upstream base: $baseRef"
+    }
+    Write-Host "Resolved base   : $baseRef @ $baseSha"
 
     # Refuse to overwrite any existing branch. A sync must always create a fresh,
     # reviewable candidate so the currently working compat build remains intact.
@@ -113,7 +145,7 @@ try {
         throw "Branch already exists: $NewBranch. Choose another -NewBranch."
     }
 
-    Invoke-Checked -Command git -Arguments @('switch', '--create', $NewBranch, $baseRef)
+    Invoke-Checked -Command git -Arguments @('switch', '--create', $NewBranch, $baseSha)
 
     foreach ($asset in $assets) {
         $src = Join-Path $temp $asset
@@ -136,7 +168,6 @@ try {
         Invoke-Checked -Command cargo -Arguments @('test', '-p', 'codex-app-transfer-adapters', '--lib', '--', '--nocapture')
     }
 
-    $baseSha = (git rev-parse $baseRef).Trim()
     Set-Content -LiteralPath 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt' -Value "$baseRef`n$baseSha`n" -Encoding utf8NoBOM
 
     Invoke-Checked -Command git -Arguments @('add', '-A')

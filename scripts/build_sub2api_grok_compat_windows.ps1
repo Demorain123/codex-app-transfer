@@ -87,8 +87,8 @@ Invoke-Checked npm '--prefix' 'frontend' 'ci'
 Invoke-Checked npm '--prefix' 'frontend' 'run' 'build'
 
 if (-not $SkipTests) {
-    Write-Host "`nRunning Sub2API Grok compatibility tests..." -ForegroundColor Green
-    Invoke-Checked cargo 'test' '-p' 'codex-app-transfer-adapters' 'sub2api_grok_compat' '--' '--nocapture'
+    Write-Host "`nRunning all adapter regression tests..." -ForegroundColor Green
+    Invoke-Checked cargo 'test' '-p' 'codex-app-transfer-adapters' '--lib' '--' '--nocapture'
 }
 else {
     Write-Host "`nSkipping tests because -SkipTests was specified." -ForegroundColor Yellow

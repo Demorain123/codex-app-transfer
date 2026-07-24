@@ -2,6 +2,7 @@ from pathlib import Path
 import runpy
 
 LEGACY_PATCHER = Path("scripts/apply_sub2api_grok_compat_ui.py")
+CATALOG_PRESERVE_PATCHER = Path("scripts/apply_sub2api_grok_catalog_preserve.py")
 
 
 def contains(path: str, *needles: str) -> bool:
@@ -75,6 +76,24 @@ def overlay_complete() -> bool:
     )
 
 
+def catalog_preserve_complete() -> bool:
+    return all(
+        [
+            contains(
+                "src-tauri/src/admin/services/desktop/snapshot.rs",
+                "preserve_external_model_catalog",
+                'get("sub2apiGrokCompat")',
+            ),
+            contains(
+                "crates/codex_integration/src/apply.rs",
+                "pub preserve_external_model_catalog: bool",
+                "if preserve_external_model_catalog {",
+                "Leave both model_catalog_json and model_context_window untouched",
+            ),
+        ]
+    )
+
+
 if overlay_complete():
     print("[ok] Sub2API Grok UI/backend overlay already complete; no-op")
 else:
@@ -88,3 +107,13 @@ else:
             "upstream source likely changed and needs a reviewed anchor update"
         )
     print("[ok] Sub2API Grok UI/backend overlay installed and verified")
+
+# Always enforce this invariant. It fixes an upstream catalog-management behavior
+# that is undesirable specifically for the Sub2API mixed-model wire-shim use case:
+# Transfer must not delete/replace a user-owned Codex model_catalog_json.
+if not CATALOG_PRESERVE_PATCHER.is_file():
+    raise SystemExit(f"missing catalog preservation patcher: {CATALOG_PRESERVE_PATCHER}")
+runpy.run_path(str(CATALOG_PRESERVE_PATCHER), run_name="__main__")
+if not catalog_preserve_complete():
+    raise SystemExit("catalog preservation overlay did not produce the required source invariants")
+print("[ok] external Codex model catalog preservation installed and verified")

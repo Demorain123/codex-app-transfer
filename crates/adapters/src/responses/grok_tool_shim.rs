@@ -502,10 +502,99 @@ fn generic_custom_input(args_acc: &str) -> String {
 
 /// tool_search args 字符串 → Codex `ToolSearchCall.arguments` 期望的 JSON object(parse 失败 fallback
 /// `{"raw": ...}`,让 Codex 端可 log 模型意图而非静默 drop)。
+// CAS-SUB2API-GROK-TOOLSEARCH-ARGS-HOOK
+// Grok's function-call decoder is not constrained by Codex's native tool_search
+// grammar. In real traffic it can emit a query with a non-usize `limit` (float,
+// numeric string, negative, etc.). Codex deserializes ToolSearchCall.arguments
+// into SearchToolCallParams before dispatch and rejects the whole call with
+// `failed to parse tool_search arguments: ...`. Keep the repair local to the
+// Grok shim: native GPT/Luna Responses traffic remains byte-for-byte passthrough.
+fn normalize_grok_tool_search_call_arguments(args: Value) -> Value {
+    let mut obj = match args {
+        Value::Object(obj) => obj,
+        Value::String(query) => return json!({ "query": query }),
+        other => {
+            tracing::warn!(
+                target: "adapters::grok_tool_search",
+                raw = %other,
+                "Grok tool_search arguments were not an object; coercing to a query string"
+            );
+            return json!({ "query": other.to_string() });
+        }
+    };
+
+    let before = Value::Object(obj.clone());
+
+    // Codex SearchToolCallParams requires query: String. Preserve normal strings;
+    // for malformed scalar/container values stringify rather than surfacing a
+    // deserialization failure. Missing query may come from our JSON-parse fallback
+    // (`raw`) or a legacy redirect (`server`).
+    let query = match obj.get("query").cloned() {
+        Some(Value::String(query)) => query,
+        Some(Value::Null) | None => obj
+            .get("raw")
+            .and_then(Value::as_str)
+            .or_else(|| obj.get("server").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_owned(),
+        Some(other) => other.to_string(),
+    };
+    obj.insert("query".into(), Value::String(query));
+    obj.remove("raw");
+    obj.remove("server");
+
+    // `limit` is optional in Codex. A malformed value should therefore be
+    // dropped so Codex uses its own default rather than failing the tool call.
+    if let Some(limit) = obj.get("limit").cloned() {
+        let parsed = match limit {
+            Value::Number(n) => n.as_u64().or_else(|| {
+                n.as_f64().and_then(|f| {
+                    (f.is_finite() && f >= 1.0 && f.fract() == 0.0 && f <= u64::MAX as f64)
+                        .then_some(f as u64)
+                })
+            }),
+            Value::String(s) => s.trim().parse::<u64>().ok(),
+            _ => None,
+        }
+        .filter(|n| *n > 0)
+        .filter(|n| usize::try_from(*n).is_ok());
+
+        match parsed {
+            Some(n) => {
+                obj.insert("limit".into(), Value::Number(n.into()));
+            }
+            None => {
+                obj.remove("limit");
+            }
+        }
+    }
+
+    let after = Value::Object(obj);
+    if after != before {
+        tracing::warn!(
+            target: "adapters::grok_tool_search",
+            before = %before,
+            after = %after,
+            "normalized Grok tool_search arguments for Codex"
+        );
+    }
+    after
+}
+
 fn parse_tool_search_arguments(args_acc: &str) -> Value {
-    let v: Value =
-        serde_json::from_str(args_acc).unwrap_or_else(|_| json!({ "raw": args_acc.to_owned() }));
-    normalize_tool_search_arguments(v)
+    let parsed: Value = match serde_json::from_str(args_acc) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(
+                target: "adapters::grok_tool_search",
+                raw = %args_acc,
+                %error,
+                "Grok emitted invalid JSON for tool_search; preserving it as a searchable query"
+            );
+            json!({ "raw": args_acc.to_owned() })
+        }
+    };
+    normalize_grok_tool_search_call_arguments(normalize_tool_search_arguments(parsed))
 }
 
 fn find_double_newline(buf: &[u8]) -> Option<usize> {
@@ -747,6 +836,25 @@ mod tests {
         assert_eq!(done["status"], "completed");
         assert_eq!(done["arguments"]["query"], "notion");
         assert_eq!(seqs(&frames), vec![0, 1]);
+    }
+
+    #[test]
+    fn tool_search_malformed_numeric_limit_is_repaired_before_codex() {
+        let args = normalize_grok_tool_search_call_arguments(json!({
+            "query": "ask_user_questions",
+            "limit": 2.5
+        }));
+        assert_eq!(args["query"], "ask_user_questions");
+        assert!(
+            args.get("limit").is_none(),
+            "non-integer limit must fall back to Codex default"
+        );
+
+        let numeric_string = normalize_grok_tool_search_call_arguments(json!({
+            "query": "auq",
+            "limit": "8"
+        }));
+        assert_eq!(numeric_string["limit"], 8);
     }
 
     #[test]

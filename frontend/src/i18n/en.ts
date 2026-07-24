@@ -1,6 +1,6 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r9 · v2.4.5+9",
+  "compat.buildBadge": "Sub2API Grok Compat r10 · v2.4.5+10",
   "providerForm.grokCompatSection": "Sub2API · Grok Compatibility",
   "providerForm.grokCompat": "Grok MCP / Tools compatibility",
   "providerForm.grokCompatHint": "Enable Codex custom / namespace / tool_search compatibility only for grok-* Responses requests; Luna / GPT remain native passthrough.",

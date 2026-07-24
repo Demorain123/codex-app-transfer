@@ -18,6 +18,7 @@ on:
       - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
+      - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -39,6 +40,7 @@ on:
       - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
+      - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -75,6 +77,7 @@ jobs:
           python scripts/apply_sub2api_grok_replay_compat.py
           python scripts/apply_sub2api_grok_terminal_compat.py
           python scripts/apply_sub2api_openai_codex_identity.py
+          python scripts/apply_sub2api_subagent_retry_diag.py
           python scripts/apply_sub2api_grok_compat_revision.py
 
           grep -F "v-if=\"form.apiFormat === 'responses'\"" \
@@ -88,6 +91,8 @@ jobs:
           grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-REPLAY-SCHEMA-HOOK' crates/adapters/src/mapper/grok_build.rs
           grep -F -q 'CAS-SUB2API-OPENAI-CODEX-IDENTITY-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-INJECT' crates/proxy/src/forward.rs
 
       - name: Resolve visible compat version
         id: compat-version

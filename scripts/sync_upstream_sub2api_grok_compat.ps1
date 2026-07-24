@@ -101,12 +101,14 @@ $assets = @(
     'scripts/sub2api_grok_compat_overlay.rs',
     'scripts/apply_sub2api_grok_compat_ui.py',
     'scripts/apply_sub2api_grok_compat_ui_dispatch.py',
+    'scripts/apply_sub2api_grok_compat_revision.py',
     'scripts/migrate_sub2api_grok_ui_to_overlay.py',
     'scripts/build_sub2api_grok_compat_windows.ps1',
     'scripts/sync_upstream_sub2api_grok_compat.ps1',
     '.github/workflows/apply-sub2api-grok-compat.yml',
     '.github/workflows/build-sub2api-grok-compat-windows.yml',
     '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml',
+    'SUB2API_GROK_COMPAT_REVISION.txt',
     'SUB2API_GROK_COMPAT.md'
 )
 
@@ -159,6 +161,7 @@ try {
     Write-Host "`nApplying isolated overlay..." -ForegroundColor Green
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat.py'))
     Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_ui_dispatch.py'))
+    Invoke-Checked -Command $python.Command -Arguments (@($python.Prefix) + @('scripts/apply_sub2api_grok_compat_revision.py'))
     Invoke-Checked -Command cargo -Arguments @('fmt', '--all')
 
     if (-not $SkipFrontend) {

@@ -106,10 +106,6 @@ pub struct ApplyConfig<'a> {
     /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user-owned model_catalog_json.
     #[serde(default)]
     pub preserve_external_model_catalog: bool,
-    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user sandbox/approval policy when
-    /// the Transfer-specific network-access override is disabled.
-    #[serde(default)]
-    pub preserve_user_sandbox_policy: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -219,7 +215,7 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
             "network_access",
             None,
         )?;
-    } else if !cfg.preserve_user_sandbox_policy {
+    } else {
         sync_root_value(&paths.config_toml, "sandbox_mode", None)?;
         sync_root_value(&paths.config_toml, "approval_policy", None)?;
         sync_table_field(

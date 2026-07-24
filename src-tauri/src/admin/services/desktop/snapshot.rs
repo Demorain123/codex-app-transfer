@@ -49,9 +49,6 @@ pub struct DesktopConfigTarget {
     pub is_qoder: bool,
     /// CAS-SUB2API-GROK-COMPAT-HOOK: keep an existing external Codex model catalog.
     pub preserve_external_model_catalog: bool,
-    /// CAS-SUB2API-GROK-COMPAT-HOOK: when Transfer network access is off,
-    /// keep the user's existing sandbox/approval policy unchanged.
-    pub preserve_user_sandbox_policy: bool,
 }
 
 /// [MOC-69] 给 antigravity provider 构建 model id → displayName 反查表(JSON object),
@@ -200,11 +197,6 @@ pub fn desktop_config_target_for_provider(
                 .get("sub2apiGrokCompat")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-        preserve_user_sandbox_policy: api_format_lower == "responses"
-            && provider
-                .get("sub2apiGrokCompat")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
     }
 }
 
@@ -297,7 +289,6 @@ fn apply_desktop_target_impl(
             preserve_chatgpt_auth,
             // CAS-SUB2API-GROK-COMPAT-HOOK
             preserve_external_model_catalog: target.preserve_external_model_catalog,
-            preserve_user_sandbox_policy: target.preserve_user_sandbox_policy,
         },
     )
     .map_err(|e| format!("apply 失败: {e}"))?;

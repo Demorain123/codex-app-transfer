@@ -13,6 +13,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
@@ -27,6 +28,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
@@ -55,6 +57,7 @@ jobs:
           cp scripts/apply_sub2api_grok_compat_ui_dispatch.py "$tmp/"
           cp scripts/apply_sub2api_grok_gateway_auth.py "$tmp/"
           cp scripts/apply_sub2api_grok_replay_compat.py "$tmp/"
+          cp scripts/apply_sub2api_openai_codex_identity.py "$tmp/"
           cp scripts/apply_sub2api_grok_compat_revision.py "$tmp/"
           cp SUB2API_GROK_COMPAT_REVISION.txt "$tmp/"
 
@@ -78,6 +81,7 @@ jobs:
           cp "$tmp/apply_sub2api_grok_compat_ui_dispatch.py" scripts/
           cp "$tmp/apply_sub2api_grok_gateway_auth.py" scripts/
           cp "$tmp/apply_sub2api_grok_replay_compat.py" scripts/
+          cp "$tmp/apply_sub2api_openai_codex_identity.py" scripts/
           cp "$tmp/apply_sub2api_grok_compat_revision.py" scripts/
           cp "$tmp/SUB2API_GROK_COMPAT_REVISION.txt" ./
 
@@ -85,6 +89,7 @@ jobs:
           python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
           python3 scripts/apply_sub2api_grok_gateway_auth.py
           python3 scripts/apply_sub2api_grok_replay_compat.py
+          python3 scripts/apply_sub2api_openai_codex_identity.py
           python3 scripts/apply_sub2api_grok_compat_revision.py
 
           echo "Pristine base SHA: $base_sha"
@@ -125,6 +130,7 @@ jobs:
             python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
             python3 scripts/apply_sub2api_grok_gateway_auth.py
             python3 scripts/apply_sub2api_grok_replay_compat.py
+            python3 scripts/apply_sub2api_openai_codex_identity.py
             python3 scripts/apply_sub2api_grok_compat_revision.py
             cargo fmt --all
             git diff --check

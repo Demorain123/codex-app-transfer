@@ -29,6 +29,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Thin-overlay build: Sub2API-specific runtime/UI logic lives in isolated
+  # overlay modules; upstream core files contain only small hook points.
   SUB2API_GROK_COMPAT_BUILD_REV: overlay-v1
 
 jobs:

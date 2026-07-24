@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - sub2api-grok-compat
+      - 'sub2api-grok-compat-next-*'
     paths:
       - 'crates/**'
       - 'src-tauri/**'
@@ -28,7 +29,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  SUB2API_GROK_COMPAT_BUILD_REV: ui-v1
+  SUB2API_GROK_COMPAT_BUILD_REV: overlay-v1
 
 jobs:
   build-windows:
@@ -36,7 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: sub2api-grok-compat
+          # Build the exact commit that triggered the workflow. This is critical
+          # for future `sub2api-grok-compat-next-*` upstream-sync candidates.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -72,8 +75,8 @@ jobs:
           npm --prefix frontend ci
           npm --prefix frontend run build
 
-      - name: Test Sub2API Grok compatibility patch
-        run: cargo test -p codex-app-transfer-adapters sub2api_grok_compat -- --nocapture
+      - name: Test all adapter regressions
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
 
       - name: Build Windows NSIS + MSI
         working-directory: src-tauri
@@ -104,7 +107,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sub2api-grok-compat-windows-x64-ui-v1
+          name: sub2api-grok-compat-windows-x64-overlay-v1
           path: staging/*
           if-no-files-found: error
           retention-days: 30

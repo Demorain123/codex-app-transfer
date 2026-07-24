@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sub2api-grok-compat
+      - 'sub2api-grok-compat-next-*'
   pull_request:
     branches:
       - main
@@ -26,7 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'sub2api-grok-compat' }}
+          # Never silently validate a different branch. This makes upstream-sync
+          # candidate branches safe and reviewable.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Apply Responses compat overlay
@@ -139,4 +142,4 @@ jobs:
             frontend/src/i18n/zh.ts \
             frontend/src/i18n/en.ts
           git commit -m "refactor: apply thin Sub2API Grok compat overlay [compat-generated]"
-          git push origin HEAD:sub2api-grok-compat
+          git push origin "HEAD:${GITHUB_REF_NAME}"

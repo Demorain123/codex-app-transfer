@@ -18,6 +18,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  SUB2API_GROK_COMPAT_BUILD_REV: cache-v2
 
 jobs:
   build-windows:

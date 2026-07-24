@@ -20,6 +20,7 @@ on:
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
@@ -61,6 +62,9 @@ jobs:
 
       - name: Apply Grok terminal completion compat overlay
         run: python3 scripts/apply_sub2api_grok_terminal_compat.py
+
+      - name: Apply Grok apply_patch r16 structural recovery overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
 
       - name: Apply Sub2API OpenAI official-Codex identity overlay
         run: python3 scripts/apply_sub2api_openai_codex_identity.py

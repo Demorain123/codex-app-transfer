@@ -97,7 +97,14 @@ jobs:
           cargo fmt --all
           git diff --check
           git diff --binary > /tmp/overlay-second.diff
-          cmp /tmp/overlay-first.diff /tmp/overlay-second.diff
+
+          if ! cmp -s /tmp/overlay-first.diff /tmp/overlay-second.diff; then
+            echo '::error::Overlay patchers are not idempotent.'
+            echo '::group::Difference between first and second application'
+            diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff || true
+            echo '::endgroup::'
+            exit 1
+          fi
 
       - name: Build frontend from pristine upstream + overlay
         shell: bash

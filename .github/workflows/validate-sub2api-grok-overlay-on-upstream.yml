@@ -21,6 +21,7 @@ on:
       - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
+      - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
@@ -44,6 +45,7 @@ on:
       - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
+      - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
@@ -83,6 +85,7 @@ jobs:
             scripts/apply_sub2api_grok_apply_patch_r17_review2.py
             scripts/apply_sub2api_openai_codex_identity.py
             scripts/apply_sub2api_subagent_retry_diag.py
+            scripts/apply_sub2api_stream_retry_diag.py
             scripts/apply_sub2api_grok_compat_revision.py
             SUB2API_GROK_COMPAT_REVISION.txt
           )
@@ -152,8 +155,11 @@ jobs:
       - name: Apply OpenAI official-Codex identity overlay on pristine upstream
         run: python3 scripts/apply_sub2api_openai_codex_identity.py
 
-      - name: Apply subagent retry diagnostic overlay on pristine upstream
+      - name: Apply parent/child retry diagnostic overlay on pristine upstream
         run: python3 scripts/apply_sub2api_subagent_retry_diag.py
+
+      - name: Apply r19 stream retry diagnostic overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_stream_retry_diag.py
 
       - name: Apply visible compat revision on pristine upstream
         run: python3 scripts/apply_sub2api_grok_compat_revision.py
@@ -173,6 +179,9 @@ jobs:
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT' crates/adapters/src/responses/request/tools.rs
           grep -F -q 'CAS-SUB2API-OPENAI-CODEX-IDENTITY-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-RETRY-RUNTIME-DIAG-R18-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL' crates/proxy/src/forward.rs
           echo "Pristine base SHA: $PRISTINE_BASE_SHA"
           cat SUB2API_GROK_COMPAT_VERSION.txt
           git status --short
@@ -214,6 +223,7 @@ jobs:
               python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
               python3 scripts/apply_sub2api_openai_codex_identity.py
               python3 scripts/apply_sub2api_subagent_retry_diag.py
+              python3 scripts/apply_sub2api_stream_retry_diag.py
               python3 scripts/apply_sub2api_grok_compat_revision.py
             }
 

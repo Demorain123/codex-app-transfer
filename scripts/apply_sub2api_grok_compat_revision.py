@@ -61,7 +61,12 @@ write(path, text)
 # or partially-generated builds much harder to diagnose.
 path = "frontend/src/components/provider/ProviderFormModal.vue"
 text = read(path)
-# Remove legacy/computed visibility declarations if present.
+# Remove historical/computed visibility declarations if present. The first-install
+# UI overlay on a pristine official checkout still emits the original multiline
+# `isCustomProvider && apiFormat === responses` computed gate; already-generated
+# compat branches may instead contain one of the later one-line forms. Revision
+# normalization must accept all of them so the complete overlay stack is replayable
+# directly from pristine upstream before any intermediate rustfmt/build step.
 text = re.sub(
     r"\n//[^\n]*Responses provider[^\n]*\n(?://[^\n]*\n){0,3}const\s+showSub2apiGrokCompat\s*=\s*computed\([^\n]*\)\n",
     "\n",
@@ -70,6 +75,26 @@ text = re.sub(
 )
 text = re.sub(
     r"\nconst\s+showSub2apiGrokCompat\s*=\s*computed\(\(\)\s*=>\s*form\.apiFormat\s*===\s*'responses'\)\n",
+    "\n",
+    text,
+    count=1,
+)
+text = re.sub(
+    r"\n//\s*CAS-SUB2API-GROK-COMPAT-HOOK:[^\n]*\n"
+    r"const\s+showSub2apiGrokCompat\s*=\s*computed\(\s*\n"
+    r"\s*\(\)\s*=>\s*isCustomProvider\.value\s*&&\s*form\.apiFormat\s*===\s*'responses',?\s*\n"
+    r"\s*\)\s*\n",
+    "\n",
+    text,
+    count=1,
+)
+# Defensive fallback for the same multiline computed gate if an older UI overlay
+# omitted or reworded the preceding comment. Keep the pattern intentionally narrow
+# to this exact variable and `isCustomProvider && apiFormat` expression.
+text = re.sub(
+    r"\nconst\s+showSub2apiGrokCompat\s*=\s*computed\(\s*\n"
+    r"\s*\(\)\s*=>\s*isCustomProvider\.value\s*&&\s*form\.apiFormat\s*===\s*'responses',?\s*\n"
+    r"\s*\)\s*\n",
     "\n",
     text,
     count=1,

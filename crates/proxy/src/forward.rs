@@ -462,11 +462,14 @@ mod sub2api_codex_identity_tests {
 /// stream shape used by Codex's own `stream_no_completed` regression test. The
 /// body then reaches EOF, which should be surfaced as a retryable stream
 /// disconnect before completion.
-fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, ForwardError> {
+fn sub2api_stream_retry_diag_sse_body() -> String {
     let event = serde_json::json!({
         "type": "response.output_item.done"
     });
-    let body = format!("data: {event}\\n\\n");
+    format!("data: {event}\n\n")
+}
+
+fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, ForwardError> {
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
@@ -475,12 +478,21 @@ fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, Forwa
             "x-cas-retry-diag",
             "incomplete-sse-before-response-completed",
         )
-        .body(Body::from(body))?)
+        .body(Body::from(sub2api_stream_retry_diag_sse_body()))?)
 }
 
 #[cfg(test)]
 mod sub2api_stream_retry_diag_r19_tests {
     use super::*;
+
+    #[test]
+    fn synthetic_sse_body_uses_real_event_delimiter_and_never_completes() {
+        let body = sub2api_stream_retry_diag_sse_body();
+        assert!(body.starts_with("data: {"));
+        assert!(body.ends_with("\n\n"));
+        assert!(!body.contains("response.completed"));
+        assert!(!body.contains("\\n"));
+    }
 
     #[test]
     fn synthetic_stream_response_is_http_200_event_stream() {
@@ -1064,7 +1076,32 @@ pub async fn forward_handler(
     }
 
     let original_model = body_model(&body_bytes);
-    let resolved = state.resolver.resolve(&parts, &body_bytes)?;
+    let resolved = match state.resolver.resolve(&parts, &body_bytes) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            // CAS-MCP-RELAY-DIAG-R20-RESOLVE
+            // The observed "missing or invalid gateway api key" is emitted before normal proxy
+            // telemetry starts. When diagnostics are enabled, record only path + header *names*
+            // and credential-presence booleans so that a resolver failure can be correlated with
+            // the MCP 451 sequence without exposing any header value/body/API key.
+            if forward_trace_enabled() {
+                proxy_telemetry().logs.add(
+                    "WARN",
+                    format!(
+                        "[resolver-diag] method={} path={} auth={} x_api_key={} api_key={} headers=[{}] error={}",
+                        parts.method,
+                        client_path,
+                        parts.headers.contains_key("authorization"),
+                        parts.headers.contains_key("x-api-key"),
+                        parts.headers.contains_key("api-key"),
+                        diagnostic_header_names(&parts.headers),
+                        error,
+                    ),
+                );
+            }
+            return Err(error.into());
+        }
+    };
 
     // 3. 如有 model 重写,改写 body 的 "model" 字段
     if let Some(new_model) = resolved.rewritten_model.as_deref() {
@@ -1540,6 +1577,36 @@ fn is_chatgpt_backend_path(path: &str) -> bool {
     p == "/backend-api" || p.starts_with("/backend-api/")
 }
 
+// CAS-MCP-RELAY-DIAG-R20-HOOK
+// Diagnostic-only helpers for the ChatGPT hosted-MCP relay path. These do not change routing,
+// authentication, or response handling; they only make the already-existing diagnostic trace
+// trustworthy enough to compare what Codex sent with what reqwest was actually prepared to send.
+static MCP_RELAY_DIAG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn is_chatgpt_mcp_backend_path(path: &str) -> bool {
+    let p = path.split('?').next().unwrap_or(path);
+    p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")
+}
+
+fn diagnostic_header_names(headers: &HeaderMap) -> String {
+    let mut names: Vec<String> = headers
+        .keys()
+        .map(|name| name.as_str().to_ascii_lowercase())
+        .collect();
+    names.sort();
+    names.dedup();
+    names.join(",")
+}
+
+fn diagnostic_body_fingerprint(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 /// [MOC-104 relay 诊断] 把 chatgpt backend 请求透传真 chatgpt.com 同 path,逐条 log
 /// path/status/body 摘要。复用 `state.http`(走系统代理 → chatgpt.com 可达);响应整体
 /// buffer 以便 log body(getAccount/plugins 都是小 JSON、非 SSE,buffer 无碍)。
@@ -1560,6 +1627,21 @@ async fn passthrough_chatgpt_backend(
     );
     // [MOC-125] gate 开时先 clone Codex 原始请求体(下面会 move 进 rb),供 passthrough 诊断 trace。
     let trace_inbound = forward_trace_enabled().then(|| body.clone());
+    let mcp_diag_id = (forward_trace_enabled() && is_chatgpt_mcp_backend_path(client_path))
+        .then(|| MCP_RELAY_DIAG_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    if let Some(diag_id) = mcp_diag_id {
+        telemetry.logs.add(
+            "INFO",
+            format!(
+                "[mcp-relay-diag id={diag_id}] inbound method={method} path={client_path} body_bytes={} auth={} cookie={} account={} headers=[{}]",
+                body.len(),
+                headers.contains_key("authorization"),
+                headers.contains_key("cookie"),
+                headers.contains_key("chatgpt-account-id"),
+                diagnostic_header_names(headers),
+            ),
+        );
+    }
 
     // [review M-2] method 解析失败**报错、不降级** —— 把 POST(plugins install 等写操作)
     // 悄悄降级成 GET 是破坏性降级(违反"禁止破坏性降级"硬规则);axum Method 已合法,
@@ -1580,13 +1662,45 @@ async fn passthrough_chatgpt_backend(
         rb = rb.body(body);
     }
 
-    let resp = rb.send().await?;
+    // Build explicitly before execute so diagnostics can snapshot the request headers after all
+    // passthrough copy/strip decisions. This is behavior-equivalent to RequestBuilder::send();
+    // it does not add/remove any application header or alter the target URL/body.
+    let req = rb.build()?;
+    let outbound_headers_snapshot = req.headers().clone();
+    if let Some(diag_id) = mcp_diag_id {
+        telemetry.logs.add(
+            "INFO",
+            format!(
+                "[mcp-relay-diag id={diag_id}] outbound-pre-execute auth={} cookie={} account={} headers=[{}]",
+                outbound_headers_snapshot.contains_key("authorization"),
+                outbound_headers_snapshot.contains_key("cookie"),
+                outbound_headers_snapshot.contains_key("chatgpt-account-id"),
+                diagnostic_header_names(&outbound_headers_snapshot),
+            ),
+        );
+    }
+    let resp = state.http.execute(req).await?;
     let status = resp.status().as_u16();
     let resp_headers = resp.headers().clone();
     // [review H-1] body 读失败**冒泡、不吞** —— `unwrap_or_default()` 会把上游连接 reset /
     // TLS 截断 / 读超时伪装成"成功读到空 200",抹掉根因 + 让诊断日志说假话(本模块存在的
     // 意义就是把 TLS 黑盒变可见)。透传场景上游断连本就该回 502 让 Codex 重试。
     let resp_body = resp.bytes().await.map_err(ForwardError::Upstream)?;
+    if let Some(diag_id) = mcp_diag_id {
+        telemetry.logs.add(
+            if (200..300).contains(&status) { "INFO" } else { "WARN" },
+            format!(
+                "[mcp-relay-diag id={diag_id}] response status={status} body_bytes={} body_fp={:016x} content_type={} headers=[{}]",
+                resp_body.len(),
+                diagnostic_body_fingerprint(&resp_body),
+                resp_headers
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("<none>"),
+                diagnostic_header_names(&resp_headers),
+            ),
+        );
+    }
 
     // [review N-3] 不再 log 响应 body preview —— getAccount/plugin 响应含 account id/email,
     // 落 telemetry 是敏感信息泄漏。只记 status + bytes 足够诊断;Authorization 本就不记。
@@ -1634,11 +1748,11 @@ async fn passthrough_chatgpt_backend(
             inbound_headers: headers,
             inbound_body: tbody.as_ref(),
             upstream_url: &upstream,
-            // [review comment #1] passthrough 不转换协议,trace 的 outbound 段直接复用 inbound
-            // headers/body 作镜像 —— 真实发 chatgpt.com 的请求会再 strip host/accept-encoding、
-            // reqwest 重填 host/content-length(trace 未反映这层)。诊断重点在 inbound cookie +
-            // response set-cookie 的会话连续性,outbound 仅作对照。
-            outbound_headers: headers,
+            // r20 diagnostics: use the actually-built reqwest request header map rather than
+            // mirroring inbound headers. This exposes passthrough copy/strip drift while the
+            // existing trace serializer still masks credential values. Client-level defaults
+            // that reqwest may add at execute time remain outside this snapshot.
+            outbound_headers: &outbound_headers_snapshot,
             outbound_body: tbody.as_ref(),
             status,
             response_headers: &resp_headers,
@@ -4248,6 +4362,31 @@ mod tests {
         assert_eq!(
             build_upstream_url("https://api.openai.com/v1/", "/responses"),
             "https://api.openai.com/v1/responses"
+        );
+    }
+
+    #[test]
+    fn mcp_relay_diag_path_scope_is_narrow() {
+        assert!(is_chatgpt_mcp_backend_path("/backend-api/ps/mcp"));
+        assert!(is_chatgpt_mcp_backend_path(
+            "/backend-api/ps/mcp/.well-known/oauth-protected-resource"
+        ));
+        assert!(is_chatgpt_mcp_backend_path(
+            "/backend-api/ps/mcp?transport=streamable-http"
+        ));
+        assert!(!is_chatgpt_mcp_backend_path("/backend-api/ps/plugins/list"));
+        assert!(!is_chatgpt_mcp_backend_path("/backend-api/f/conversation"));
+    }
+
+    #[test]
+    fn mcp_relay_diag_body_fingerprint_is_stable_without_exposing_body() {
+        assert_eq!(
+            diagnostic_body_fingerprint(b"gateway error"),
+            diagnostic_body_fingerprint(b"gateway error")
+        );
+        assert_ne!(
+            diagnostic_body_fingerprint(b"gateway error"),
+            diagnostic_body_fingerprint(b"other error")
         );
     }
 

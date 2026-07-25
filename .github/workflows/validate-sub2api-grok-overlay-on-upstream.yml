@@ -63,7 +63,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tmp="$(mktemp -d)"
+          tmp="$RUNNER_TEMP/sub2api-grok-overlay-assets"
+          rm -rf "$tmp"
+          mkdir -p "$tmp"
           overlay_assets=(
             scripts/apply_sub2api_grok_compat.py
             scripts/sub2api_grok_compat_overlay.rs
@@ -109,26 +111,51 @@ jobs:
             mkdir -p "$(dirname "$asset")"
             cp "$tmp/$asset" "$asset"
           done
+          echo "PRISTINE_BASE_SHA=$base_sha" >> "$GITHUB_ENV"
 
-          apply_overlay() {
-            python3 scripts/apply_sub2api_grok_compat.py
-            python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
-            python3 scripts/apply_sub2api_grok_gateway_auth.py
-            python3 scripts/apply_sub2api_grok_replay_compat.py
-            python3 scripts/apply_sub2api_grok_terminal_compat.py
-            python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
-            python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
-            python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
-            python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
-            python3 scripts/apply_sub2api_openai_codex_identity.py
-            python3 scripts/apply_sub2api_subagent_retry_diag.py
-            python3 scripts/apply_sub2api_grok_compat_revision.py
-          }
+      # Keep each layer as its own Actions step. When a future upstream change breaks one
+      # anchor, the workflow UI now names the exact failing overlay instead of collapsing
+      # everything into the reset step.
+      - name: Apply Responses compat overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_compat.py
 
-          echo '=== first complete overlay application ==='
-          apply_overlay
+      - name: Apply UI/provider compat overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
 
-          # Make stale/incomplete preservation lists fail here instead of much later in cargo tests.
+      - name: Apply local gateway auth overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_gateway_auth.py
+
+      - name: Apply Grok replay/tool_search overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_replay_compat.py
+
+      - name: Apply Grok terminal completion overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_terminal_compat.py
+
+      - name: Apply Grok apply_patch r16 recovery on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
+
+      - name: Apply Grok apply_patch r17 hardening on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
+
+      - name: Apply Grok apply_patch r17 self-review on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
+
+      - name: Apply Grok apply_patch r17 raw-V4A review on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
+
+      - name: Apply OpenAI official-Codex identity overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_openai_codex_identity.py
+
+      - name: Apply subagent retry diagnostic overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_subagent_retry_diag.py
+
+      - name: Apply visible compat revision on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Verify complete overlay markers after pristine application
+        shell: bash
+        run: |
+          set -euo pipefail
           grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-RECOVERY-R16-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID' crates/adapters/src/responses/grok_tool_shim.rs
@@ -139,8 +166,7 @@ jobs:
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT' crates/adapters/src/responses/request/tools.rs
           grep -F -q 'CAS-SUB2API-OPENAI-CODEX-IDENTITY-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-HOOK' crates/proxy/src/forward.rs
-
-          echo "Pristine base SHA: $base_sha"
+          echo "Pristine base SHA: $PRISTINE_BASE_SHA"
           cat SUB2API_GROK_COMPAT_VERSION.txt
           git status --short
 

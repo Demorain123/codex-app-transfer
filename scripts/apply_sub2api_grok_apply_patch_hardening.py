@@ -7,7 +7,8 @@ behavior, then adds:
 - Add/Update/Delete and body-sentinel regression coverage;
 - privacy-safe apply_patch diagnostics (length/error only, no patch previews);
 - stronger prompt wording that forbids Markdown-style trailing stars on the
-  two V4A envelope sentinels.
+  two V4A envelope sentinels;
+- lower-noise logging for successfully repaired sentinel drift.
 """
 from pathlib import Path
 
@@ -30,6 +31,12 @@ def write(path: Path, text: str) -> None:
     print(f"[ok] patched {path}")
 
 
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if old not in text:
+        raise SystemExit(f"anchor not found: {label}")
+    return text.replace(old, new, 1)
+
+
 # ---------------------------------------------------------------------------
 # 1. Terminal fail-closed identity: response.incomplete/failed must keep the
 #    terminal envelope poisoned even if Grok omits or drifts item/call ids.
@@ -37,28 +44,126 @@ def write(path: Path, text: str) -> None:
 # ---------------------------------------------------------------------------
 text = read(SHIM)
 if SHIM_MARKER not in text:
-    old_sets = '''        let mut interrupted: std::collections::HashSet<String> = std::collections::HashSet::new();\n'''
-    new_sets = f'''        // {SHIM_MARKER}\n        // A failed/incomplete terminal response is a hard safety boundary for apply_patch.\n        // Grok/Sub2API may omit item ids or call ids in the terminal envelope, so tracking only\n        // `item_id` can accidentally let the envelope be rewritten back to status=completed.\n        // Keep three independent identities; any one match is enough to preserve fail-closed.\n        let mut interrupted_indices: std::collections::HashSet<u64> =\n            std::collections::HashSet::new();\n        let mut interrupted_item_ids: std::collections::HashSet<String> =\n            std::collections::HashSet::new();\n        let mut interrupted_call_ids: std::collections::HashSet<String> =\n            std::collections::HashSet::new();\n'''
-    if old_sets not in text:
-        raise SystemExit("anchor not found: terminal interrupted set")
-    text = text.replace(old_sets, new_sets, 1)
+    old_sets = "        let mut interrupted: std::collections::HashSet<String> = std::collections::HashSet::new();\n"
+    new_sets = f'''        // {SHIM_MARKER}
+        // A failed/incomplete terminal response is a hard safety boundary for apply_patch.
+        // Grok/Sub2API may omit item ids or call ids in the terminal envelope, so tracking only
+        // `item_id` can accidentally let the envelope be rewritten back to status=completed.
+        // Keep three independent identities; any one match is enough to preserve fail-closed.
+        let mut interrupted_indices: std::collections::HashSet<u64> =
+            std::collections::HashSet::new();
+        let mut interrupted_item_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut interrupted_call_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+'''
+    text = replace_once(text, old_sets, new_sets, "terminal interrupted set")
 
-    old_insert = '''                if treat_as_interrupted {\n                    interrupted.insert(p.item_id.clone());\n                }\n'''
-    new_insert = '''                if treat_as_interrupted {\n                    interrupted_indices.insert(output_index);\n                    if !p.item_id.is_empty() {\n                        interrupted_item_ids.insert(p.item_id.clone());\n                    }\n                    if !p.call_id.is_empty() {\n                        interrupted_call_ids.insert(p.call_id.clone());\n                    }\n                }\n'''
-    if old_insert not in text:
-        raise SystemExit("anchor not found: terminal interrupted insert")
-    text = text.replace(old_insert, new_insert, 1)
+    old_insert = '''                if treat_as_interrupted {
+                    interrupted.insert(p.item_id.clone());
+                }
+'''
+    new_insert = '''                if treat_as_interrupted {
+                    interrupted_indices.insert(output_index);
+                    if !p.item_id.is_empty() {
+                        interrupted_item_ids.insert(p.item_id.clone());
+                    }
+                    if !p.call_id.is_empty() {
+                        interrupted_call_ids.insert(p.call_id.clone());
+                    }
+                }
+'''
+    text = replace_once(text, old_insert, new_insert, "terminal interrupted insert")
 
-    old_loop = '''            for item in output.iter_mut() {\n                let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);\n                self.rewrite_envelope_item(item);\n                if let Some(id) = id {\n                    if interrupted.contains(&id) {\n                        if let Some(o) = item.as_object_mut() {\n                            o.insert("status".into(), Value::String("incomplete".into()));\n                            // Keep incomplete/failed terminal envelopes fail-closed too.\n                            if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")\n                                && o.get("name").and_then(Value::as_str) == Some("apply_patch")\n                            {\n                                if let Some(input) =\n                                    o.get("input").and_then(Value::as_str).map(str::to_owned)\n                                {\n                                    o.insert(\n                                        "input".into(),\n                                        Value::String(block_incomplete_apply_patch(&input)),\n                                    );\n                                }\n                            }\n                        }\n                    }\n                }\n            }\n'''
-    new_loop = '''            for (terminal_index, item) in output.iter_mut().enumerate() {\n                let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);\n                let call_id = item\n                    .get("call_id")\n                    .and_then(|v| v.as_str())\n                    .map(str::to_owned);\n                self.rewrite_envelope_item(item);\n                let item_was_interrupted = u64::try_from(terminal_index)\n                    .ok()\n                    .is_some_and(|idx| interrupted_indices.contains(&idx))\n                    || id\n                        .as_ref()\n                        .is_some_and(|id| interrupted_item_ids.contains(id))\n                    || call_id\n                        .as_ref()\n                        .is_some_and(|call_id| interrupted_call_ids.contains(call_id));\n                if item_was_interrupted {\n                    if let Some(o) = item.as_object_mut() {\n                        o.insert("status".into(), Value::String("incomplete".into()));\n                        // Keep incomplete/failed terminal envelopes fail-closed too.\n                        if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")\n                            && o.get("name").and_then(Value::as_str) == Some("apply_patch")\n                        {\n                            if let Some(input) =\n                                o.get("input").and_then(Value::as_str).map(str::to_owned)\n                            {\n                                o.insert(\n                                    "input".into(),\n                                    Value::String(block_incomplete_apply_patch(&input)),\n                                );\n                            }\n                        }\n                    }\n                }\n            }\n'''
-    if old_loop not in text:
-        raise SystemExit("anchor not found: terminal envelope loop")
-    text = text.replace(old_loop, new_loop, 1)
+    old_loop = '''            for item in output.iter_mut() {
+                let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                self.rewrite_envelope_item(item);
+                if let Some(id) = id {
+                    if interrupted.contains(&id) {
+                        if let Some(o) = item.as_object_mut() {
+                            o.insert("status".into(), Value::String("incomplete".into()));
+                            // Keep incomplete/failed terminal envelopes fail-closed too.
+                            if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                                && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                            {
+                                if let Some(input) =
+                                    o.get("input").and_then(Value::as_str).map(str::to_owned)
+                                {
+                                    o.insert(
+                                        "input".into(),
+                                        Value::String(block_incomplete_apply_patch(&input)),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+'''
+    new_loop = '''            for (terminal_index, item) in output.iter_mut().enumerate() {
+                let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                self.rewrite_envelope_item(item);
+                let item_was_interrupted = u64::try_from(terminal_index)
+                    .ok()
+                    .is_some_and(|idx| interrupted_indices.contains(&idx))
+                    || id
+                        .as_ref()
+                        .is_some_and(|id| interrupted_item_ids.contains(id))
+                    || call_id
+                        .as_ref()
+                        .is_some_and(|call_id| interrupted_call_ids.contains(call_id));
+                if item_was_interrupted {
+                    if let Some(o) = item.as_object_mut() {
+                        o.insert("status".into(), Value::String("incomplete".into()));
+                        // Keep incomplete/failed terminal envelopes fail-closed too.
+                        if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                            && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                        {
+                            if let Some(input) =
+                                o.get("input").and_then(Value::as_str).map(str::to_owned)
+                            {
+                                o.insert(
+                                    "input".into(),
+                                    Value::String(block_incomplete_apply_patch(&input)),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+'''
+    text = replace_once(text, old_loop, new_loop, "terminal envelope loop")
+
+    # A successful sentinel normalization is expected compatibility work, not a warning.
+    text = replace_once(
+        text,
+        '''        tracing::warn!(
+            target: "adapters::grok_tool_diag",
+            begin_repaired,
+            end_repaired,
+            input_len = input.len(),
+            "repaired Grok Markdown-style V4A envelope sentinel"
+        );
+''',
+        '''        tracing::info!(
+            target: "adapters::grok_tool_diag",
+            begin_repaired,
+            end_repaired,
+            input_len = input.len(),
+            "repaired Grok Markdown-style V4A envelope sentinel"
+        );
+''',
+        "sentinel repair log level",
+    )
 
     # Add regression coverage immediately before the existing completed-terminal test.
-    anchor = '''    #[test]\n    fn completed_terminal_without_output_item_done_recovers_apply_patch() {\n'''
-    if anchor not in text:
-        raise SystemExit("anchor not found: completed terminal regression")
+    anchor = '''    #[test]
+    fn completed_terminal_without_output_item_done_recovers_apply_patch() {
+'''
     tests = r'''    #[test]
     fn grok_markdown_style_v4a_sentinels_are_repaired_for_update_and_delete() {
         let cases = [
@@ -153,7 +258,7 @@ if SHIM_MARKER not in text:
     }
 
 '''
-    text = text.replace(anchor, tests + anchor, 1)
+    text = replace_once(text, anchor, tests + anchor, "completed terminal regression")
     write(SHIM, text)
 else:
     print("[ok] Grok apply_patch r17 terminal/test hardening: already applied")
@@ -162,26 +267,29 @@ else:
 # ---------------------------------------------------------------------------
 # 2. Privacy: the generic apply_patch extractor is used by the Grok shim. On
 #    malformed input it must not log the first 120 characters of user code.
+#    Scope edits to extract_apply_patch_input so unrelated custom-tool logging
+#    is not accidentally rewritten if the file gains earlier args_preview uses.
 # ---------------------------------------------------------------------------
 text = read(CONVERTER)
 if PRIVACY_MARKER not in text:
     fn_anchor = "pub(crate) fn extract_apply_patch_input(args_acc: &str) -> String {"
-    if fn_anchor not in text:
-        raise SystemExit("anchor not found: extract_apply_patch_input")
-    text = text.replace(
-        fn_anchor,
-        f"// {PRIVACY_MARKER}: malformed apply_patch diagnostics never include patch previews.\n{fn_anchor}",
-        1,
-    )
+    next_anchor = "pub(crate) fn extract_custom_tool_input(args_acc: &str) -> String {"
+    fn_start = text.index(fn_anchor)
+    fn_end = text.index(next_anchor, fn_start)
+    segment = text[fn_start:fn_end]
     preview = '                    args_preview = %args_acc.chars().take(120).collect::<String>(),\n'
-    count = text.count(preview)
-    if count < 2:
-        raise SystemExit(f"expected at least two apply_patch args_preview anchors, found {count}")
-    # Only the first two occurrences are inside extract_apply_patch_input; later custom-tool
-    # diagnostics intentionally remain untouched by this narrowly-scoped overlay.
-    text = text.replace(preview, '                    args_len = args_acc.len(),\n', 1)
-    # The parse-error branch already logs args_len, so remove (rather than duplicate) its preview.
-    text = text.replace(preview, '', 1)
+    if segment.count(preview) != 2:
+        raise SystemExit(
+            f"expected exactly two apply_patch args_preview anchors, found {segment.count(preview)}"
+        )
+    segment = segment.replace(preview, '                    args_len = args_acc.len(),\n', 1)
+    # The parse-error branch already logs args_len, so remove its preview rather than duplicate it.
+    segment = segment.replace(preview, '', 1)
+    segment = (
+        f"// {PRIVACY_MARKER}: malformed apply_patch diagnostics never include patch previews.\n"
+        + segment
+    )
+    text = text[:fn_start] + segment + text[fn_end:]
     write(CONVERTER, text)
 else:
     print("[ok] Grok apply_patch r17 privacy hardening: already applied")
@@ -189,28 +297,34 @@ else:
 
 # ---------------------------------------------------------------------------
 # 3. Prompt prevention: r16 repairs Grok's observed `*** Begin Patch ***`
-#    drift, but preventing the drift is cheaper and avoids noisy repair logs.
+#    drift, but preventing the drift is cheaper and avoids repair churn.
+#    Keep the internal marker in a Rust comment, never in model-visible text.
 # ---------------------------------------------------------------------------
 text = read(TOOLS)
 if PROMPT_MARKER not in text:
+    const_anchor = "pub(crate) const APPLY_PATCH_TOOL_DESCRIPTION_FOR_CHAT: &str = concat!("
+    text = replace_once(
+        text,
+        const_anchor,
+        f"// {PROMPT_MARKER}: explicitly forbid Markdown-style trailing stars on V4A sentinels.\n"
+        + const_anchor,
+        "apply_patch prompt marker",
+    )
+
     tool_anchor = '    "**The patch MUST start with `*** Begin Patch` as the literal first line** (no leading whitespace, no other content before it), and end with `*** End Patch`. ",\n'
     tool_replacement = tool_anchor + (
-        f'    "{PROMPT_MARKER}: **Do NOT append trailing stars to either envelope sentinel** — '
+        '    "**Do NOT append trailing stars to either envelope sentinel** — '
         '`*** Begin Patch ***` and `*** End Patch ***` are invalid Markdown-styled variants; use exactly '
         '`*** Begin Patch` and `*** End Patch`. ",\n'
     )
-    if tool_anchor not in text:
-        raise SystemExit("anchor not found: apply_patch tool sentinel prompt")
-    text = text.replace(tool_anchor, tool_replacement, 1)
+    text = replace_once(text, tool_anchor, tool_replacement, "apply_patch tool sentinel prompt")
 
     input_anchor = '    "A V4A patch starting with `*** Begin Patch` and ending with `*** End Patch`. ",\n'
     input_replacement = input_anchor + (
         '    "Use those two envelope sentinels EXACTLY as written — no trailing ` ***` (so never '
         '`*** Begin Patch ***` / `*** End Patch ***`). ",\n'
     )
-    if input_anchor not in text:
-        raise SystemExit("anchor not found: apply_patch input sentinel prompt")
-    text = text.replace(input_anchor, input_replacement, 1)
+    text = replace_once(text, input_anchor, input_replacement, "apply_patch input sentinel prompt")
     write(TOOLS, text)
 else:
     print("[ok] Grok apply_patch r17 prompt hardening: already applied")

@@ -22,6 +22,7 @@ on:
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
@@ -70,6 +71,9 @@ jobs:
 
       - name: Apply Grok apply_patch r17 hardening overlay
         run: python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
+
+      - name: Apply Grok apply_patch r17 self-review overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
 
       - name: Apply Sub2API OpenAI official-Codex identity overlay
         run: python3 scripts/apply_sub2api_openai_codex_identity.py

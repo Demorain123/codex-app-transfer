@@ -462,11 +462,14 @@ mod sub2api_codex_identity_tests {
 /// stream shape used by Codex's own `stream_no_completed` regression test. The
 /// body then reaches EOF, which should be surfaced as a retryable stream
 /// disconnect before completion.
-fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, ForwardError> {
+fn sub2api_stream_retry_diag_sse_body() -> String {
     let event = serde_json::json!({
         "type": "response.output_item.done"
     });
-    let body = format!("data: {event}\\n\\n");
+    format!("data: {event}\n\n")
+}
+
+fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, ForwardError> {
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
@@ -475,12 +478,21 @@ fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, Forwa
             "x-cas-retry-diag",
             "incomplete-sse-before-response-completed",
         )
-        .body(Body::from(body))?)
+        .body(Body::from(sub2api_stream_retry_diag_sse_body()))?)
 }
 
 #[cfg(test)]
 mod sub2api_stream_retry_diag_r19_tests {
     use super::*;
+
+    #[test]
+    fn synthetic_sse_body_uses_real_event_delimiter_and_never_completes() {
+        let body = sub2api_stream_retry_diag_sse_body();
+        assert!(body.starts_with("data: {"));
+        assert!(body.ends_with("\n\n"));
+        assert!(!body.contains("response.completed"));
+        assert!(!body.contains("\\n"));
+    }
 
     #[test]
     fn synthetic_stream_response_is_http_200_event_stream() {

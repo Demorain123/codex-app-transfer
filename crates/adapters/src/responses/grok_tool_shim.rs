@@ -440,7 +440,17 @@ impl GrokToolCallShim {
             .cloned()
             .unwrap_or_default();
 
-        let mut interrupted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID
+        // A failed/incomplete terminal response is a hard safety boundary for apply_patch.
+        // Grok/Sub2API may omit item ids or call ids in the terminal envelope, so tracking only
+        // `item_id` can accidentally let the envelope be rewritten back to status=completed.
+        // Keep three independent identities; any one match is enough to preserve fail-closed.
+        let mut interrupted_indices: std::collections::HashSet<u64> =
+            std::collections::HashSet::new();
+        let mut interrupted_item_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut interrupted_call_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         if !self.items.is_empty() {
             let mut leftovers: Vec<(u64, Pending)> = self.items.drain().collect();
             leftovers.sort_by_key(|(idx, _)| *idx);
@@ -449,15 +459,19 @@ impl GrokToolCallShim {
                 // Prefer the same output_index, then fall back to stable item/call ids.
                 // This recovers the authoritative complete arguments from the terminal
                 // envelope when the provider omitted response.output_item.done.
+                // CAS-SUB2API-GROK-APPLY-PATCH-R17-TERMINAL-NAME-MATCH
                 let indexed = usize::try_from(output_index)
                     .ok()
                     .and_then(|idx| terminal_output.get(idx))
                     .filter(|item| {
                         item.get("type").and_then(Value::as_str) == Some("function_call")
+                            && item.get("name").and_then(Value::as_str) == Some(p.name.as_str())
                     });
                 let matched = indexed.or_else(|| {
                     terminal_output.iter().find(|item| {
-                        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+                        if item.get("type").and_then(Value::as_str) != Some("function_call")
+                            || item.get("name").and_then(Value::as_str) != Some(p.name.as_str())
+                        {
                             return false;
                         }
                         let id_matches = !p.item_id.is_empty()
@@ -482,7 +496,13 @@ impl GrokToolCallShim {
                 // Incomplete/failed terminal responses remain explicitly interrupted.
                 let treat_as_interrupted = !terminal_completed;
                 if treat_as_interrupted {
-                    interrupted.insert(p.item_id.clone());
+                    interrupted_indices.insert(output_index);
+                    if !p.item_id.is_empty() {
+                        interrupted_item_ids.insert(p.item_id.clone());
+                    }
+                    if !p.call_id.is_empty() {
+                        interrupted_call_ids.insert(p.call_id.clone());
+                    }
                 }
 
                 // Safe diagnostic only: never log patch contents or argument previews.
@@ -506,25 +526,36 @@ impl GrokToolCallShim {
             .and_then(|r| r.get_mut("output"))
             .and_then(|o| o.as_array_mut())
         {
-            for item in output.iter_mut() {
+            for (terminal_index, item) in output.iter_mut().enumerate() {
                 let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
                 self.rewrite_envelope_item(item);
-                if let Some(id) = id {
-                    if interrupted.contains(&id) {
-                        if let Some(o) = item.as_object_mut() {
-                            o.insert("status".into(), Value::String("incomplete".into()));
-                            // Keep incomplete/failed terminal envelopes fail-closed too.
-                            if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
-                                && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                let item_was_interrupted = u64::try_from(terminal_index)
+                    .ok()
+                    .is_some_and(|idx| interrupted_indices.contains(&idx))
+                    || id
+                        .as_ref()
+                        .is_some_and(|id| interrupted_item_ids.contains(id))
+                    || call_id
+                        .as_ref()
+                        .is_some_and(|call_id| interrupted_call_ids.contains(call_id));
+                if item_was_interrupted {
+                    if let Some(o) = item.as_object_mut() {
+                        o.insert("status".into(), Value::String("incomplete".into()));
+                        // Keep incomplete/failed terminal envelopes fail-closed too.
+                        if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                            && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                        {
+                            if let Some(input) =
+                                o.get("input").and_then(Value::as_str).map(str::to_owned)
                             {
-                                if let Some(input) =
-                                    o.get("input").and_then(Value::as_str).map(str::to_owned)
-                                {
-                                    o.insert(
-                                        "input".into(),
-                                        Value::String(block_incomplete_apply_patch(&input)),
-                                    );
-                                }
+                                o.insert(
+                                    "input".into(),
+                                    Value::String(block_incomplete_apply_patch(&input)),
+                                );
                             }
                         }
                     }
@@ -594,10 +625,14 @@ fn function_arguments_to_string(value: Option<&Value>) -> String {
 /// `{"input":"*** Begin Patch..."}` they return a JSON string containing that JSON object (or
 /// a JSON string containing raw V4A). Unwrap at most two string layers; bounded depth avoids
 /// turning arbitrary patch content into an open-ended parser while covering observed drift.
+// CAS-SUB2API-GROK-APPLY-PATCH-R17-PRESERVE-RAW-V4A
 fn normalize_apply_patch_arguments(args_acc: &str) -> String {
-    let mut current = args_acc.trim().to_owned();
+    // Preserve raw bare V4A byte-for-byte (notably a trailing newline). Trimming is only a
+    // temporary JSON-parse view; `current` changes only after a real JSON string unwrap.
+    let mut current = args_acc.to_owned();
     for _ in 0..2 {
-        let Ok(Value::String(inner)) = serde_json::from_str::<Value>(&current) else {
+        let parse_view = current.trim();
+        let Ok(Value::String(inner)) = serde_json::from_str::<Value>(parse_view) else {
             break;
         };
         let trimmed = inner.trim_start();
@@ -662,7 +697,7 @@ fn finalize_apply_patch(args_acc: &str, cwd: Option<&str>, interrupted: bool) ->
     let input = extract_apply_patch_input(&normalized_args);
     let (input, begin_repaired, end_repaired) = repair_grok_v4a_sentinels(&input);
     if begin_repaired || end_repaired {
-        tracing::warn!(
+        tracing::info!(
             target: "adapters::grok_tool_diag",
             begin_repaired,
             end_repaired,
@@ -671,9 +706,23 @@ fn finalize_apply_patch(args_acc: &str, cwd: Option<&str>, interrupted: bool) ->
         );
     }
 
-    let json_trunc = detect_json_truncation(&normalized_args);
+    // CAS-SUB2API-GROK-APPLY-PATCH-R17-BARE-V4A-NOT-JSON
+    // CAS-SUB2API-GROK-APPLY-PATCH-R17-ENVELOPE-REQUIRES-JSON-PROOF
+    // Decide JSON completeness from the ORIGINAL wire argument, before double-encoded JSON is
+    // unwrapped. Bare V4A may contain arbitrary source braces/quotes and must never be scanned as
+    // JSON. Conversely, only a structurally complete original JSON wrapper proves that a missing
+    // V4A Begin/End sentinel is model/schema drift rather than a raw transport EOF truncation.
+    let original_trimmed = args_acc.trim_start();
+    let args_look_json_wrapped =
+        original_trimmed.starts_with('{') || original_trimmed.starts_with('"');
+    let json_trunc = if args_look_json_wrapped {
+        detect_json_truncation(args_acc)
+    } else {
+        None
+    };
+    let json_complete_for_envelope = args_look_json_wrapped && json_trunc.is_none();
     let (input, _repairs) =
-        apply_patch_preflight::optimize_patch(&input, cwd, json_trunc.is_none());
+        apply_patch_preflight::optimize_patch(&input, cwd, json_complete_for_envelope);
     let v4a_trunc = detect_v4a_truncation(&input);
     let json_truncated = json_trunc.is_some();
     let v4a_truncated = v4a_trunc.is_some();
@@ -1071,6 +1120,12 @@ mod tests {
     }
 
     #[test]
+    fn normalize_apply_patch_arguments_preserves_raw_v4a_trailing_newline() {
+        let patch = "*** Begin Patch\n*** Add File: preserve.txt\n+ok\n*** End Patch\n";
+        assert_eq!(normalize_apply_patch_arguments(patch), patch);
+    }
+
+    #[test]
     fn apply_patch_unwraps_double_encoded_arguments() {
         let patch = "*** Begin Patch\n*** Add File: double.txt\n+double\n*** End Patch\n";
         let once = serde_json::to_string(&json!({ "input": patch })).unwrap();
@@ -1156,6 +1211,212 @@ mod tests {
         let done = &frames[3].1["item"];
         assert_eq!(done["status"], "completed");
         assert_eq!(done["input"], canonical);
+    }
+
+    #[test]
+    fn grok_markdown_style_v4a_sentinels_are_repaired_for_update_and_delete() {
+        let cases = [
+            (
+                "*** Begin Patch ***\n*** Update File: probe.txt\n-old\n+new\n*** End Patch ***\n",
+                "*** Begin Patch\n*** Update File: probe.txt\n-old\n+new\n*** End Patch\n",
+            ),
+            (
+                "*** Begin Patch ***\n*** Delete File: probe.txt\n*** End Patch ***\n",
+                "*** Begin Patch\n*** Delete File: probe.txt\n*** End Patch\n",
+            ),
+        ];
+
+        for (case_idx, (malformed, canonical)) in cases.into_iter().enumerate() {
+            let args = serde_json::to_string(&json!({ "input": malformed })).unwrap();
+            let input = [
+                frame(
+                    "response.output_item.added",
+                    json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                        "item":{"type":"function_call","id":format!("fc_case_{case_idx}"),"call_id":format!("call_case_{case_idx}"),"name":"apply_patch","arguments":""}}),
+                ),
+                frame(
+                    "response.output_item.done",
+                    json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                        "item":{"type":"function_call","id":format!("fc_case_{case_idx}"),"call_id":format!("call_case_{case_idx}"),"name":"apply_patch","arguments":args}}),
+                ),
+            ]
+            .concat();
+            let frames = run(&input);
+            let done = &frames[3].1["item"];
+            assert_eq!(done["status"], "completed");
+            assert_eq!(done["input"], canonical);
+            assert!(validate_v4a_syntax(done["input"].as_str().unwrap()).is_ok());
+        }
+    }
+
+    #[test]
+    fn grok_sentinel_repair_never_touches_prefixed_body_lines() {
+        let malformed = "*** Begin Patch ***\n*** Add File: sentinel-body.txt\n+*** End Patch ***\n*** End Patch ***\n";
+        let canonical =
+            "*** Begin Patch\n*** Add File: sentinel-body.txt\n+*** End Patch ***\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": malformed })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_body_sentinel","call_id":"call_body_sentinel","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_body_sentinel","call_id":"call_body_sentinel","name":"apply_patch","arguments":args}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(done["input"], canonical);
+        assert!(done["input"]
+            .as_str()
+            .unwrap()
+            .contains("+*** End Patch ***"));
+    }
+
+    #[test]
+    fn incomplete_terminal_without_item_or_call_id_stays_fail_closed() {
+        let patch = "*** Begin Patch\n*** Delete File: must-not-run.txt\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.incomplete",
+                json!({"type":"response.incomplete","sequence_number":1,
+                    "response":{"output":[{"type":"function_call","name":"apply_patch","arguments":args}]}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let streamed_done = &frames[1].1["item"];
+        assert_eq!(streamed_done["status"], "incomplete");
+        assert!(streamed_done["input"]
+            .as_str()
+            .unwrap()
+            .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+        let terminal_item = &frames[2].1["response"]["output"][0];
+        assert_eq!(terminal_item["status"], "incomplete");
+        assert!(terminal_item["input"]
+            .as_str()
+            .unwrap()
+            .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+    }
+
+    #[test]
+    fn bare_v4a_with_unbalanced_source_brace_is_not_misclassified_as_json_truncation() {
+        let patch = "*** Begin Patch\n*** Add File: brace.rs\n+fn main() {\n*** End Patch\n";
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_bare_brace","call_id":"call_bare_brace","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_bare_brace","call_id":"call_bare_brace","name":"apply_patch","arguments":patch}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(done["input"], patch);
+        assert!(!done["input"]
+            .as_str()
+            .unwrap()
+            .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+    }
+
+    #[test]
+    fn bare_v4a_missing_end_at_raw_eof_stays_fail_closed() {
+        let patch = "*** Begin Patch\n*** Add File: raw-eof.txt\n+must-not-run\n";
+        let input = frame(
+            "response.output_item.added",
+            json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                "item":{"type":"function_call","id":"fc_raw_eof","call_id":"call_raw_eof","name":"apply_patch","arguments":patch}}),
+        );
+        let frames = run(&input);
+        let done = &frames[1].1["item"];
+        assert_eq!(done["status"], "incomplete");
+        assert!(done["input"]
+            .as_str()
+            .unwrap()
+            .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+    }
+
+    #[test]
+    fn complete_json_wrapper_can_still_repair_missing_v4a_end() {
+        let patch_without_end = "*** Begin Patch\n*** Add File: json-complete.txt\n+ok\n";
+        let args = serde_json::to_string(&json!({ "input": patch_without_end })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_json_complete","call_id":"call_json_complete","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_json_complete","call_id":"call_json_complete","name":"apply_patch","arguments":args}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(
+            done["input"],
+            "*** Begin Patch\n*** Add File: json-complete.txt\n+ok\n*** End Patch"
+        );
+    }
+
+    #[test]
+    fn completed_terminal_reordered_output_does_not_feed_other_function_args_to_apply_patch() {
+        let patch = "*** Begin Patch\n*** Add File: recovered-by-id.txt\n+ok\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_target","call_id":"call_target","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.completed",
+                json!({"type":"response.completed","sequence_number":1,
+                    "response":{"output":[
+                        {"type":"function_call","id":"fc_other","call_id":"call_other","name":"exec_command","arguments":"{\"cmd\":\"echo nope\"}"},
+                        {"type":"function_call","id":"fc_target","call_id":"call_target","name":"apply_patch","arguments":args}
+                    ]}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let streamed_done = frames
+            .iter()
+            .find(|(event, value)| {
+                event == "response.output_item.done" && value["item"]["name"] == "apply_patch"
+            })
+            .map(|(_, value)| &value["item"])
+            .unwrap();
+        assert_eq!(streamed_done["status"], "completed");
+        assert_eq!(streamed_done["input"], patch);
+        let terminal_apply = frames.last().unwrap().1["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "apply_patch")
+            .unwrap();
+        assert_eq!(terminal_apply["status"], "completed");
+        assert_eq!(terminal_apply["input"], patch);
     }
 
     #[test]

@@ -1926,6 +1926,7 @@ pub(crate) fn emit_event(out: &mut Vec<u8>, seq: &mut u64, event_name: &str, pay
 /// 取到候选后过 [`repair_v4a_envelope`] 规整信封(剥 markdown fence / Begin 前
 /// End 后的杂散行)。取不到候选(截断 / 非 V4A 垃圾)则**原样透传**,交给 Codex
 /// CLI `parse_patch` 暴露真坏 —— 绝不静默吞、不截断正文。不做 V4A 语法校验。
+// CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PRIVACY: malformed apply_patch diagnostics never include patch previews.
 pub(crate) fn extract_apply_patch_input(args_acc: &str) -> String {
     let trimmed = args_acc.trim();
     if trimmed.is_empty() {
@@ -1951,7 +1952,7 @@ pub(crate) fn extract_apply_patch_input(args_acc: &str) -> String {
             } else {
                 tracing::warn!(
                     target: "adapters::apply_patch",
-                    args_preview = %args_acc.chars().take(120).collect::<String>(),
+                    args_len = args_acc.len(),
                     "apply_patch args parsed as JSON but missing `input` string field; passing raw args to Codex CLI",
                 );
                 None
@@ -1969,7 +1970,6 @@ pub(crate) fn extract_apply_patch_input(args_acc: &str) -> String {
                     target: "adapters::apply_patch",
                     error = %err,
                     args_len = args_acc.len(),
-                    args_preview = %args_acc.chars().take(120).collect::<String>(),
                     "apply_patch args failed JSON parse and don't look like bare V4A; falling back to raw passthrough — likely truncation or schema drift",
                 );
                 None

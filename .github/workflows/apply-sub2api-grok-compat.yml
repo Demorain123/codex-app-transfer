@@ -21,6 +21,9 @@ on:
       - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
@@ -66,6 +69,15 @@ jobs:
 
       - name: Apply Grok apply_patch r16 structural recovery overlay
         run: python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
+
+      - name: Apply Grok apply_patch r17 hardening overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
+
+      - name: Apply Grok apply_patch r17 self-review overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
+
+      - name: Apply Grok apply_patch r17 raw-V4A preservation review
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
 
       - name: Apply Sub2API OpenAI official-Codex identity overlay
         run: python3 scripts/apply_sub2api_openai_codex_identity.py
@@ -139,7 +151,9 @@ jobs:
             crates/adapters/src/mapper/responses.rs \
             crates/adapters/src/mapper/grok_build.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/adapters/src/responses/converter.rs \
             crates/adapters/src/responses/grok_tool_shim.rs \
+            crates/adapters/src/responses/request/tools.rs \
             crates/codex_integration/src/apply.rs \
             crates/proxy/src/resolver.rs \
             crates/proxy/src/forward.rs \
@@ -177,7 +191,9 @@ jobs:
             crates/adapters/src/mapper/responses.rs \
             crates/adapters/src/mapper/grok_build.rs \
             crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/adapters/src/responses/converter.rs \
             crates/adapters/src/responses/grok_tool_shim.rs \
+            crates/adapters/src/responses/request/tools.rs \
             crates/codex_integration/src/apply.rs \
             crates/proxy/src/resolver.rs \
             crates/proxy/src/forward.rs \

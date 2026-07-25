@@ -18,6 +18,9 @@ on:
       - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
@@ -42,6 +45,9 @@ on:
       - 'scripts/apply_sub2api_grok_replay_compat.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
@@ -80,6 +86,9 @@ jobs:
           python scripts/apply_sub2api_grok_replay_compat.py
           python scripts/apply_sub2api_grok_terminal_compat.py
           python scripts/apply_sub2api_grok_apply_patch_recovery.py
+          python scripts/apply_sub2api_grok_apply_patch_hardening.py
+          python scripts/apply_sub2api_grok_apply_patch_r17_review.py
+          python scripts/apply_sub2api_grok_apply_patch_r17_review2.py
           python scripts/apply_sub2api_openai_codex_identity.py
           python scripts/apply_sub2api_subagent_retry_diag.py
           python scripts/apply_sub2api_grok_compat_revision.py
@@ -94,6 +103,13 @@ jobs:
           grep -F -q 'CAS-SUB2API-GROK-TOOLSEARCH-ARGS-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-RECOVERY-R16-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-BARE-V4A-NOT-JSON' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-ENVELOPE-REQUIRES-JSON-PROOF' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-TERMINAL-NAME-MATCH' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-PRESERVE-RAW-V4A' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PRIVACY' crates/adapters/src/responses/converter.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT' crates/adapters/src/responses/request/tools.rs
           grep -F -q 'CAS-SUB2API-GROK-REPLAY-SCHEMA-HOOK' crates/adapters/src/mapper/grok_build.rs
           grep -F -q 'CAS-SUB2API-OPENAI-CODEX-IDENTITY-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-HOOK' crates/proxy/src/forward.rs

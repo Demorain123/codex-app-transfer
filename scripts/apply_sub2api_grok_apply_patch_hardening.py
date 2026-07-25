@@ -9,6 +9,10 @@ behavior, then adds:
 - stronger prompt wording that forbids Markdown-style trailing stars on the
   two V4A envelope sentinels;
 - lower-noise logging for successfully repaired sentinel drift.
+
+The patcher must also compose directly after the earlier overlays on a pristine
+checkout, before rustfmt has normalized their generated source. Therefore anchors
+that can legitimately differ only by rustfmt whitespace accept both shapes.
 """
 from pathlib import Path
 
@@ -37,6 +41,21 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_one_of(text: str, olds: tuple[str, ...], new: str, label: str) -> str:
+    """Replace exactly the first supported source shape.
+
+    Older overlay scripts intentionally emit readable multiline Rust which rustfmt
+    may later collapse. A thin overlay stack must be replayable before rustfmt, so
+    downstream patchers accept both the generated and formatted whitespace forms.
+    """
+    hits = [old for old in olds if old in text]
+    if not hits:
+        raise SystemExit(f"anchor not found: {label}")
+    # Prefer the longest shape if one happens to contain another.
+    old = max(hits, key=len)
+    return text.replace(old, new, 1)
+
+
 # ---------------------------------------------------------------------------
 # 1. Terminal fail-closed identity: response.incomplete/failed must keep the
 #    terminal envelope poisoned even if Grok omits or drifts item/call ids.
@@ -44,7 +63,13 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 # ---------------------------------------------------------------------------
 text = read(SHIM)
 if SHIM_MARKER not in text:
-    old_sets = "        let mut interrupted: std::collections::HashSet<String> = std::collections::HashSet::new();\n"
+    old_sets_formatted = (
+        "        let mut interrupted: std::collections::HashSet<String> = "
+        "std::collections::HashSet::new();\n"
+    )
+    old_sets_generated = '''        let mut interrupted: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+'''
     new_sets = f'''        // {SHIM_MARKER}
         // A failed/incomplete terminal response is a hard safety boundary for apply_patch.
         // Grok/Sub2API may omit item ids or call ids in the terminal envelope, so tracking only
@@ -57,7 +82,12 @@ if SHIM_MARKER not in text:
         let mut interrupted_call_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 '''
-    text = replace_once(text, old_sets, new_sets, "terminal interrupted set")
+    text = replace_one_of(
+        text,
+        (old_sets_formatted, old_sets_generated),
+        new_sets,
+        "terminal interrupted set",
+    )
 
     old_insert = '''                if treat_as_interrupted {
                     interrupted.insert(p.item_id.clone());

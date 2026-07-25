@@ -1,4 +1,4 @@
-# Parent/child retry diagnostics (r18)
+# Parent/child stream retry diagnostics (r19)
 
 This diagnostic answers one narrow question:
 
@@ -7,16 +7,16 @@ This diagnostic answers one narrow question:
 It deliberately combines three independent observations:
 
 - **A — Effective config lock export:** inspect the effective session config Codex resolved for parent and child threads.
-- **B — Child one-shot synthetic 429:** force exactly one eligible Grok subagent request to reconnect.
-- **C — Main one-shot synthetic 429:** force exactly one eligible main-agent request to reconnect in the same Transfer process/provider.
+- **B — Child one-shot incomplete SSE:** force exactly one eligible Grok subagent response stream to end before `response.completed`.
+- **C — Main one-shot incomplete SSE:** force exactly one eligible main-agent response stream to end before `response.completed` in the same Transfer process/provider.
 
-r18 also adds compact request-identity correlation logs so repeated requests can be associated with the same main/child thread without logging raw identity header values.
+r18 added compact request-identity correlation logs. r19 corrects the fault-injection layer: a raw HTTP 429 happens before a Responses stream is established and therefore exercises request/status handling, not `stream_max_retries`. r19 instead returns HTTP 200 `text/event-stream`, emits a minimal Responses event, and ends the body before `response.completed`, matching the failure shape used by Codex's own `stream_no_completed` regression test.
 
 ## Safety / scope
 
 All fault injection is disabled by default.
 
-### Child injector (introduced in r16)
+### Child injector
 
 It can trigger only when all are true:
 
@@ -24,9 +24,9 @@ It can trigger only when all are true:
 2. the model is `grok-*`;
 3. Codex marks the request as a subagent with `x-openai-subagent` or `x-codex-parent-thread-id`;
 4. `~/.codex-app-transfer/subagent-retry-diag.flag` exists;
-5. this Transfer process has not already injected a child diagnostic fault.
+5. this Transfer process has not already consumed a child diagnostic fault.
 
-### Main injector (r18)
+### Main injector
 
 It can trigger only when all are true:
 
@@ -34,7 +34,7 @@ It can trigger only when all are true:
 2. the request contains a model;
 3. the request does **not** carry `x-openai-subagent` or `x-codex-parent-thread-id`;
 4. `~/.codex-app-transfer/main-retry-diag.flag` exists;
-5. this Transfer process has not already injected a main diagnostic fault.
+5. this Transfer process has not already consumed a main diagnostic fault.
 
 Each flag is deleted immediately after it is consumed. Main and child injectors have independent process guards, so one main fault and one child fault can be tested in the same Transfer process.
 
@@ -89,7 +89,7 @@ Get-ChildItem "$HOME\.codex-app-transfer\subagent-retry-diag\config-locks" -File
 
 Do not use an exported lock as `load_path`; this test is export-only.
 
-## B. Force one Grok child reconnect
+## B. Force one Grok child stream reconnect
 
 Arm one child fault:
 
@@ -97,15 +97,18 @@ Arm one child fault:
 New-Item -ItemType File -Force "$HOME\.codex-app-transfer\subagent-retry-diag.flag" | Out-Null
 ```
 
-Then spawn one Grok 4.5 High child and give it a harmless read-only task that causes a normal model request. The first eligible child request receives:
+Then spawn one Grok 4.5 High child and give it a harmless read-only task that causes a normal model request. The first eligible child request is answered locally with:
 
 ```http
-HTTP/1.1 429 Too Many Requests
-Retry-After: 1
-Content-Type: application/json
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+X-CAS-Retry-Diag: incomplete-sse-before-response-completed
+
+ data: {"type":"response.output_item.done"}
 ```
 
-with diagnostic code `subagent_retry_diag`.
+The SSE body then ends without any `response.completed` event. Codex should classify this as a retryable stream disconnect rather than a raw HTTP-status failure.
 
 Observe the child UI:
 
@@ -114,7 +117,7 @@ Reconnecting 1/15  -> child transport is using the configured retry budget
 Reconnecting 1/5   -> child transport is using the default/fallback budget
 ```
 
-## C. Force one main-agent reconnect
+## C. Force one main-agent stream reconnect
 
 Keep the same Transfer process and provider. Arm the main control:
 
@@ -122,7 +125,7 @@ Keep the same Transfer process and provider. Arm the main control:
 New-Item -ItemType File -Force "$HOME\.codex-app-transfer\main-retry-diag.flag" | Out-Null
 ```
 
-Immediately send one simple prompt from the Luna main session. The first eligible **non-subagent** request receives one local 429 with `Retry-After: 1` and diagnostic code `main_retry_diag`.
+Immediately send one simple prompt from the Luna main session. The first eligible non-subagent request receives the same one-shot incomplete HTTP-200 SSE response and should enter Codex's stream reconnect loop.
 
 Observe the main UI:
 
@@ -145,7 +148,7 @@ That removes Sub2API timing and natural rate limiting as variables and isolates 
 
 ## Correlation logs
 
-For explicit Sub2API Grok-compat Responses traffic r18 writes one compact line before either injector can return early:
+For explicit Sub2API Grok-compat Responses traffic, compact runtime lines associate repeated requests with the same main/child identities without exposing the raw IDs:
 
 ```text
 [retry-runtime-diag] target=main model=gpt-5.6-luna provider=sub2api thread=91b62b6f parent=- session=2ee6f355 client_request=dc0a09ad subagent_header=false parent_thread_header=false
@@ -154,12 +157,14 @@ For explicit Sub2API Grok-compat Responses traffic r18 writes one compact line b
 
 The hexadecimal identity tokens are fingerprints, not raw IDs. Equal fingerprints across retry attempts indicate the same underlying identity value.
 
-Synthetic faults also produce:
+An armed r19 fault produces one of:
 
 ```text
-[main-retry-diag] injecting synthetic one-shot HTTP 429; model=gpt-5.6-luna ...
-[subagent-retry-diag] injecting synthetic one-shot HTTP 429; model=grok-4.5 ...
+[main-retry-diag] injecting synthetic incomplete SSE before response.completed; model=gpt-5.6-luna ...
+[subagent-retry-diag] injecting synthetic incomplete SSE before response.completed; model=grok-4.5 ...
 ```
+
+If a log still says `injecting synthetic one-shot HTTP 429`, that build is r18 or older and is not suitable for measuring `stream_max_retries` deterministically.
 
 ## Disarm / repeat
 

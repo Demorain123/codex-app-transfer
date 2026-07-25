@@ -452,6 +452,51 @@ mod sub2api_codex_identity_tests {
     }
 }
 
+/// CAS-SUB2API-STREAM-RETRY-DIAG-R19-HOOK
+///
+/// Produce a successfully-established Responses SSE body that terminates before
+/// `response.completed`. This deliberately exercises Codex's *stream* retry path
+/// (`stream_max_retries`) rather than the request-level HTTP status path.
+///
+/// The single `response.output_item.done` event mirrors the minimal incomplete
+/// stream shape used by Codex's own `stream_no_completed` regression test. The
+/// body then reaches EOF, which should be surfaced as a retryable stream
+/// disconnect before completion.
+fn sub2api_stream_retry_diag_incomplete_sse_response() -> Result<Response, ForwardError> {
+    let event = serde_json::json!({
+        "type": "response.output_item.done"
+    });
+    let body = format!("data: {event}\\n\\n");
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .header(
+            "x-cas-retry-diag",
+            "incomplete-sse-before-response-completed",
+        )
+        .body(Body::from(body))?)
+}
+
+#[cfg(test)]
+mod sub2api_stream_retry_diag_r19_tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_stream_response_is_http_200_event_stream() {
+        let response = sub2api_stream_retry_diag_incomplete_sse_response().unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/event-stream"
+        );
+        assert_eq!(
+            response.headers().get("x-cas-retry-diag").unwrap(),
+            "incomplete-sse-before-response-completed"
+        );
+    }
+}
+
 /// CAS-SUB2API-RETRY-RUNTIME-DIAG-R18-HOOK
 ///
 /// Parent/child retry diagnostics for the Sub2API compat path.
@@ -1070,6 +1115,50 @@ pub async fn forward_handler(
     // `upstream_model`(adapter 后的 plan.body):gemini_native 等把 model 挪进 URL 的
     // adapter,plan.body 已无 model 字段,只有 resolved_model 仍持有真实上游模型。
     record_session_upstream_model(&parts.headers, resolved_model.as_deref());
+
+    // CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL: consume an armed retry probe before the
+    // legacy raw-429 probes below. A 200/SSE response that ends before `response.completed`
+    // reaches Codex's stream-disconnect retry loop and therefore reveals stream_max_retries.
+    let stream_retry_diag_model = resolved_model.as_deref().or(upstream_model.as_deref());
+
+    if maybe_take_sub2api_main_retry_diag(
+        &resolved.provider,
+        &parts.headers,
+        stream_retry_diag_model,
+    ) {
+        log_sub2api_retry_runtime_diag(&resolved.provider, &parts.headers, stream_retry_diag_model);
+        telemetry.logs.add(
+            "WARN",
+            format!(
+                "[main-retry-diag] injecting synthetic incomplete SSE before response.completed; model={} thread={} session={} client_request={}",
+                stream_retry_diag_model.unwrap_or("<unknown>"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "thread-id"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "session-id"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "x-client-request-id"),
+            ),
+        );
+        return sub2api_stream_retry_diag_incomplete_sse_response();
+    }
+
+    if maybe_take_sub2api_subagent_retry_diag(
+        &resolved.provider,
+        &parts.headers,
+        stream_retry_diag_model,
+    ) {
+        log_sub2api_retry_runtime_diag(&resolved.provider, &parts.headers, stream_retry_diag_model);
+        telemetry.logs.add(
+            "WARN",
+            format!(
+                "[subagent-retry-diag] injecting synthetic incomplete SSE before response.completed; model={} thread={} parent={} session={} client_request={}",
+                stream_retry_diag_model.unwrap_or("<unknown>"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "thread-id"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "x-codex-parent-thread-id"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "session-id"),
+                sub2api_retry_runtime_diag_header_fingerprint(&parts.headers, "x-client-request-id"),
+            ),
+        );
+        return sub2api_stream_retry_diag_incomplete_sse_response();
+    }
 
     // CAS-SUB2API-RETRY-RUNTIME-DIAG-R18-CALL: correlate parent/child traffic before
     // either one-shot fault injector can return early. Raw identity header values are never logged.

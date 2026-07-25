@@ -18,15 +18,104 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def refresh_early_r20(text: str) -> str:
+    """Upgrade the first generated r20 form without accepting a partial overlay."""
+    if MARKER not in text or RESOLVE_MARKER not in text:
+        raise SystemExit("r20 mcp diag: partial generated diagnostic detected; refusing to guess")
+    if PRIVACY_MARKER in text:
+        return text
+
+    text = replace_once(
+        text,
+        "// CAS-MCP-RELAY-DIAG-R20-HOOK\n",
+        "// CAS-MCP-RELAY-DIAG-R20-HOOK\n// CAS-MCP-RELAY-DIAG-R20-QUERY-PRIVACY\n",
+        "privacy marker",
+    )
+    text = replace_once(
+        text,
+        '''fn is_chatgpt_mcp_backend_path(path: &str) -> bool {
+    let p = path.split('?').next().unwrap_or(path);
+    p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")
+}
+''',
+        '''fn diagnostic_path_only(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
+fn is_chatgpt_mcp_backend_path(path: &str) -> bool {
+    let p = diagnostic_path_only(path);
+    p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")
+}
+''',
+        "privacy path helper",
+    )
+    text = replace_once(
+        text,
+        '''                "[mcp-relay-diag id={diag_id}] inbound method={method} path={client_path} body_bytes={} auth={} cookie={} account={} headers=[{}]",
+                body.len(),
+''',
+        '''                "[mcp-relay-diag id={diag_id}] inbound method={method} path={} body_bytes={} auth={} cookie={} account={} headers=[{}]",
+                diagnostic_path_only(client_path),
+                body.len(),
+''',
+        "mcp compact path privacy",
+    )
+    text = replace_once(
+        text,
+        '''                        parts.method,
+                        client_path,
+                        parts.headers.contains_key("authorization"),
+''',
+        '''                        parts.method,
+                        diagnostic_path_only(&client_path),
+                        parts.headers.contains_key("authorization"),
+''',
+        "resolver compact path privacy",
+    )
+    text = replace_once(
+        text,
+        '''    fn mcp_relay_diag_path_scope_is_narrow() {
+        assert!(is_chatgpt_mcp_backend_path("/backend-api/ps/mcp"));
+        assert!(is_chatgpt_mcp_backend_path(
+            "/backend-api/ps/mcp/.well-known/oauth-protected-resource"
+        ));
+        assert!(is_chatgpt_mcp_backend_path(
+            "/backend-api/ps/mcp?transport=streamable-http"
+        ));
+        assert!(!is_chatgpt_mcp_backend_path("/backend-api/ps/plugins/list"));
+        assert!(!is_chatgpt_mcp_backend_path("/backend-api/f/conversation"));
+    }
+''',
+        '''    fn mcp_relay_diag_path_scope_is_narrow_and_query_is_not_logged() {
+        assert!(is_chatgpt_mcp_backend_path("/backend-api/ps/mcp"));
+        assert!(is_chatgpt_mcp_backend_path(
+            "/backend-api/ps/mcp/.well-known/oauth-protected-resource"
+        ));
+        assert!(is_chatgpt_mcp_backend_path(
+            "/backend-api/ps/mcp?access_token=do-not-log"
+        ));
+        assert_eq!(
+            diagnostic_path_only("/backend-api/ps/mcp?access_token=do-not-log"),
+            "/backend-api/ps/mcp"
+        );
+        assert!(!is_chatgpt_mcp_backend_path("/backend-api/ps/plugins/list"));
+        assert!(!is_chatgpt_mcp_backend_path("/backend-api/f/conversation"));
+    }
+''',
+        "privacy path regression",
+    )
+    return text
+
+
 def main() -> None:
     text = TARGET.read_text(encoding="utf-8")
-    present = [marker in text for marker in (MARKER, RESOLVE_MARKER, PRIVACY_MARKER)]
-    if any(present):
-        if not all(present):
-            raise SystemExit(
-                "r20 mcp diag: partial/old generated diagnostic detected; refusing to silently accept it"
-            )
-        print("r20 mcp relay diagnostics already applied and privacy markers verified")
+    if MARKER in text or RESOLVE_MARKER in text or PRIVACY_MARKER in text:
+        refreshed = refresh_early_r20(text)
+        if refreshed != text:
+            TARGET.write_text(refreshed, encoding="utf-8")
+            print("refreshed early r20 MCP diagnostics with query-safe logging")
+        else:
+            print("r20 mcp relay diagnostics already applied and privacy markers verified")
         return
 
     backend_helper = '''fn is_chatgpt_backend_path(path: &str) -> bool {

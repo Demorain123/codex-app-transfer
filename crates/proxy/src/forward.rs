@@ -1090,7 +1090,7 @@ pub async fn forward_handler(
                     format!(
                         "[resolver-diag] method={} path={} auth={} x_api_key={} api_key={} headers=[{}] error={}",
                         parts.method,
-                        client_path,
+                        diagnostic_path_only(&client_path),
                         parts.headers.contains_key("authorization"),
                         parts.headers.contains_key("x-api-key"),
                         parts.headers.contains_key("api-key"),
@@ -1578,13 +1578,18 @@ fn is_chatgpt_backend_path(path: &str) -> bool {
 }
 
 // CAS-MCP-RELAY-DIAG-R20-HOOK
+// CAS-MCP-RELAY-DIAG-R20-QUERY-PRIVACY
 // Diagnostic-only helpers for the ChatGPT hosted-MCP relay path. These do not change routing,
 // authentication, or response handling; they only make the already-existing diagnostic trace
 // trustworthy enough to compare what Codex sent with what reqwest was actually prepared to send.
 static MCP_RELAY_DIAG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+fn diagnostic_path_only(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
 fn is_chatgpt_mcp_backend_path(path: &str) -> bool {
-    let p = path.split('?').next().unwrap_or(path);
+    let p = diagnostic_path_only(path);
     p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")
 }
 
@@ -1633,7 +1638,8 @@ async fn passthrough_chatgpt_backend(
         telemetry.logs.add(
             "INFO",
             format!(
-                "[mcp-relay-diag id={diag_id}] inbound method={method} path={client_path} body_bytes={} auth={} cookie={} account={} headers=[{}]",
+                "[mcp-relay-diag id={diag_id}] inbound method={method} path={} body_bytes={} auth={} cookie={} account={} headers=[{}]",
+                diagnostic_path_only(client_path),
                 body.len(),
                 headers.contains_key("authorization"),
                 headers.contains_key("cookie"),
@@ -4366,14 +4372,18 @@ mod tests {
     }
 
     #[test]
-    fn mcp_relay_diag_path_scope_is_narrow() {
+    fn mcp_relay_diag_path_scope_is_narrow_and_query_is_not_logged() {
         assert!(is_chatgpt_mcp_backend_path("/backend-api/ps/mcp"));
         assert!(is_chatgpt_mcp_backend_path(
             "/backend-api/ps/mcp/.well-known/oauth-protected-resource"
         ));
         assert!(is_chatgpt_mcp_backend_path(
-            "/backend-api/ps/mcp?transport=streamable-http"
+            "/backend-api/ps/mcp?access_token=do-not-log"
         ));
+        assert_eq!(
+            diagnostic_path_only("/backend-api/ps/mcp?access_token=do-not-log"),
+            "/backend-api/ps/mcp"
+        );
         assert!(!is_chatgpt_mcp_backend_path("/backend-api/ps/plugins/list"));
         assert!(!is_chatgpt_mcp_backend_path("/backend-api/f/conversation"));
     }

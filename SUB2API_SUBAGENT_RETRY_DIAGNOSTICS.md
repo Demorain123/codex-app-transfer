@@ -1,29 +1,48 @@
-# Subagent retry diagnostics (r16)
+# Parent/child stream retry diagnostics (r19)
 
-This diagnostic is for one question only:
+This diagnostic answers one narrow question:
 
-> Does a spawned Codex subagent inherit the parent's provider-level `stream_max_retries`, or does the child session fall back to Codex's default of 5?
+> Why can a Codex main session use a provider-level `stream_max_retries = 15` while a spawned Grok subagent appears to reconnect only `1/5 ... 5/5`?
 
-It deliberately separates two independent observations:
+It deliberately combines three independent observations:
 
-- **A — Effective config lock export:** inspect the effective session config that Codex resolved for parent and child threads.
-- **B — One-shot synthetic 429:** deterministically force exactly one eligible Grok subagent request to reconnect so the UI reveals `Reconnecting 1/N` without waiting for a natural upstream rate limit.
+- **A — Effective config lock export:** inspect the effective session config Codex resolved for parent and child threads.
+- **B — Child one-shot incomplete SSE:** force exactly one eligible Grok subagent response stream to end before `response.completed`.
+- **C — Main one-shot incomplete SSE:** force exactly one eligible main-agent response stream to end before `response.completed` in the same Transfer process/provider.
+
+r18 added compact request-identity correlation logs. r19 corrects the fault-injection layer: a raw HTTP 429 happens before a Responses stream is established and therefore exercises request/status handling, not `stream_max_retries`. r19 instead returns HTTP 200 `text/event-stream`, emits a minimal Responses event, and ends the body before `response.completed`, matching the failure shape used by Codex's own `stream_no_completed` regression test.
 
 ## Safety / scope
 
-The r16 fault injector is disabled by default. It can only trigger when all of these are true:
+All fault injection is disabled by default.
+
+### Child injector
+
+It can trigger only when all are true:
 
 1. the provider is an explicit Responses provider with `sub2apiGrokCompat=true`;
 2. the model is `grok-*`;
 3. Codex marks the request as a subagent with `x-openai-subagent` or `x-codex-parent-thread-id`;
-4. the local arming flag exists at `~/.codex-app-transfer/subagent-retry-diag.flag`;
-5. this Transfer process has not injected once already.
+4. `~/.codex-app-transfer/subagent-retry-diag.flag` exists;
+5. this Transfer process has not already consumed a child diagnostic fault.
 
-The flag is deleted immediately after the synthetic 429 is consumed. GPT/OpenAI models and main-agent requests are not eligible. No prompt, tool arguments, API keys, header values, or request bodies are logged.
+### Main injector
+
+It can trigger only when all are true:
+
+1. the provider is an explicit Responses provider with `sub2apiGrokCompat=true`;
+2. the request contains a model;
+3. the request does **not** carry `x-openai-subagent` or `x-codex-parent-thread-id`;
+4. `~/.codex-app-transfer/main-retry-diag.flag` exists;
+5. this Transfer process has not already consumed a main diagnostic fault.
+
+Each flag is deleted immediately after it is consumed. Main and child injectors have independent process guards, so one main fault and one child fault can be tested in the same Transfer process.
+
+No prompt, request body, tool arguments, API keys, authorization values, or raw thread/session/request IDs are logged. Identity values are reduced to short deterministic fingerprints used only to correlate retries.
 
 ## A. Export effective Codex session configs
 
-Codex exposes a debug config-lock exporter. For the test, add this temporary block to `~/.codex/config.toml`:
+Add this temporary block to `~/.codex/config.toml`:
 
 ```toml
 [debug.config_lockfile]
@@ -31,20 +50,22 @@ export_dir = "C:/Users/Demorain/.codex-app-transfer/subagent-retry-diag/config-l
 save_fields_resolved_from_model_catalog = true
 ```
 
-Create the directory if desired (Codex may create it itself):
+Create/clean the directory before a controlled test:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\.codex-app-transfer\subagent-retry-diag\config-locks" | Out-Null
+$LockDir = "$HOME\.codex-app-transfer\subagent-retry-diag\config-locks"
+Remove-Item "$LockDir\*" -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $LockDir | Out-Null
 ```
 
 Restart Codex Desktop after changing `config.toml`, then:
 
-1. create/use a parent session that is known to show `Reconnecting x/15` when it reconnects;
-2. spawn one `grok-4.5` / `high` subagent with `fork_context=false`;
-3. wait until the child has started and issued at least one model request;
-4. inspect the newest files under the export directory.
+1. create a parent Luna session;
+2. spawn one `grok-4.5` / `high` / `fork_context=false` worker;
+3. wait until both parent and child have issued model requests;
+4. inspect the newest lock files.
 
-The fields of interest are:
+Fields of interest:
 
 ```text
 model_provider
@@ -66,53 +87,104 @@ Get-ChildItem "$HOME\.codex-app-transfer\subagent-retry-diag\config-locks" -File
   }
 ```
 
-Do not use a lock file as `load_path`; this test is export-only.
+Do not use an exported lock as `load_path`; this test is export-only.
 
-## B. Deterministically force one Grok subagent reconnect
+## B. Force one Grok child stream reconnect
 
-With r16 running, arm exactly one synthetic 429:
+Arm one child fault:
 
 ```powershell
 New-Item -ItemType File -Force "$HOME\.codex-app-transfer\subagent-retry-diag.flag" | Out-Null
 ```
 
-Then spawn one Grok 4.5 High child and give it a harmless read-only task that causes a normal model request. The first eligible child request receives:
+Then spawn one Grok 4.5 High child and give it a harmless read-only task that causes a normal model request. The first eligible child request is answered locally with:
 
 ```http
-HTTP/1.1 429 Too Many Requests
-Retry-After: 1
-Content-Type: application/json
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+X-CAS-Retry-Diag: incomplete-sse-before-response-completed
+
+ data: {"type":"response.output_item.done"}
 ```
 
-with a diagnostic error code `subagent_retry_diag`.
+The SSE body then ends without any `response.completed` event. Codex should classify this as a retryable stream disconnect rather than a raw HTTP-status failure.
 
-Observe the Codex child UI:
+Observe the child UI:
 
 ```text
-Reconnecting 1/15  -> child inherited the configured retry budget
-Reconnecting 1/5   -> child resolved/fell back to the default retry budget
+Reconnecting 1/15  -> child transport is using the configured retry budget
+Reconnecting 1/5   -> child transport is using the default/fallback budget
 ```
 
-The flag is consumed automatically. To repeat the test, create it again. To disarm before it fires:
+## C. Force one main-agent stream reconnect
+
+Keep the same Transfer process and provider. Arm the main control:
 
 ```powershell
+New-Item -ItemType File -Force "$HOME\.codex-app-transfer\main-retry-diag.flag" | Out-Null
+```
+
+Immediately send one simple prompt from the Luna main session. The first eligible non-subagent request receives the same one-shot incomplete HTTP-200 SSE response and should enter Codex's stream reconnect loop.
+
+Observe the main UI:
+
+```text
+Reconnecting 1/15  -> main transport is using the configured retry budget
+Reconnecting 1/5   -> main transport is also using the default/fallback budget
+```
+
+The strongest reproduction is:
+
+```text
+same Codex process
+same Transfer process
+same provider/config.toml
+main  -> Reconnecting 1/15
+child -> Reconnecting 1/5
+```
+
+That removes Sub2API timing and natural rate limiting as variables and isolates parent-vs-child runtime configuration.
+
+## Correlation logs
+
+For explicit Sub2API Grok-compat Responses traffic, compact runtime lines associate repeated requests with the same main/child identities without exposing the raw IDs:
+
+```text
+[retry-runtime-diag] target=main model=gpt-5.6-luna provider=sub2api thread=91b62b6f parent=- session=2ee6f355 client_request=dc0a09ad subagent_header=false parent_thread_header=false
+[retry-runtime-diag] target=subagent model=grok-4.5 provider=sub2api thread=abc412ef parent=91b62b6f session=6d68a3be client_request=71e21450 subagent_header=true parent_thread_header=true
+```
+
+The hexadecimal identity tokens are fingerprints, not raw IDs. Equal fingerprints across retry attempts indicate the same underlying identity value.
+
+An armed r19 fault produces one of:
+
+```text
+[main-retry-diag] injecting synthetic incomplete SSE before response.completed; model=gpt-5.6-luna ...
+[subagent-retry-diag] injecting synthetic incomplete SSE before response.completed; model=grok-4.5 ...
+```
+
+If a log still says `injecting synthetic one-shot HTTP 429`, that build is r18 or older and is not suitable for measuring `stream_max_retries` deterministically.
+
+## Disarm / repeat
+
+Disarm flags before they fire:
+
+```powershell
+Remove-Item "$HOME\.codex-app-transfer\main-retry-diag.flag" -ErrorAction SilentlyContinue
 Remove-Item "$HOME\.codex-app-transfer\subagent-retry-diag.flag" -ErrorAction SilentlyContinue
 ```
 
-Transfer logs contain only compact diagnostics such as:
+Because each target also has a process-local one-shot guard, **restart Codex App Transfer before repeating the same target's synthetic fault a second time**. Creating the same flag again without restarting Transfer intentionally will not inject a second fault. Main and child guards are independent, so one main + one child test does not require a restart between them.
 
-```text
-[subagent-retry-diag] injecting synthetic one-shot HTTP 429; model=grok-4.5 subagent_header=true parent_thread_header=true
-[subagent-retry-diag] armed flag consumed; this process will not inject again
-```
+## Interpretation
 
-## Interpreting A + B together
-
-| Effective child config | Forced reconnect | Interpretation |
-|---|---|---|
-| `stream_max_retries = 15` | `1/15` | inheritance works; no bug reproduced |
-| missing / 5 | `1/5` | child effective provider config lost retry tuning |
-| `stream_max_retries = 15` | `1/5` | retry budget is being replaced later than config resolution; inspect child `ModelClient` / transport construction |
-| missing / 5 | `1/15` | UI/request path differs from exported lock; investigate which config snapshot the child transport actually uses |
+| Effective child config | Main forced reconnect | Child forced reconnect | Interpretation |
+|---|---:|---:|---|
+| 15 | `1/15` | `1/15` | inheritance works; previous `/5` came from a different path/session |
+| missing / 5 | `1/15` | `1/5` | child effective provider config lost retry tuning before transport creation |
+| **15** | **`1/15`** | **`1/5`** | strongest evidence that child config looks correct but the child `ModelClient`/transport later uses a default provider snapshot |
+| missing / 5 | `1/5` | `1/5` | parent control is not using the expected provider tuning; re-check active provider selection |
+| 15 | `1/5` | `1/5` | config-lock export and actual transport retry budget diverge for both sessions |
 
 After the test, remove the temporary `[debug.config_lockfile]` block if you do not want Codex to keep exporting config locks.

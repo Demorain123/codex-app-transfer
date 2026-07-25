@@ -27,6 +27,7 @@ on:
       - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
+      - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
@@ -86,8 +87,11 @@ jobs:
       - name: Apply Sub2API OpenAI official-Codex identity overlay
         run: python3 scripts/apply_sub2api_openai_codex_identity.py
 
-      - name: Apply subagent retry diagnostic overlay
+      - name: Apply parent/child retry diagnostic overlay
         run: python3 scripts/apply_sub2api_subagent_retry_diag.py
+
+      - name: Apply r19 stream retry diagnostic overlay
+        run: python3 scripts/apply_sub2api_stream_retry_diag.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py

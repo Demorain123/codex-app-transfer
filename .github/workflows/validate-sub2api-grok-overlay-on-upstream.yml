@@ -13,6 +13,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
@@ -35,6 +36,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
@@ -73,6 +75,7 @@ jobs:
             scripts/apply_sub2api_grok_compat_ui_dispatch.py
             scripts/apply_sub2api_grok_gateway_auth.py
             scripts/apply_sub2api_grok_replay_compat.py
+            scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
             scripts/apply_sub2api_grok_terminal_compat.py
             scripts/apply_sub2api_grok_apply_patch_recovery.py
             scripts/apply_sub2api_grok_apply_patch_hardening.py
@@ -114,7 +117,7 @@ jobs:
           echo "PRISTINE_BASE_SHA=$base_sha" >> "$GITHUB_ENV"
 
       # Keep each layer as its own Actions step. When a future upstream change breaks one
-      # anchor, the workflow UI now names the exact failing overlay instead of collapsing
+      # anchor, the workflow UI names the exact failing overlay instead of collapsing
       # everything into the reset step.
       - name: Apply Responses compat overlay on pristine upstream
         run: python3 scripts/apply_sub2api_grok_compat.py
@@ -127,6 +130,9 @@ jobs:
 
       - name: Apply Grok replay/tool_search overlay on pristine upstream
         run: python3 scripts/apply_sub2api_grok_replay_compat.py
+
+      - name: Apply Grok apply_patch r14 bootstrap on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
 
       - name: Apply Grok terminal completion overlay on pristine upstream
         run: python3 scripts/apply_sub2api_grok_terminal_compat.py
@@ -156,6 +162,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R14-BOOTSTRAP' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-RECOVERY-R16-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID' crates/adapters/src/responses/grok_tool_shim.rs
@@ -199,6 +206,7 @@ jobs:
               python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
               python3 scripts/apply_sub2api_grok_gateway_auth.py
               python3 scripts/apply_sub2api_grok_replay_compat.py
+              python3 scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
               python3 scripts/apply_sub2api_grok_terminal_compat.py
               python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
               python3 scripts/apply_sub2api_grok_apply_patch_hardening.py

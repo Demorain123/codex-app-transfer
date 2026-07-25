@@ -440,7 +440,17 @@ impl GrokToolCallShim {
             .cloned()
             .unwrap_or_default();
 
-        let mut interrupted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID
+        // A failed/incomplete terminal response is a hard safety boundary for apply_patch.
+        // Grok/Sub2API may omit item ids or call ids in the terminal envelope, so tracking only
+        // `item_id` can accidentally let the envelope be rewritten back to status=completed.
+        // Keep three independent identities; any one match is enough to preserve fail-closed.
+        let mut interrupted_indices: std::collections::HashSet<u64> =
+            std::collections::HashSet::new();
+        let mut interrupted_item_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut interrupted_call_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         if !self.items.is_empty() {
             let mut leftovers: Vec<(u64, Pending)> = self.items.drain().collect();
             leftovers.sort_by_key(|(idx, _)| *idx);
@@ -482,7 +492,13 @@ impl GrokToolCallShim {
                 // Incomplete/failed terminal responses remain explicitly interrupted.
                 let treat_as_interrupted = !terminal_completed;
                 if treat_as_interrupted {
-                    interrupted.insert(p.item_id.clone());
+                    interrupted_indices.insert(output_index);
+                    if !p.item_id.is_empty() {
+                        interrupted_item_ids.insert(p.item_id.clone());
+                    }
+                    if !p.call_id.is_empty() {
+                        interrupted_call_ids.insert(p.call_id.clone());
+                    }
                 }
 
                 // Safe diagnostic only: never log patch contents or argument previews.
@@ -506,25 +522,36 @@ impl GrokToolCallShim {
             .and_then(|r| r.get_mut("output"))
             .and_then(|o| o.as_array_mut())
         {
-            for item in output.iter_mut() {
+            for (terminal_index, item) in output.iter_mut().enumerate() {
                 let id = item.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
                 self.rewrite_envelope_item(item);
-                if let Some(id) = id {
-                    if interrupted.contains(&id) {
-                        if let Some(o) = item.as_object_mut() {
-                            o.insert("status".into(), Value::String("incomplete".into()));
-                            // Keep incomplete/failed terminal envelopes fail-closed too.
-                            if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
-                                && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                let item_was_interrupted = u64::try_from(terminal_index)
+                    .ok()
+                    .is_some_and(|idx| interrupted_indices.contains(&idx))
+                    || id
+                        .as_ref()
+                        .is_some_and(|id| interrupted_item_ids.contains(id))
+                    || call_id
+                        .as_ref()
+                        .is_some_and(|call_id| interrupted_call_ids.contains(call_id));
+                if item_was_interrupted {
+                    if let Some(o) = item.as_object_mut() {
+                        o.insert("status".into(), Value::String("incomplete".into()));
+                        // Keep incomplete/failed terminal envelopes fail-closed too.
+                        if o.get("type").and_then(Value::as_str) == Some("custom_tool_call")
+                            && o.get("name").and_then(Value::as_str) == Some("apply_patch")
+                        {
+                            if let Some(input) =
+                                o.get("input").and_then(Value::as_str).map(str::to_owned)
                             {
-                                if let Some(input) =
-                                    o.get("input").and_then(Value::as_str).map(str::to_owned)
-                                {
-                                    o.insert(
-                                        "input".into(),
-                                        Value::String(block_incomplete_apply_patch(&input)),
-                                    );
-                                }
+                                o.insert(
+                                    "input".into(),
+                                    Value::String(block_incomplete_apply_patch(&input)),
+                                );
                             }
                         }
                     }
@@ -662,7 +689,7 @@ fn finalize_apply_patch(args_acc: &str, cwd: Option<&str>, interrupted: bool) ->
     let input = extract_apply_patch_input(&normalized_args);
     let (input, begin_repaired, end_repaired) = repair_grok_v4a_sentinels(&input);
     if begin_repaired || end_repaired {
-        tracing::warn!(
+        tracing::info!(
             target: "adapters::grok_tool_diag",
             begin_repaired,
             end_repaired,
@@ -1156,6 +1183,103 @@ mod tests {
         let done = &frames[3].1["item"];
         assert_eq!(done["status"], "completed");
         assert_eq!(done["input"], canonical);
+    }
+
+    #[test]
+    fn grok_markdown_style_v4a_sentinels_are_repaired_for_update_and_delete() {
+        let cases = [
+            (
+                "*** Begin Patch ***\n*** Update File: probe.txt\n-old\n+new\n*** End Patch ***\n",
+                "*** Begin Patch\n*** Update File: probe.txt\n-old\n+new\n*** End Patch\n",
+            ),
+            (
+                "*** Begin Patch ***\n*** Delete File: probe.txt\n*** End Patch ***\n",
+                "*** Begin Patch\n*** Delete File: probe.txt\n*** End Patch\n",
+            ),
+        ];
+
+        for (case_idx, (malformed, canonical)) in cases.into_iter().enumerate() {
+            let args = serde_json::to_string(&json!({ "input": malformed })).unwrap();
+            let input = [
+                frame(
+                    "response.output_item.added",
+                    json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                        "item":{"type":"function_call","id":format!("fc_case_{case_idx}"),"call_id":format!("call_case_{case_idx}"),"name":"apply_patch","arguments":""}}),
+                ),
+                frame(
+                    "response.output_item.done",
+                    json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                        "item":{"type":"function_call","id":format!("fc_case_{case_idx}"),"call_id":format!("call_case_{case_idx}"),"name":"apply_patch","arguments":args}}),
+                ),
+            ]
+            .concat();
+            let frames = run(&input);
+            let done = &frames[3].1["item"];
+            assert_eq!(done["status"], "completed");
+            assert_eq!(done["input"], canonical);
+            assert!(validate_v4a_syntax(done["input"].as_str().unwrap()).is_ok());
+        }
+    }
+
+    #[test]
+    fn grok_sentinel_repair_never_touches_prefixed_body_lines() {
+        let malformed = "*** Begin Patch ***\n*** Add File: sentinel-body.txt\n+*** End Patch ***\n*** End Patch ***\n";
+        let canonical =
+            "*** Begin Patch\n*** Add File: sentinel-body.txt\n+*** End Patch ***\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": malformed })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_body_sentinel","call_id":"call_body_sentinel","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","sequence_number":1,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_body_sentinel","call_id":"call_body_sentinel","name":"apply_patch","arguments":args}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let done = &frames[3].1["item"];
+        assert_eq!(done["status"], "completed");
+        assert_eq!(done["input"], canonical);
+        assert!(done["input"]
+            .as_str()
+            .unwrap()
+            .contains("+*** End Patch ***"));
+    }
+
+    #[test]
+    fn incomplete_terminal_without_item_or_call_id_stays_fail_closed() {
+        let patch = "*** Begin Patch\n*** Delete File: must-not-run.txt\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.incomplete",
+                json!({"type":"response.incomplete","sequence_number":1,
+                    "response":{"output":[{"type":"function_call","name":"apply_patch","arguments":args}]}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let streamed_done = &frames[1].1["item"];
+        assert_eq!(streamed_done["status"], "incomplete");
+        assert!(streamed_done["input"]
+            .as_str()
+            .unwrap()
+            .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
+        let terminal_item = &frames[2].1["response"]["output"][0];
+        assert_eq!(terminal_item["status"], "incomplete");
+        assert!(terminal_item["input"]
+            .as_str()
+            .unwrap()
+            .starts_with(INCOMPLETE_APPLY_PATCH_PREFIX));
     }
 
     #[test]

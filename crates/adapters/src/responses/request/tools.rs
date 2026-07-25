@@ -47,6 +47,7 @@ pub(crate) const TOOL_SEARCH_BY_NAME_HINT: &str = "\n\nIf a tool is referenced b
 /// 不显式说清这个,模型会把 context 行当成 space 行再写一次,parse_patch
 /// 找不到双行 → 整个 patch 拒收。本 description 通过显式规则 + 一个最小
 /// 可执行的更新文件 example 让模型看到正确形态。
+// CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT: explicitly forbid Markdown-style trailing stars on V4A sentinels.
 pub(crate) const APPLY_PATCH_TOOL_DESCRIPTION_FOR_CHAT: &str = concat!(
     "Edit files using the apply_patch tool. ",
     "**ALWAYS use this tool to write file content** — new files, single-line edits, and full-file rewrites alike. ",
@@ -55,6 +56,7 @@ pub(crate) const APPLY_PATCH_TOOL_DESCRIPTION_FOR_CHAT: &str = concat!(
     "**PREFER SURGICAL TARGETED EDITS.** To change or replace existing content, emit ONLY the specific `-` (old) and `+` (new) lines for what actually changes, with minimal context. Do NOT regenerate the whole file/section and append it; do NOT rewrite an entire file just because part of it changed. Reserve full-file replacement (`*** Delete File: <path>` then `*** Add File: <path>` with every line `+`-prefixed, in one patch) for genuine cases ONLY: creating brand-new content, or when almost every line truly differs. ",
     "Call this function with a single `input` string containing a V4A patch. ",
     "**The patch MUST start with `*** Begin Patch` as the literal first line** (no leading whitespace, no other content before it), and end with `*** End Patch`. ",
+    "**Do NOT append trailing stars to either envelope sentinel** — `*** Begin Patch ***` and `*** End Patch ***` are invalid Markdown-styled variants; use exactly `*** Begin Patch` and `*** End Patch`. ",
     "Each file operation header is one of `*** Add File: <path>`, ",
     "`*** Update File: <path>` (optionally followed by `*** Move to: <path>`, but Update with Move STILL requires at least one hunk — see RENAME / MOVE FILE section), ",
     "or `*** Delete File: <path>`. ",
@@ -170,6 +172,7 @@ pub(crate) const APPLY_PATCH_TOOL_DESCRIPTION_FOR_CHAT: &str = concat!(
 /// histories — keep the rule visible at parameter level too).
 pub(crate) const APPLY_PATCH_INPUT_DESCRIPTION_FOR_CHAT: &str = concat!(
     "A V4A patch starting with `*** Begin Patch` and ending with `*** End Patch`. ",
+    "Use those two envelope sentinels EXACTLY as written — no trailing ` ***` (so never `*** Begin Patch ***` / `*** End Patch ***`). ",
     "Use `*** Add File:`, `*** Update File:`, or `*** Delete File:` headers. ",
     "Update File simplest form: just `-line`/`+line` rows directly after the header ",
     "(no `@@`, no context) — use this when the `-` line is unique in the file. ",

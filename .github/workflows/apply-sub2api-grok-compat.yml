@@ -19,6 +19,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
@@ -63,6 +64,9 @@ jobs:
 
       - name: Apply Grok replay and tool_search compat overlay
         run: python3 scripts/apply_sub2api_grok_replay_compat.py
+
+      - name: Apply Grok apply_patch r14 bootstrap overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
 
       - name: Apply Grok terminal completion compat overlay
         run: python3 scripts/apply_sub2api_grok_terminal_compat.py

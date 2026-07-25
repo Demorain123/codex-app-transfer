@@ -140,6 +140,28 @@ CALL = r'''    // CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL: consume an armed retry
 '''
 
 
+def _validate_generated_r19(text: str) -> None:
+    required_fragments = [
+        'fn sub2api_stream_retry_diag_sse_body() -> String',
+        'format!("data: {event}\\n\\n")',
+        'assert!(body.ends_with("\\n\\n"));',
+        'assert!(!body.contains("\\\\n"));',
+        'injecting synthetic incomplete SSE before response.completed',
+    ]
+    missing = [fragment for fragment in required_fragments if fragment not in text]
+    if missing:
+        raise SystemExit(
+            "r19 generated stream diagnostic failed semantic validation; missing: "
+            + ", ".join(missing)
+        )
+
+    stale_literal = r'format!("data: {event}\\n\\n")'
+    if stale_literal in text:
+        raise SystemExit(
+            "r19 generated stream diagnostic still contains literal backslash-n SSE delimiters"
+        )
+
+
 def main() -> int:
     text = FORWARD.read_text(encoding="utf-8")
 
@@ -147,10 +169,6 @@ def main() -> int:
     call_present = CALL_MARKER in text
     if helper_present != call_present:
         raise SystemExit("partial r19 stream retry diagnostic overlay detected; refusing to guess")
-
-    if helper_present:
-        print("r19 stream retry diagnostic overlay already present; validating.")
-        return 0
 
     # The r18 overlay must be applied first because r19 reuses its eligibility,
     # identity, flag-consumption, fingerprint and correlation helpers.
@@ -167,16 +185,30 @@ def main() -> int:
             + ", ".join(missing)
         )
 
-    if HELPER_ANCHOR not in text:
-        raise SystemExit(f"r19 helper anchor not found in {FORWARD}")
-    text = text.replace(HELPER_ANCHOR, HELPER + HELPER_ANCHOR, 1)
+    if helper_present:
+        # r19 was live-tested while its script was still evolving. Replace the
+        # complete generated r19 blocks rather than returning early so an already
+        # generated branch is self-upgraded to the current probe semantics.
+        helper_start = text.index("/// " + HELPER_MARKER)
+        helper_end = text.index(HELPER_ANCHOR, helper_start)
+        text = text[:helper_start] + HELPER.lstrip("\n") + text[helper_end:]
 
-    if CALL_ANCHOR not in text:
-        raise SystemExit(f"r19 call anchor not found in {FORWARD}")
-    text = text.replace(CALL_ANCHOR, CALL + CALL_ANCHOR, 1)
+        call_start = text.index("    // " + CALL_MARKER)
+        call_end = text.index(CALL_ANCHOR, call_start)
+        text = text[:call_start] + CALL + text[call_end:]
+        print("Refreshed existing r19 stream retry diagnostic overlay to current semantics.")
+    else:
+        if HELPER_ANCHOR not in text:
+            raise SystemExit(f"r19 helper anchor not found in {FORWARD}")
+        text = text.replace(HELPER_ANCHOR, HELPER + HELPER_ANCHOR, 1)
 
+        if CALL_ANCHOR not in text:
+            raise SystemExit(f"r19 call anchor not found in {FORWARD}")
+        text = text.replace(CALL_ANCHOR, CALL + CALL_ANCHOR, 1)
+        print("Applied r19 incomplete-SSE stream retry diagnostic overlay.")
+
+    _validate_generated_r19(text)
     FORWARD.write_text(text, encoding="utf-8")
-    print("Applied r19 incomplete-SSE stream retry diagnostic overlay.")
     return 0
 
 

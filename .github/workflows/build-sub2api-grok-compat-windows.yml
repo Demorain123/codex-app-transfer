@@ -16,6 +16,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
@@ -43,6 +44,7 @@ on:
       - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
       - 'scripts/apply_sub2api_grok_gateway_auth.py'
       - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
       - 'scripts/apply_sub2api_grok_terminal_compat.py'
       - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
       - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
@@ -84,6 +86,7 @@ jobs:
           python scripts/apply_sub2api_grok_compat_ui_dispatch.py
           python scripts/apply_sub2api_grok_gateway_auth.py
           python scripts/apply_sub2api_grok_replay_compat.py
+          python scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
           python scripts/apply_sub2api_grok_terminal_compat.py
           python scripts/apply_sub2api_grok_apply_patch_recovery.py
           python scripts/apply_sub2api_grok_apply_patch_hardening.py
@@ -101,6 +104,7 @@ jobs:
           fi
           grep -F -q 'user_id/organizations' crates/proxy/src/resolver.rs
           grep -F -q 'CAS-SUB2API-GROK-TOOLSEARCH-ARGS-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R14-BOOTSTRAP' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-RECOVERY-R16-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID' crates/adapters/src/responses/grok_tool_shim.rs

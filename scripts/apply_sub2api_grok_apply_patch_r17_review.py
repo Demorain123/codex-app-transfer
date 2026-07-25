@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Second r17 self-review pass for Grok apply_patch compatibility.
+"""Multi-pass r17 self-review for Grok apply_patch compatibility.
 
-This pass intentionally stays separate from the main r17 hardening overlay so
-it can be audited/reverted independently. It fixes two transport-shape safety
-edges around the JSON/V4A boundary:
+This overlay intentionally stays separate from the main r17 hardening layer so
+review fixes can be audited/reverted independently. It addresses three subtle
+edges found after the first successful r16 real-device Add File probe:
 
-1. `detect_json_truncation` must only inspect the ORIGINAL JSON-wrapped function
-   arguments. Bare V4A is a supported recovery shape and may legitimately
-   contain unmatched source-code braces/quotes with no JSON structural meaning.
-2. V4A envelope auto-completion (`*** Begin/End Patch`) is allowed only when the
-   ORIGINAL argument had a structurally complete JSON wrapper. A raw bare-V4A
-   stream that ends at EOF without `*** End Patch` cannot prove it was not
-   transport-truncated, so it must remain fail-closed rather than being repaired
-   into an executable patch.
+1. JSON truncation is evaluated only on the ORIGINAL JSON-wrapped function
+   argument. Bare V4A may legitimately contain unmatched source braces/quotes.
+2. V4A envelope auto-completion is allowed only when the ORIGINAL argument has
+   a structurally complete JSON wrapper. Raw bare-V4A EOF without EndPatch has
+   no transport-completeness proof and must stay fail-closed.
+3. Terminal argument recovery by output_index must also match the pending tool
+   name; otherwise a reordered/compacted terminal output array could feed some
+   other function's arguments into apply_patch before the id/call-id fallback.
 
 It also contains a migration guard for the earliest r17 prompt-marker draft,
 where the internal marker could have landed inside model-visible text.
@@ -25,6 +25,7 @@ TOOLS = Path("crates/adapters/src/responses/request/tools.rs")
 
 BARE_V4A_MARKER = "CAS-SUB2API-GROK-APPLY-PATCH-R17-BARE-V4A-NOT-JSON"
 WRAPPER_PROOF_MARKER = "CAS-SUB2API-GROK-APPLY-PATCH-R17-ENVELOPE-REQUIRES-JSON-PROOF"
+TERMINAL_NAME_MARKER = "CAS-SUB2API-GROK-APPLY-PATCH-R17-TERMINAL-NAME-MATCH"
 PROMPT_MARKER = "CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT"
 PROMPT_COMMENT = (
     f"// {PROMPT_MARKER}: explicitly forbid Markdown-style trailing stars on V4A sentinels.\n"
@@ -48,8 +49,6 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 # ---------------------------------------------------------------------------
 # 1. JSON proof belongs to the ORIGINAL wire argument, before bounded unwrapping.
-#    This both avoids false-positive JSON scans on bare V4A and prevents raw EOF
-#    from gaining an EndPatch sentinel merely because optimize_patch can repair it.
 # ---------------------------------------------------------------------------
 text = read(SHIM)
 if WRAPPER_PROOF_MARKER not in text:
@@ -130,9 +129,6 @@ if WRAPPER_PROOF_MARKER not in text:
 
     #[test]
     fn bare_v4a_missing_end_at_raw_eof_stays_fail_closed() {
-        // No JSON wrapper means raw EOF itself cannot prove transport completeness. Even though
-        // the generic preflight knows how to append a missing EndPatch for complete JSON calls,
-        // this bare-V4A shape must NOT be promoted into an executable patch.
         let patch = "*** Begin Patch\n*** Add File: raw-eof.txt\n+must-not-run\n";
         let input = frame(
             "response.output_item.added",
@@ -150,8 +146,6 @@ if WRAPPER_PROOF_MARKER not in text:
 
     #[test]
     fn complete_json_wrapper_can_still_repair_missing_v4a_end() {
-        // A closed JSON object is a transport-completeness proof for its string value, so the
-        // established non-destructive envelope preflight may still repair a model-omitted EndPatch.
         let patch_without_end = "*** Begin Patch\n*** Add File: json-complete.txt\n+ok\n";
         let args = serde_json::to_string(&json!({ "input": patch_without_end })).unwrap();
         let input = [
@@ -177,7 +171,6 @@ if WRAPPER_PROOF_MARKER not in text:
     }
 
 '''
-    # Avoid duplicating the first test if an earlier generated run already applied v1 of this overlay.
     if "fn bare_v4a_with_unbalanced_source_brace_is_not_misclassified_as_json_truncation()" in text:
         first_start = text.index(
             "    #[test]\n    fn bare_v4a_with_unbalanced_source_brace_is_not_misclassified_as_json_truncation()"
@@ -192,7 +185,98 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# 2. Migration guard for the earliest r17 draft only. The internal overlay
+# 2. Same-index recovery is only authoritative when it is still the same tool.
+#    If terminal output is compacted/reordered, reject a different function name
+#    and let stable item/call ids locate the real apply_patch call.
+# ---------------------------------------------------------------------------
+text = read(SHIM)
+if TERMINAL_NAME_MARKER not in text:
+    old_indexed = '''                let indexed = usize::try_from(output_index)
+                    .ok()
+                    .and_then(|idx| terminal_output.get(idx))
+                    .filter(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("function_call")
+                    });
+'''
+    new_indexed = f'''                // {TERMINAL_NAME_MARKER}
+                let indexed = usize::try_from(output_index)
+                    .ok()
+                    .and_then(|idx| terminal_output.get(idx))
+                    .filter(|item| {{
+                        item.get("type").and_then(Value::as_str) == Some("function_call")
+                            && item.get("name").and_then(Value::as_str) == Some(p.name.as_str())
+                    }});
+'''
+    text = replace_once(text, old_indexed, new_indexed, "terminal indexed name match")
+
+    old_fallback = '''                        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+                            return false;
+                        }
+'''
+    new_fallback = '''                        if item.get("type").and_then(Value::as_str) != Some("function_call")
+                            || item.get("name").and_then(Value::as_str) != Some(p.name.as_str())
+                        {
+                            return false;
+                        }
+'''
+    text = replace_once(text, old_fallback, new_fallback, "terminal fallback name match")
+
+    test_anchor = '''    #[test]
+    fn completed_terminal_without_output_item_done_recovers_apply_patch() {
+'''
+    test = r'''    #[test]
+    fn completed_terminal_reordered_output_does_not_feed_other_function_args_to_apply_patch() {
+        let patch = "*** Begin Patch\n*** Add File: recovered-by-id.txt\n+ok\n*** End Patch\n";
+        let args = serde_json::to_string(&json!({ "input": patch })).unwrap();
+        let input = [
+            frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","sequence_number":0,"output_index":0,
+                    "item":{"type":"function_call","id":"fc_target","call_id":"call_target","name":"apply_patch","arguments":""}}),
+            ),
+            frame(
+                "response.completed",
+                json!({"type":"response.completed","sequence_number":1,
+                    "response":{"output":[
+                        {"type":"function_call","id":"fc_other","call_id":"call_other","name":"exec_command","arguments":"{\"cmd\":\"echo nope\"}"},
+                        {"type":"function_call","id":"fc_target","call_id":"call_target","name":"apply_patch","arguments":args}
+                    ]}}),
+            ),
+        ]
+        .concat();
+        let frames = run(&input);
+        let streamed_done = frames
+            .iter()
+            .find(|(event, value)| {
+                event == "response.output_item.done"
+                    && value["item"]["name"] == "apply_patch"
+            })
+            .map(|(_, value)| &value["item"])
+            .unwrap();
+        assert_eq!(streamed_done["status"], "completed");
+        assert_eq!(streamed_done["input"], patch);
+        let terminal_apply = frames
+            .last()
+            .unwrap()
+            .1["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["name"] == "apply_patch")
+            .unwrap();
+        assert_eq!(terminal_apply["status"], "completed");
+        assert_eq!(terminal_apply["input"], patch);
+    }
+
+'''
+    text = replace_once(text, test_anchor, test + test_anchor, "reordered terminal regression anchor")
+    write(SHIM, text)
+else:
+    print("[ok] r17 terminal name-match hardening: already applied")
+
+
+# ---------------------------------------------------------------------------
+# 3. Migration guard for the earliest r17 draft only. The internal overlay
 #    marker belongs in a Rust comment, never in model-visible tool text.
 # ---------------------------------------------------------------------------
 text = read(TOOLS)
@@ -216,4 +300,4 @@ if legacy_prefix in text:
 else:
     print("[ok] r17 prompt marker is not model-visible")
 
-print("[ok] Grok apply_patch r17 second self-review overlay applied")
+print("[ok] Grok apply_patch r17 multi-pass self-review overlay applied")

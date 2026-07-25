@@ -613,6 +613,7 @@ impl GrokToolCallShim {
 /// Responses-compatible function_call.arguments is normally a JSON string, but Grok/Sub2API
 /// traffic in the wild can put the JSON object directly on `arguments`. Normalize both shapes
 /// into the string form consumed by the existing parser. Null/missing remains empty.
+// CAS-SUB2API-GROK-APPLY-PATCH-R14-BOOTSTRAP: historical r14 layer is now replayable from pristine upstream.
 fn function_arguments_to_string(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),

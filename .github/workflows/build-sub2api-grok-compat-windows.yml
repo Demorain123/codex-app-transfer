@@ -25,6 +25,7 @@ on:
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_stream_retry_diag.py'
+      - 'scripts/apply_sub2api_mcp_relay_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -54,6 +55,7 @@ on:
       - 'scripts/apply_sub2api_openai_codex_identity.py'
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_stream_retry_diag.py'
+      - 'scripts/apply_sub2api_mcp_relay_diag.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -97,6 +99,7 @@ jobs:
           python scripts/apply_sub2api_openai_codex_identity.py
           python scripts/apply_sub2api_subagent_retry_diag.py
           python scripts/apply_sub2api_stream_retry_diag.py
+          python scripts/apply_sub2api_mcp_relay_diag.py
           python scripts/apply_sub2api_grok_compat_revision.py
 
           grep -F "v-if=\"form.apiFormat === 'responses'\"" \
@@ -124,6 +127,8 @@ jobs:
           grep -F -q 'CAS-SUB2API-RETRY-RUNTIME-DIAG-R18-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-MCP-RELAY-DIAG-R20-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-MCP-RELAY-DIAG-R20-RESOLVE' crates/proxy/src/forward.rs
 
       - name: Resolve visible compat version
         id: compat-version

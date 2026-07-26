@@ -85,7 +85,9 @@ fn snapshot_codex_processes() -> Option<Vec<ProcRow>> {
                     .position(|&c| c == 0)
                     .unwrap_or(entry.szExeFile.len());
                 let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
-                if name.eq_ignore_ascii_case("codex.exe") {
+                if name.eq_ignore_ascii_case("codex.exe")
+                    || name.eq_ignore_ascii_case("chatgpt.exe")
+                {
                     rows.push(ProcRow {
                         pid: entry.th32ProcessID,
                         ppid: entry.th32ParentProcessID,
@@ -113,6 +115,7 @@ fn observe_processes(previous: &mut HashMap<u32, ProcRow>) {
             tracing::info!(
                 target: "codex_runtime_diag",
                 event = "process_started",
+                image = %row.name,
                 pid = *pid as u64,
                 ppid = row.ppid as u64,
                 codex_process_count = current.len() as u64,
@@ -125,6 +128,7 @@ fn observe_processes(previous: &mut HashMap<u32, ProcRow>) {
             tracing::warn!(
                 target: "codex_runtime_diag",
                 event = "process_exited",
+                image = %row.name,
                 pid = *pid as u64,
                 ppid = row.ppid as u64,
                 remaining_codex_processes = current.len() as u64,
@@ -132,11 +136,19 @@ fn observe_processes(previous: &mut HashMap<u32, ProcRow>) {
             );
         }
     }
-    if current.len() > 1 && previous.len() <= 1 {
+    let codex_count = current
+        .values()
+        .filter(|row| row.name.eq_ignore_ascii_case("codex.exe"))
+        .count();
+    let previous_codex_count = previous
+        .values()
+        .filter(|row| row.name.eq_ignore_ascii_case("codex.exe"))
+        .count();
+    if codex_count > 1 && previous_codex_count <= 1 {
         tracing::warn!(
             target: "codex_runtime_diag",
             event = "multiple_codex_processes",
-            codex_process_count = current.len() as u64,
+            codex_process_count = codex_count as u64,
             "multiple codex.exe runtime candidates detected; diagnostic only"
         );
     }
@@ -366,6 +378,8 @@ fn classify(lower: &str) -> Option<(&'static str, &'static str)> {
             "INFO",
         ),
         ("remote_compaction_v2", "remote_compaction_v2", "WARN"),
+        // CAS-RUNTIME-DIAG-R26-STREAM-MARKER: event = "stream_disconnected"
+        ("stream disconnected", "stream_disconnected", "WARN"),
         ("response.failed", "response_failed", "WARN"),
         ("reconnecting", "reconnecting", "WARN"),
         ("upstream request failed", "upstream_request_failed", "WARN"),
@@ -397,18 +411,18 @@ fn emit_native_event(line: &str, file_name: &str) {
     };
     let ids = uuid_fingerprints(line);
     let status = status_from_line(&lower) as u64;
-    let line_fp = format!("{:016x}", fnv64(line.as_bytes()));
+    let line_bytes = line.len() as u64;
     match level {
         "ERROR" => tracing::error!(
-            target: "codex_runtime_diag", event = %event, ids = %ids, status, line_fp = %line_fp,
+            target: "codex_runtime_diag", event = %event, ids = %ids, status, line_bytes,
             file = %file_name, "sanitized Codex native runtime event"
         ),
         "WARN" => tracing::warn!(
-            target: "codex_runtime_diag", event = %event, ids = %ids, status, line_fp = %line_fp,
+            target: "codex_runtime_diag", event = %event, ids = %ids, status, line_bytes,
             file = %file_name, "sanitized Codex native runtime event"
         ),
         _ => tracing::info!(
-            target: "codex_runtime_diag", event = %event, ids = %ids, status, line_fp = %line_fp,
+            target: "codex_runtime_diag", event = %event, ids = %ids, status, line_bytes,
             file = %file_name, "sanitized Codex native runtime event"
         ),
     }

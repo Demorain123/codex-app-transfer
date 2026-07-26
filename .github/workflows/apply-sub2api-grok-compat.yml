@@ -30,6 +30,7 @@ on:
       - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_mcp_relay_diag.py'
       - 'scripts/apply_no_micro_r23_restart_pipeline.py'
+      - 'scripts/apply_no_micro_r23_restart_review.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
@@ -100,6 +101,9 @@ jobs:
 
       - name: Apply r23 No Micro shared restart pipeline
         run: python3 scripts/apply_no_micro_r23_restart_pipeline.py
+
+      - name: Apply r23 legacy restart preservation review
+        run: python3 scripts/apply_no_micro_r23_restart_review.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py

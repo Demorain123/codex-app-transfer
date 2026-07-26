@@ -10,7 +10,10 @@ forward = (ROOT / "crates/proxy/src/forward.rs").read_text(encoding="utf-8")
 required = [
     "CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY",
     "CAS-APPS-MCP-AUTH-R25-LOG-SAFE-PATH-WIRE",
+    "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY",
     "apps_mcp_safe_relay_log_path(client_path)",
+    "apps_mcp_safe_reqwest_error(client_path, e)",
+    "error.without_url()",
     "[chatgpt-relay] {method} {relay_log_path} → {relay_log_upstream}",
     "[chatgpt-relay] resp {status} {relay_log_path}",
     "{relay_log_path}",
@@ -26,6 +29,11 @@ for marker in required:
 # is telemetry-only; changing the request URL would be a functional OAuth regression.
 if 'let upstream = format!("https://chatgpt.com{client_path}");' not in forward:
     raise SystemExit("r25 relay log privacy review: real upstream URL no longer uses original client_path")
+
+# All three reqwest failure entry points in the direct ChatGPT passthrough must pass
+# through the path-scoped URL stripper before the common ForwardError logger sees them.
+if forward.count("ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e))") < 3:
+    raise SystemExit("r25 relay log privacy review: not all MCP reqwest error paths strip the URL")
 
 # Final privacy/account-state companions. The OAuth trace query patch is kept narrow
 # to the hosted Apps MCP namespace; then the revocation gate refuses a bearer the
@@ -43,4 +51,4 @@ for companion in (
     print(f"applying {companion}")
     runpy.run_path(str(companion_path), run_name="__main__")
 
-print("r25 Apps MCP relay telemetry query privacy review: PASS")
+print("r25 Apps MCP relay telemetry/error URL privacy review: PASS")

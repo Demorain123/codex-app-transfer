@@ -10,92 +10,59 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+GEN = ROOT / "scripts/apply_auto_review_model_overlay_r24.py"
 
 
-def patch(path: str, old: str, new: str, label: str) -> None:
-    p = ROOT / path
-    text = p.read_text(encoding="utf-8")
+def replace_once(path: Path, old: str, new: str, label: str) -> None:
+    text = path.read_text(encoding="utf-8")
     if new in text:
         print(f"{label}: already hardened")
         return
     if old not in text:
         raise SystemExit(f"r24 hardening anchor not found: {label}")
-    p.write_text(text.replace(old, new, 1), encoding="utf-8")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
     print(f"{label}: hardened")
 
 
-GEN = "scripts/apply_auto_review_model_overlay_r24.py"
-
 # 1. Fix generator metadata serialization so generated Rust compiles.
-patch(
+replace_once(
     GEN,
     '"overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()',
     '"overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()',
     "r24 generator metadata serialization",
 )
 
-# 2. r23/current CRUD layout places the long grokWeb explanatory comment BEFORE the
-# actual validation block. The initial r24 anchor assumed the reverse order. Patch the
-# generator to anchor only on the real validation block and the following stable MOC-257
-# comment, so it composes with the current branch without touching that explanatory text.
-old_add_anchor = r'''    add_anchor = '''    if let Some(gw) = input.grok_web.as_ref() {
-        if let Err(errs) = validate_grok_web_input(gw) {
-            return err(StatusCode::BAD_REQUEST, format_grok_web_errs(&errs)).into_response();
-        }
-    }
-
-    // silent-failure-hunter H2 + chatgpt-codex P2:grokWeb 结构在 save 时校验,
-'''
-    add_repl = '''    if let Some(gw) = input.grok_web.as_ref() {
-        if let Err(errs) = validate_grok_web_input(gw) {
-            return err(StatusCode::BAD_REQUEST, format_grok_web_errs(&errs)).into_response();
-        }
-    }
-    if let Some(overrides) = input.auto_review_model_overrides.as_ref() {
-        if let Err(message) = validate_auto_review_model_overrides_input(overrides) {
-            return err(StatusCode::BAD_REQUEST, message).into_response();
-        }
-    }
-
-    // silent-failure-hunter H2 + chatgpt-codex P2:grokWeb 结构在 save 时校验,
-'''
-'''
-new_add_anchor = r'''    add_anchor = '''    if let Some(gw) = input.grok_web.as_ref() {
-        if let Err(errs) = validate_grok_web_input(gw) {
-            return err(StatusCode::BAD_REQUEST, format_grok_web_errs(&errs)).into_response();
-        }
-    }
-
-    // [MOC-257 review] 标记本次是否新建了「首个 provider」(自动成 active)——闭包内置位,闭包外据此补
-'''
-    add_repl = '''    if let Some(gw) = input.grok_web.as_ref() {
-        if let Err(errs) = validate_grok_web_input(gw) {
-            return err(StatusCode::BAD_REQUEST, format_grok_web_errs(&errs)).into_response();
-        }
-    }
-    if let Some(overrides) = input.auto_review_model_overrides.as_ref() {
-        if let Err(message) = validate_auto_review_model_overrides_input(overrides) {
-            return err(StatusCode::BAD_REQUEST, message).into_response();
-        }
-    }
-
-    // [MOC-257 review] 标记本次是否新建了「首个 provider」(自动成 active)——闭包内置位,闭包外据此补
-'''
-'''
-patch(GEN, old_add_anchor, new_add_anchor, "r24 CRUD add-validation anchor")
+# 2. Repair current-r23 CRUD anchor drift. The long explanatory grokWeb comment is
+# before the actual validation block, so use the stable MOC-257 line that really follows
+# the block. Both the generator's anchor and replacement carry the same trailing line,
+# therefore replacing the two embedded comment lines is sufficient and deterministic.
+gen_text = GEN.read_text(encoding="utf-8")
+old_comment = "    // silent-failure-hunter H2 + chatgpt-codex P2:grokWeb 结构在 save 时校验,\n"
+new_comment = "    // [MOC-257 review] 标记本次是否新建了「首个 provider」(自动成 active)——闭包内置位,闭包外据此补\n"
+count = gen_text.count(old_comment)
+if count == 0:
+    if gen_text.count(new_comment) >= 2:
+        print("r24 CRUD add-validation anchor: already hardened")
+    else:
+        raise SystemExit("r24 hardening anchor not found: CRUD add-validation comment")
+elif count == 2:
+    GEN.write_text(gen_text.replace(old_comment, new_comment), encoding="utf-8")
+    print("r24 CRUD add-validation anchor: hardened")
+else:
+    raise SystemExit(f"r24 CRUD add-validation anchor count unexpected: {count}")
 
 # 3. Fix already-generated Rust if generation happened before this postflight pass.
 generated = ROOT / "crates/codex_integration/src/auto_review_overlay.rs"
 if generated.exists():
-    patch(
-        "crates/codex_integration/src/auto_review_overlay.rs",
+    replace_once(
+        generated,
         '"overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()',
         '"overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()',
         "generated metadata serialization",
     )
 
 # 4. Restore the true catalog source BEFORE taking a snapshot. In preflight the r24
-# block does not exist yet, so simply defer this check to the postflight invocation.
+# block does not exist yet, so defer this check to the postflight invocation.
 apply_path = ROOT / "crates/codex_integration/src/apply.rs"
 if apply_path.exists():
     text = apply_path.read_text(encoding="utf-8")

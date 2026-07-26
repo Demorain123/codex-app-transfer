@@ -26,13 +26,16 @@ mod opencode_session;
 mod provider_quota;
 mod proxy_runner;
 mod qoder_quota;
+#[cfg(target_os = "windows")]
+mod runtime_diag;
 #[cfg(target_os = "macos")]
 mod single_instance;
 mod system_proxy;
 mod telemetry_bridge;
 mod trace_viewer;
 mod trae_quota;
-mod web_session_quota;
+mod web_session_quota; // CAS-RUNTIME-DIAG-R26-MODULE
+
 #[cfg(target_os = "windows")]
 mod windows_msix;
 mod workbuddy_quota;
@@ -224,6 +227,9 @@ fn main() {
             // [MOC-204] 额度条目注入 daemon:每 tick 读 settings.codexQuotaEnabled
             // + proxy rate limit 快照,经 CDP 推进 Codex Environment 卡片。
             // 开关关 / CDP 不可达时 tick 内静默跳过,常驻无负担。
+            #[cfg(target_os = "windows")]
+            runtime_diag::start_runtime_diag_daemon(); // CAS-RUNTIME-DIAG-R26-START
+
             tauri::async_runtime::spawn(codex_quota_injector::run_quota_daemon());
 
             // [MOC-323] Quick Chat 模型名注入 daemon:每 tick 读 settings.chatCustomModelEnabled

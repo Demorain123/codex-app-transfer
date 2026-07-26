@@ -101,8 +101,31 @@ jobs:
       - name: Format generated Rust
         run: cargo fmt --all
 
-      - name: Unit test copy-on-write catalog semantics
-        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+      - name: Run copy-on-write unit test diagnostic
+        id: unit
+        shell: bash
+        run: |
+          set +e
+          cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture > r24-unit.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 unit-test diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-unit-diagnostic
+          path: r24-unit.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r24 unit test failed
+        if: steps.unit.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-unit.log
+          exit 1
 
       - name: Check Codex integration crate
         run: cargo check -p codex-app-transfer-codex-integration --lib

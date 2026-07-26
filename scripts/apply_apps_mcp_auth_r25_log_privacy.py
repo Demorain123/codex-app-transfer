@@ -36,6 +36,14 @@ fn apps_mcp_safe_relay_log_path(path: &str) -> &str {
     }
 }
 
+fn apps_mcp_safe_reqwest_error(path: &str, error: reqwest::Error) -> reqwest::Error {
+    if is_chatgpt_mcp_backend_path(path) {
+        error.without_url()
+    } else {
+        error
+    }
+}
+
 #[cfg(test)]
 mod apps_mcp_auth_r25_log_privacy_tests {
     use super::*;
@@ -94,14 +102,49 @@ if "CAS-APPS-MCP-AUTH-R25-LOG-SAFE-PATH-WIRE" not in text:
         label="r25 401 ChatGPT relay telemetry path",
     )
 
+# CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY
+# reqwest::Error can retain/display the full request URL. Strip it before the common
+# ForwardError telemetry path can stringify an Apps MCP failure; preserve existing
+# URL-rich diagnostics for all non-MCP requests.
+if "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY" not in text:
+    text = replace_once(
+        text,
+        '''    let req = rb.build()?;''',
+        '''    let req = rb
+        .build()
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?; // CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY''',
+        label="r25 request-build error URL privacy",
+    )
+    text = replace_once(
+        text,
+        '''    let resp = state.http.execute(req).await?;''',
+        '''    let resp = state
+        .http
+        .execute(req)
+        .await
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;''',
+        label="r25 execute error URL privacy",
+    )
+    text = replace_once(
+        text,
+        '''    let resp_body = resp.bytes().await.map_err(ForwardError::Upstream)?;''',
+        '''    let resp_body = resp
+        .bytes()
+        .await
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;''',
+        label="r25 response-body error URL privacy",
+    )
+
 FORWARD.write_text(text, encoding="utf-8")
 
 for marker in (
     "CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY",
     "CAS-APPS-MCP-AUTH-R25-LOG-SAFE-PATH-WIRE",
+    "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY",
     "apps_mcp_auth_r25_relay_logs_strip_mcp_query_but_preserve_other_backend_paths",
+    "apps_mcp_safe_reqwest_error(client_path, e)",
 ):
     if marker not in text:
         raise SystemExit(f"r25 relay log privacy marker missing: {marker}")
 
-print("r25 Apps MCP relay telemetry query privacy: complete")
+print("r25 Apps MCP relay telemetry/error URL privacy: complete")

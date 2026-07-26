@@ -1,1 +1,0 @@
-r25 review scope: exact MCP allowlist; no auth overwrite; active real auth only; synthetic/imported excluded; no secret logging; outbound 401 fingerprint; idempotence; Windows compile/package.

@@ -130,8 +130,24 @@ jobs:
       - name: Check Codex integration crate
         run: cargo check -p codex-app-transfer-codex-integration --lib
 
-      - name: Check Tauri backend compilation
-        run: cargo check -p codex-app-transfer
+      - name: Run Tauri backend compile diagnostic
+        id: backend
+        shell: bash
+        run: |
+          set +e
+          cargo check -p codex-app-transfer > r24-backend.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 backend diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-backend-diagnostic
+          path: r24-backend.log
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/setup-node@v4
         with:
@@ -139,10 +155,41 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
+      - name: Run frontend build diagnostic
+        id: frontend
+        shell: bash
         run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run build
+          set +e
+          {
+            npm --prefix frontend ci
+            npm --prefix frontend run build
+          } > r24-frontend.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 frontend diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-frontend-diagnostic
+          path: r24-frontend.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r24 backend compile failed
+        if: steps.backend.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-backend.log
+          exit 1
+
+      - name: Fail if r24 frontend build failed
+        if: steps.frontend.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-frontend.log
+          exit 1
 
       - name: Show r24 generated diff
         if: always()

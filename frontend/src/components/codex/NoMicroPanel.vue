@@ -32,7 +32,7 @@ const copy = computed(() =>
   zh.value
     ? {
         title: 'Codex No Micro A/B（实验性）',
-        desc: '用同一面板做最小 A/B：A 为普通启动，B 为 No Micro 启动。两种启动都会把明确的 [codex-ab]、run_id、mode 和启动/退出阶段写入 Transfer 的 proxy 日志，后续分析不再依赖手工记时间。',
+        desc: '用同一面板做最小 A/B：A 为普通启动，B 为 No Micro 启动。两种启动都会把明确的 [codex-ab]、run_id、mode 和启动结果写入 Transfer 的 proxy 日志，后续分析不再依赖手工记时间。',
         doctor: '兼容性检查',
         checking: '检查中…',
         normalLaunch: '普通启动（A）',
@@ -57,11 +57,11 @@ const copy = computed(() =>
         lastFailed: '最近一次 B：注入失败',
         never: '尚无 No Micro B 启动记录',
         unsupported: '当前平台暂不支持（仅 Windows Store/MSIX Codex）。',
-        logHint: '日志关键字：[codex-ab]。A 看 mode=normal，B 看 mode=no-micro；process_exit 表示该轮 Codex 已退出。',
+        logHint: '日志关键字：[codex-ab]。A 看 mode=normal + launch_success；B 看 mode=no-micro + injection_success。每轮 run_id 独立。',
       }
     : {
         title: 'Codex No Micro A/B (experimental)',
-        desc: 'Run the minimal A/B from one panel: A is a normal launch, B is a No Micro launch. Both write explicit [codex-ab] run_id/mode/lifecycle markers into the Transfer proxy log, so later analysis does not depend on manually noted timestamps.',
+        desc: 'Run the minimal A/B from one panel: A is a normal launch, B is a No Micro launch. Both write explicit [codex-ab] run_id/mode/result markers into the Transfer proxy log, so later analysis does not depend on manually noted timestamps.',
         doctor: 'Compatibility check',
         checking: 'Checking…',
         normalLaunch: 'Normal launch (A)',
@@ -86,7 +86,7 @@ const copy = computed(() =>
         lastFailed: 'Last B: injection failed',
         never: 'No No Micro B launch has been recorded yet',
         unsupported: 'This feature currently supports Windows Store/MSIX Codex only.',
-        logHint: 'Log key: [codex-ab]. A uses mode=normal, B uses mode=no-micro; process_exit marks the end of that Codex run.',
+        logHint: 'Log key: [codex-ab]. A uses mode=normal + launch_success; B uses mode=no-micro + injection_success. Every run has a unique run_id.',
       },
 )
 

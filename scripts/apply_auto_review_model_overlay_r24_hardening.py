@@ -4,6 +4,10 @@
 The revision composer runs this script before AND after the base r24 generator:
 - preflight patches generator defects/anchor drift before generation can fail;
 - postflight fixes/validates generated Rust ordering and serialization.
+
+The generated r24 Rust module is now also materialized in the branch. Therefore
+postflight checks must be semantic/idempotent rather than depend on one exact
+rustfmt layout.
 """
 from __future__ import annotations
 
@@ -22,6 +26,39 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
         raise SystemExit(f"r24 hardening anchor not found: {label}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
     print(f"{label}: hardened")
+
+
+def harden_generated_metadata(path: Path) -> None:
+    """Accept both generator formatting and rustfmt materialized formatting."""
+    text = path.read_text(encoding="utf-8")
+    old = '"overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()'
+    fixed_single = '"overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()'
+    if old in text:
+        path.write_text(text.replace(old, fixed_single, 1), encoding="utf-8")
+        print("generated metadata serialization: hardened")
+        return
+    # rustfmt expands the iterator chain over several lines. These markers prove the
+    # same semantic conversion String -> Value is present without pinning whitespace.
+    if (
+        '"overrides": overrides' in text
+        and "Value::String(reviewer.clone())" in text
+        and "collect::<serde_json::Map<String, Value>>()" in text
+    ):
+        print("generated metadata serialization: already hardened (semantic)")
+        return
+    raise SystemExit("r24 hardening semantic check failed: generated metadata serialization")
+
+
+def harden_generated_non_windows_path(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if "        raw.into_owned()\n" in text:
+        path.write_text(text.replace("        raw.into_owned()\n", "        raw\n", 1), encoding="utf-8")
+        print("generated non-Windows path normalization: hardened")
+        return
+    if "fn normalized_path(path: &Path) -> String" in text and "        raw\n" in text:
+        print("generated non-Windows path normalization: already hardened (semantic)")
+        return
+    raise SystemExit("r24 hardening semantic check failed: generated non-Windows path normalization")
 
 
 # 1. Fix generator metadata serialization so generated Rust compiles.
@@ -58,23 +95,14 @@ elif count == 2:
     GEN.write_text(gen_text.replace(old_comment, new_comment), encoding="utf-8")
     print("r24 CRUD add-validation anchor: hardened")
 else:
-    raise SystemExit(f"r24 CRUD add-validation anchor count unexpected: {count}")
+    raise SystemExit(f"r24 hardening anchor count unexpected: {count}")
 
-# 3. Fix already-generated Rust if generation happened before this postflight pass.
+# 3. Fix/validate already-generated Rust if generation happened before this postflight pass.
+# This must tolerate rustfmt because the generated module is now materialized in the branch.
 generated = ROOT / "crates/codex_integration/src/auto_review_overlay.rs"
 if generated.exists():
-    replace_once(
-        generated,
-        '"overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()',
-        '"overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()',
-        "generated metadata serialization",
-    )
-    replace_once(
-        generated,
-        "        raw.into_owned()\n",
-        "        raw\n",
-        "generated non-Windows path normalization",
-    )
+    harden_generated_metadata(generated)
+    harden_generated_non_windows_path(generated)
 
 # 4. Restore the true catalog source BEFORE taking a snapshot. In preflight the r24
 # block does not exist yet, so defer this check to the postflight invocation.

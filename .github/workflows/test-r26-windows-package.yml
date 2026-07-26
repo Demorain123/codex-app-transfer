@@ -47,16 +47,19 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Replay r24 plus r26 diagnostics overlay
+      - name: Replay r24 plus complete r26 diagnostics overlay
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/apply_runtime_diag_r26.py
+          python -m py_compile scripts/apply_runtime_diag_r26.py scripts/apply_runtime_diag_r26_review.py scripts/apply_sub2api_grok_compat_revision.py
           python scripts/apply_sub2api_grok_compat_revision.py
           grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
           grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
           grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
           grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'chatgpt.exe' src-tauri/src/runtime_diag.rs
+          grep -F -q 'stream_disconnected' src-tauri/src/runtime_diag.rs
+          ! grep -F -q 'line_fp = %line_fp' src-tauri/src/runtime_diag.rs
           grep -F -q 'compat_revision=26' SUB2API_GROK_COMPAT_VERSION.txt
 
       - name: Resolve r26 package version
@@ -87,14 +90,18 @@ jobs:
           workspaces: '. -> target'
           key: r26-windows-package
 
-      - name: Format, diff-check, and run r26 Windows regressions
+      - name: Normalize and diff-check generated Rust
         shell: bash
         run: |
           set -euo pipefail
           cargo fmt --all
           git diff --check
-          cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
-          cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Run r26 proxy failure-chain regressions
+        run: cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+
+      - name: Compile Windows-only r26 runtime watcher
+        run: cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
 
       - name: Recheck r24 catalog semantics
         run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture

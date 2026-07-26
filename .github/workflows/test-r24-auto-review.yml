@@ -50,7 +50,30 @@ jobs:
           python-version: '3.12'
 
       - name: Apply r24 overlay through production revision path
-        run: python3 scripts/apply_sub2api_grok_compat_revision.py
+        id: apply
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/apply_sub2api_grok_compat_revision.py > r24-apply.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 apply diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-apply-diagnostic
+          path: r24-apply.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r24 apply failed
+        if: steps.apply.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-apply.log
+          exit 1
 
       - name: Verify generated invariants
         shell: bash

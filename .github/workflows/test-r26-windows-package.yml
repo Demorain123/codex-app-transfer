@@ -1,0 +1,163 @@
+name: Test r26 Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r26-runtime-diag
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r26-windows-package.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r24-auto-review-overlay
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r26-windows-package.yml'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-r26-windows:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Replay r24 plus r26 diagnostics overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_runtime_diag_r26.py
+          python scripts/apply_sub2api_grok_compat_revision.py
+          grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+          grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
+          grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
+          grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'compat_revision=26' SUB2API_GROK_COMPAT_VERSION.txt
+
+      - name: Resolve r26 package version
+        id: compat-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          BASE_VERSION="${APP_VERSION%%+*}"
+          REVISION="${APP_VERSION#*+}"
+          SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
+          test "$REVISION" = "26"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Packaging Sub2API Grok Compat v${APP_VERSION} / r${REVISION}"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r26-windows-package
+
+      - name: Check formatting and r26 proxy regressions
+        shell: bash
+        run: |
+          cargo fmt --all -- --check
+          cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+          cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Recheck r24 catalog semantics
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Test adapter regressions
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r26' frontend/dist
+          grep -R -F -q 'No Micro' frontend/dist
+          grep -R -F -q 'Auto Review' frontend/dist
+
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build Windows NSIS and MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage r26 Windows bundles
+        shell: bash
+        env:
+          SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
+        run: |
+          set -euo pipefail
+          BDIR="target/x86_64-pc-windows-msvc/release/bundle"
+          mkdir -p staging
+          shopt -s nullglob
+          for f in "$BDIR"/nsis/*-setup.exe; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
+          done
+          for f in "$BDIR"/msi/*.msi; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
+          done
+          files=(staging/*)
+          if (( ${#files[@]} == 0 )); then
+            echo '::error::No r26 Windows bundles found'
+            exit 1
+          fi
+          ls -lh staging/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-${{ steps.compat-version.outputs.safe_version }}-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

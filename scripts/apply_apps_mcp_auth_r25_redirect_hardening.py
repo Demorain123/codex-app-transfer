@@ -54,10 +54,10 @@ if "CAS-APPS-MCP-AUTH-R25-REDIRECT" not in text:
         label="r25 redirect origin guard",
     )
 
-# Mark both values synthesized from auth.json as sensitive. This does not replace
-# the redirect guard above; it additionally prevents accidental Debug/HTTP2-table
-# exposure by downstream libraries.
-if text.count("set_sensitive(true)") < 2:
+# Mark both values synthesized from auth.json as sensitive. Exact markers are used
+# rather than counting arbitrary set_sensitive calls, so future upstream headers
+# cannot accidentally satisfy this security gate.
+if "CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE" not in text:
     text = replace_once(
         text,
         '''    let authorization = reqwest::header::HeaderValue::from_bytes(
@@ -68,9 +68,11 @@ if text.count("set_sensitive(true)") < 2:
         format!("Bearer {}", auth.access_token).as_bytes(),
     )
     .ok()?;
-    authorization.set_sensitive(true);''',
+    authorization.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE''',
         label="r25 bearer sensitivity",
     )
+
+if "CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE" not in text:
     text = replace_once(
         text,
         '''            .filter(|value| !value.trim().is_empty())
@@ -78,7 +80,7 @@ if text.count("set_sensitive(true)") < 2:
         '''            .filter(|value| !value.trim().is_empty())
             .and_then(|value| reqwest::header::HeaderValue::from_bytes(value.as_bytes()).ok())
             .map(|mut value| {
-                value.set_sensitive(true);
+                value.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE
                 value
             })''',
         label="r25 account-id sensitivity",
@@ -86,11 +88,14 @@ if text.count("set_sensitive(true)") < 2:
 
 FORWARD.write_text(text, encoding="utf-8")
 
-if "CAS-APPS-MCP-AUTH-R25-REDIRECT" not in text:
-    raise SystemExit("r25 redirect hardening marker missing")
+for marker in (
+    "CAS-APPS-MCP-AUTH-R25-REDIRECT",
+    "CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE",
+    "CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE",
+):
+    if marker not in text:
+        raise SystemExit(f"r25 redirect/privacy hardening marker missing: {marker}")
 if "Apps MCP cross-origin redirect blocked" not in text:
     raise SystemExit("r25 redirect hardening error path missing")
-if text.count("set_sensitive(true)") < 2:
-    raise SystemExit("r25 synthesized credential headers are not both marked sensitive")
 
 print("r25 Apps MCP redirect/privacy hardening: complete")

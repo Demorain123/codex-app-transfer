@@ -17,15 +17,12 @@ required = [
     "attempt.url().port_or_known_default()",
     "origin.port_or_known_default()",
     "Apps MCP cross-origin redirect blocked",
+    "authorization.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE",
+    "value.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE",
 ]
 for marker in required:
     if marker not in forward:
         raise SystemExit(f"r25 redirect review: missing security invariant: {marker}")
-
-if forward.count("set_sensitive(true)") < 2:
-    raise SystemExit(
-        "r25 redirect review: bearer and ChatGPT-Account-ID must both be marked sensitive"
-    )
 
 # The redirect restriction must remain scoped to the Apps MCP origin. A global
 # same-origin-only policy would be an unrelated behavioural regression for third-party

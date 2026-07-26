@@ -1,7 +1,63 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
+use serde_json::{json, Value};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::admin::handlers::common::err;
-use crate::admin::services::desktop::no_micro;
+use crate::admin::services::desktop::{no_micro, process};
+
+static AB_RUN_SEQ: AtomicU64 = AtomicU64::new(1);
+
+fn next_ab_run_id() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let seq = AB_RUN_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("{millis}-{seq}")
+}
+
+fn ab_log(level: &str, run_id: &str, mode: &str, phase: &str, extra: Option<&str>) {
+    let mut message = format!("[codex-ab] run_id={run_id} mode={mode} phase={phase}");
+    if let Some(extra) = extra.filter(|v| !v.is_empty()) {
+        message.push(' ');
+        message.push_str(extra);
+    }
+    codex_app_transfer_proxy::proxy_telemetry()
+        .logs
+        .add(level, message);
+}
+
+fn spawn_process_exit_marker(run_id: String, mode: &'static str) {
+    tokio::spawn(async move {
+        // Launch APIs can return before the Windows MSIX process is visible. Wait for it first so
+        // a fast initial false does not get misreported as an A/B run that already exited.
+        let mut observed = false;
+        for _ in 0..60 {
+            if process::is_codex_app_running("windows") {
+                observed = true;
+                ab_log("INFO", &run_id, mode, "process_observed", None);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        if !observed {
+            ab_log("WARN", &run_id, mode, "process_not_observed", None);
+            return;
+        }
+
+        // Keep a single lightweight watcher per controlled A/B run. The hard cap prevents a stale
+        // task from living forever if Windows process enumeration becomes permanently ambiguous.
+        for _ in 0..43_200 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if !process::is_codex_app_running("windows") {
+                ab_log("INFO", &run_id, mode, "process_exit", None);
+                return;
+            }
+        }
+        ab_log("WARN", &run_id, mode, "watch_timeout", None);
+    });
+}
 
 /// GET /api/desktop/no-micro/doctor
 ///
@@ -18,18 +74,121 @@ pub async fn doctor() -> impl IntoResponse {
     }
 }
 
+/// POST /api/desktop/no-micro/launch-normal
+///
+/// A/B 对照的 A 路径：要求 Codex 已完全退出，然后按 Transfer 现有的普通 Windows 启动
+/// 路径拉起，不做 No Micro 注入，也不调用 desktop provider/config 同步。这样 A/B 日志拥有
+/// 明确 mode=normal 标记，同时尽量只让 Micro 注入成为变量。
+pub async fn launch_normal() -> impl IntoResponse {
+    if std::env::consts::OS != "windows" {
+        return err(StatusCode::NOT_IMPLEMENTED, "A/B 普通启动目前仅支持 Windows").into_response();
+    }
+
+    let report = match tokio::task::spawn_blocking(no_micro::doctor).await {
+        Ok(report) => report,
+        Err(e) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("No Micro doctor task failed: {e}"),
+            )
+            .into_response()
+        }
+    };
+    if !report.package_found || report.executable_path.is_none() {
+        return err(StatusCode::CONFLICT, "未找到可用于 A/B 普通启动的 Codex Desktop").into_response();
+    }
+    if report.process_state != "not-running" {
+        return err(
+            StatusCode::CONFLICT,
+            "Codex 仍在运行或进程状态无法可靠确认。请先完全退出 Codex，再开始 A/B 普通启动。",
+        )
+        .into_response();
+    }
+
+    let run_id = next_ab_run_id();
+    ab_log("INFO", &run_id, "normal", "launch_requested", None);
+    let launched = tokio::task::spawn_blocking(|| process::launch_codex_app_restart("windows")).await;
+    match launched {
+        Ok(Ok(())) => {
+            ab_log("INFO", &run_id, "normal", "launch_success", None);
+            spawn_process_exit_marker(run_id.clone(), "normal");
+            Json(json!({
+                "success": true,
+                "abRunId": run_id,
+                "mode": "normal"
+            }))
+            .into_response()
+        }
+        Ok(Err(message)) => {
+            ab_log("ERROR", &run_id, "normal", "launch_failed", Some(&format!("error={message}")));
+            err(StatusCode::CONFLICT, message).into_response()
+        }
+        Err(e) => {
+            let message = format!("Normal A/B launch task failed: {e}");
+            ab_log("ERROR", &run_id, "normal", "launch_task_failed", Some(&format!("error={message}")));
+            err(StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
+        }
+    }
+}
+
 /// POST /api/desktop/no-micro/launch
 ///
 /// 仅执行 fail-closed 的旁路实验启动，不同步/改写 config.toml。若 Codex 仍在运行
 /// 或进程身份无法确认，会拒绝启动，而不是自动杀用户现有进程。
 pub async fn launch() -> impl IntoResponse {
+    let run_id = next_ab_run_id();
+    ab_log("INFO", &run_id, "no-micro", "launch_requested", None);
     match tokio::task::spawn_blocking(no_micro::launch).await {
-        Ok(Ok(result)) => Json(result).into_response(),
-        Ok(Err(message)) => err(StatusCode::CONFLICT, message).into_response(),
-        Err(e) => err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("No Micro launch task failed: {e}"),
-        )
-        .into_response(),
+        Ok(Ok(mut result)) => {
+            let pid = result
+                .pointer("/launch/processId")
+                .and_then(Value::as_u64)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".to_owned());
+            ab_log(
+                "INFO",
+                &run_id,
+                "no-micro",
+                "injection_success",
+                Some(&format!("pid={pid}")),
+            );
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("abRunId".to_owned(), Value::String(run_id.clone()));
+                obj.insert("mode".to_owned(), Value::String("no-micro".to_owned()));
+            }
+            spawn_process_exit_marker(run_id, "no-micro");
+            Json(result).into_response()
+        }
+        Ok(Err(message)) => {
+            ab_log(
+                "ERROR",
+                &run_id,
+                "no-micro",
+                "launch_failed",
+                Some(&format!("error={message}")),
+            );
+            err(StatusCode::CONFLICT, message).into_response()
+        }
+        Err(e) => {
+            let message = format!("No Micro launch task failed: {e}");
+            ab_log(
+                "ERROR",
+                &run_id,
+                "no-micro",
+                "launch_task_failed",
+                Some(&format!("error={message}")),
+            );
+            err(StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ab_run_ids_are_distinct() {
+        assert_ne!(next_ab_run_id(), next_ab_run_id());
     }
 }

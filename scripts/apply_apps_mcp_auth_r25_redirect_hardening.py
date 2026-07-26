@@ -15,6 +15,59 @@ def replace_once(text: str, old: str, new: str, *, label: str) -> str:
 
 text = FORWARD.read_text(encoding="utf-8")
 
+# CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER
+# Keep the redirect security predicate separately testable. It intentionally returns
+# true for non-MCP origins so r25 does not alter redirect semantics of other providers.
+if "CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER" not in text:
+    text = replace_once(
+        text,
+        '''const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("CARGO_PKG_VERSION"));
+
+impl ProxyState {''',
+        '''const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("CARGO_PKG_VERSION"));
+
+// CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER
+fn apps_mcp_redirect_target_allowed(origin: &reqwest::Url, next: &reqwest::Url) -> bool {
+    let origin_is_apps_mcp = origin.scheme() == "https"
+        && origin.host_str() == Some("chatgpt.com")
+        && (origin.path() == "/backend-api/ps/mcp"
+            || origin.path().starts_with("/backend-api/ps/mcp/"));
+    if !origin_is_apps_mcp {
+        return true;
+    }
+    next.scheme() == "https"
+        && next.host_str() == Some("chatgpt.com")
+        && next.port_or_known_default() == origin.port_or_known_default()
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_redirect_tests {
+    use super::*;
+
+    #[test]
+    fn synthesized_identity_never_crosses_origin_but_other_paths_keep_old_policy() {
+        let origin = reqwest::Url::parse(
+            "https://chatgpt.com/backend-api/ps/mcp/.well-known/oauth-protected-resource",
+        )
+        .unwrap();
+        let same = reqwest::Url::parse("https://chatgpt.com/backend-api/ps/mcp/next").unwrap();
+        let other_host = reqwest::Url::parse("https://example.com/next").unwrap();
+        let other_scheme = reqwest::Url::parse("http://chatgpt.com/backend-api/ps/mcp/next").unwrap();
+        let other_port = reqwest::Url::parse("https://chatgpt.com:444/backend-api/ps/mcp/next").unwrap();
+        assert!(apps_mcp_redirect_target_allowed(&origin, &same));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_host));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_scheme));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_port));
+
+        let non_mcp = reqwest::Url::parse("https://chatgpt.com/backend-api/ps/plugins/installed").unwrap();
+        assert!(apps_mcp_redirect_target_allowed(&non_mcp, &other_host));
+    }
+}
+
+impl ProxyState {''',
+        label="r25 redirect testable helper",
+    )
+
 # CAS-APPS-MCP-AUTH-R25-REDIRECT
 # reqwest 0.12 removes a fixed set of credential headers (including Authorization)
 # when a redirect crosses host/scheme/port, but ChatGPT-Account-ID is a custom
@@ -36,15 +89,7 @@ if "CAS-APPS-MCP-AUTH-R25-REDIRECT" not in text:
                     }
                     // CAS-APPS-MCP-AUTH-R25-REDIRECT
                     if let Some(origin) = attempt.previous().first() {
-                        let origin_is_apps_mcp = origin.scheme() == "https"
-                            && origin.host_str() == Some("chatgpt.com")
-                            && (origin.path() == "/backend-api/ps/mcp"
-                                || origin.path().starts_with("/backend-api/ps/mcp/"));
-                        let next_same_origin = attempt.url().scheme() == "https"
-                            && attempt.url().host_str() == Some("chatgpt.com")
-                            && attempt.url().port_or_known_default()
-                                == origin.port_or_known_default();
-                        if origin_is_apps_mcp && !next_same_origin {
+                        if !apps_mcp_redirect_target_allowed(origin, attempt.url()) {
                             return attempt.error(
                                 "Apps MCP cross-origin redirect blocked".to_string(),
                             );
@@ -86,12 +131,42 @@ if "CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE" not in text:
         label="r25 account-id sensitivity",
     )
 
+# Behaviour-level sensitivity regression: source markers alone are not enough.
+if "CAS-APPS-MCP-AUTH-R25-SENSITIVITY-TEST" not in text:
+    text = replace_once(
+        text,
+        '''        assert_eq!(prepared.authorization, "Bearer token-from-auth-json");
+        assert!(prepared.account_id.is_none());
+
+        let malformed = prepare_chatgpt_mcp_relay_auth(''',
+        '''        assert_eq!(prepared.authorization, "Bearer token-from-auth-json");
+        assert!(prepared.authorization.is_sensitive());
+        assert!(prepared.account_id.is_none());
+
+        // CAS-APPS-MCP-AUTH-R25-SENSITIVITY-TEST
+        let with_account = prepare_chatgpt_mcp_relay_auth(
+            ChatgptMcpRelayAuth {
+                access_token: "token-from-auth-json".to_string(),
+                account_id: Some("account-local".to_string()),
+            },
+            &HeaderMap::new(),
+        )
+        .expect("valid bearer/account");
+        assert!(with_account.authorization.is_sensitive());
+        assert!(with_account.account_id.as_ref().unwrap().is_sensitive());
+
+        let malformed = prepare_chatgpt_mcp_relay_auth(''',
+        label="r25 sensitivity behaviour test",
+    )
+
 FORWARD.write_text(text, encoding="utf-8")
 
 for marker in (
+    "CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER",
     "CAS-APPS-MCP-AUTH-R25-REDIRECT",
     "CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE",
     "CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE",
+    "CAS-APPS-MCP-AUTH-R25-SENSITIVITY-TEST",
 ):
     if marker not in text:
         raise SystemExit(f"r25 redirect/privacy hardening marker missing: {marker}")

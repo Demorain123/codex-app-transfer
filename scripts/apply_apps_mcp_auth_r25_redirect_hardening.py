@@ -68,14 +68,14 @@ impl ProxyState {''',
         label="r25 redirect testable helper",
     )
 
-# CAS-APPS-MCP-AUTH-R25-REDIRECT
+# CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD
 # reqwest 0.12 removes a fixed set of credential headers (including Authorization)
 # when a redirect crosses host/scheme/port, but ChatGPT-Account-ID is a custom
 # identity header and is not in that built-in strip list. r25 can synthesize that
 # header, so an Apps MCP request must never carry the synthesized identity across
 # origins. Restrict only redirect chains whose original request is the hosted Apps
 # MCP namespace; all unrelated providers keep the existing redirect policy.
-if "CAS-APPS-MCP-AUTH-R25-REDIRECT" not in text:
+if "CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD" not in text:
     text = replace_once(
         text,
         '''                .redirect(reqwest::redirect::Policy::custom(|attempt| {
@@ -87,7 +87,7 @@ if "CAS-APPS-MCP-AUTH-R25-REDIRECT" not in text:
                     if attempt.previous().len() >= 5 {
                         return attempt.error("too many redirects".to_string());
                     }
-                    // CAS-APPS-MCP-AUTH-R25-REDIRECT
+                    // CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD
                     if let Some(origin) = attempt.previous().first() {
                         if !apps_mcp_redirect_target_allowed(origin, attempt.url()) {
                             return attempt.error(
@@ -163,7 +163,7 @@ FORWARD.write_text(text, encoding="utf-8")
 
 for marker in (
     "CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER",
-    "CAS-APPS-MCP-AUTH-R25-REDIRECT",
+    "CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD",
     "CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE",
     "CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE",
     "CAS-APPS-MCP-AUTH-R25-SENSITIVITY-TEST",

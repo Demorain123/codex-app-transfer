@@ -38,6 +38,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   no-micro-windows:
     runs-on: windows-latest
@@ -55,7 +58,20 @@ jobs:
         run: node --check src-tauri/resources/codex_no_micro_launcher.mjs
 
       - name: Run No Micro inspector + Worker mock
-        run: node scripts/test_no_micro_launcher.mjs
+        shell: pwsh
+        run: |
+          node scripts/test_no_micro_launcher.mjs 2>&1 | Tee-Object -FilePath no-micro-mock.log
+          $code = $LASTEXITCODE
+          exit $code
+
+      - name: Upload No Micro mock failure diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-micro-mock-failure
+          path: no-micro-mock.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Install frontend dependencies
         run: npm --prefix frontend ci

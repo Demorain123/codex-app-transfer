@@ -66,6 +66,25 @@ jobs:
           $code = $LASTEXITCODE
           exit $code
 
+      - name: Verify explicit A/B log markers and controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q '[codex-ab]' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '"normal", "launch_requested"' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '"normal",' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '"launch_success"' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '"no-micro", "launch_requested"' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '"injection_success"' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'proxy_telemetry()' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '普通启动（A）' frontend/src/components/codex/NoMicroPanel.vue
+          grep -F -q 'No Micro 启动（B）' frontend/src/components/codex/NoMicroPanel.vue
+          grep -F -q 'NoMicroPanel' frontend/src/pages/ProvidersPage.vue
+          if grep -F -q 'NoMicroPanel' frontend/src/pages/CodexPage.vue; then
+            echo '::error::No Micro panel must not be rendered in Codex/Docs page'
+            exit 1
+          fi
+
       - name: Upload No Micro mock failure diagnostic
         if: failure()
         uses: actions/upload-artifact@v4

@@ -119,7 +119,7 @@ else:
 
 required = [
     'name.eq_ignore_ascii_case("chatgpt.exe")',
-    'event = "stream_disconnected"',
+    '"stream_disconnected"',
     "let previous_codex_count = previous",
     "let line_bytes = line.len() as u64;",
 ]

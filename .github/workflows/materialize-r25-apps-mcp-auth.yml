@@ -13,6 +13,8 @@ on:
       - 'scripts/apply_apps_mcp_auth_r25_redirect_hardening.py'
       - 'scripts/apply_apps_mcp_auth_r25_review.py'
       - 'scripts/apply_apps_mcp_auth_r25_redirect_review.py'
+      - 'scripts/apply_apps_mcp_auth_r25_trace_privacy.py'
+      - 'scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'crates/proxy/**'
       - 'src-tauri/**'
@@ -48,12 +50,14 @@ jobs:
           scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
           scripts/apply_apps_mcp_auth_r25_review.py
           scripts/apply_apps_mcp_auth_r25_redirect_review.py
+          scripts/apply_apps_mcp_auth_r25_trace_privacy.py
+          scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py
           scripts/apply_sub2api_grok_compat_revision.py
 
       - name: Materialize base r25 Apps MCP auth
         run: python scripts/apply_apps_mcp_auth_r25.py
 
-      - name: Apply r25 redirect/privacy hardening
+      - name: Apply r25 redirect and trace privacy hardening
         run: python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
 
       - name: Apply r25 deep self-review gates
@@ -62,6 +66,7 @@ jobs:
           set -euo pipefail
           python scripts/apply_apps_mcp_auth_r25_review.py
           python scripts/apply_apps_mcp_auth_r25_redirect_review.py
+          python scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py
 
       - name: Compose complete compat revision
         run: python scripts/apply_sub2api_grok_compat_revision.py
@@ -71,13 +76,16 @@ jobs:
         run: |
           set -euo pipefail
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-STATE' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD' crates/proxy/src/forward.rs
           grep -F -q 'Apps MCP cross-origin redirect blocked' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
           grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-ROUTER' crates/proxy/src/server.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-GENERIC' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH' crates/proxy/src/diagnostics.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-SNAPSHOT' src-tauri/src/codex_real_account.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-WIRE' src-tauri/src/proxy_runner.rs
           grep -F -q 'compat_revision=25' SUB2API_GROK_COMPAT_VERSION.txt
@@ -123,6 +131,7 @@ jobs:
             crates/proxy/src/forward.rs \
             crates/proxy/src/server.rs \
             crates/proxy/src/lib.rs \
+            crates/proxy/src/diagnostics.rs \
             src-tauri/src/codex_real_account.rs \
             src-tauri/src/proxy_runner.rs \
             src-tauri/Cargo.toml \

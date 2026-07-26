@@ -1669,6 +1669,42 @@ fn is_chatgpt_mcp_backend_path(path: &str) -> bool {
     p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")
 }
 
+// CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY
+fn apps_mcp_safe_relay_log_path(path: &str) -> &str {
+    if is_chatgpt_mcp_backend_path(path) {
+        diagnostic_path_only(path)
+    } else {
+        path
+    }
+}
+
+fn apps_mcp_safe_reqwest_error(path: &str, error: reqwest::Error) -> reqwest::Error {
+    if is_chatgpt_mcp_backend_path(path) {
+        error.without_url()
+    } else {
+        error
+    }
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_log_privacy_tests {
+    use super::*;
+
+    #[test]
+    fn apps_mcp_auth_r25_relay_logs_strip_mcp_query_but_preserve_other_backend_paths() {
+        assert_eq!(
+            apps_mcp_safe_relay_log_path(
+                "/backend-api/ps/mcp/.well-known?code=secret-code&state=private-state"
+            ),
+            "/backend-api/ps/mcp/.well-known"
+        );
+        assert_eq!(
+            apps_mcp_safe_relay_log_path("/backend-api/ps/plugins/installed?view=all"),
+            "/backend-api/ps/plugins/installed?view=all"
+        );
+    }
+}
+
 // CAS-APPS-MCP-AUTH-R25-HELPERS
 // Rehydrate only the ChatGPT-hosted Apps MCP namespace and never overwrite an
 // Authorization header supplied by Codex. The allowlist is checked on the canonical
@@ -1837,10 +1873,15 @@ async fn passthrough_chatgpt_backend(
     body: Bytes,
 ) -> Result<Response, ForwardError> {
     let upstream = format!("https://chatgpt.com{client_path}");
+    // CAS-APPS-MCP-AUTH-R25-LOG-SAFE-PATH-WIRE
+    // The real upstream keeps its full query; only human-readable local telemetry
+    // drops Apps MCP query values. Other ChatGPT backend log paths are unchanged.
+    let relay_log_path = apps_mcp_safe_relay_log_path(client_path);
+    let relay_log_upstream = format!("https://chatgpt.com{relay_log_path}");
     let telemetry = proxy_telemetry();
     telemetry.logs.add(
         "INFO",
-        format!("[chatgpt-relay] {method} {client_path} → {upstream}"),
+        format!("[chatgpt-relay] {method} {relay_log_path} → {relay_log_upstream}"),
     );
     // [MOC-125] gate 开时先 clone Codex 原始请求体(下面会 move 进 rb),供 passthrough 诊断 trace。
     let trace_inbound = forward_trace_enabled().then(|| body.clone());
@@ -1927,7 +1968,9 @@ async fn passthrough_chatgpt_backend(
     // Build explicitly before execute so diagnostics can snapshot the request headers after all
     // passthrough copy/strip decisions. This is behavior-equivalent to RequestBuilder::send();
     // it does not add/remove any application header or alter the target URL/body.
-    let req = rb.build()?;
+    let req = rb
+        .build()
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?; // CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY
     let outbound_headers_snapshot = req.headers().clone();
     if let Some(diag_id) = mcp_diag_id {
         telemetry.logs.add(
@@ -1941,13 +1984,20 @@ async fn passthrough_chatgpt_backend(
             ),
         );
     }
-    let resp = state.http.execute(req).await?;
+    let resp = state
+        .http
+        .execute(req)
+        .await
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;
     let status = resp.status().as_u16();
     let resp_headers = resp.headers().clone();
     // [review H-1] body 读失败**冒泡、不吞** —— `unwrap_or_default()` 会把上游连接 reset /
     // TLS 截断 / 读超时伪装成"成功读到空 200",抹掉根因 + 让诊断日志说假话(本模块存在的
     // 意义就是把 TLS 黑盒变可见)。透传场景上游断连本就该回 502 让 Codex 重试。
-    let resp_body = resp.bytes().await.map_err(ForwardError::Upstream)?;
+    let resp_body = resp
+        .bytes()
+        .await
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;
     if let Some(diag_id) = mcp_diag_id {
         telemetry.logs.add(
             if (200..300).contains(&status) { "INFO" } else { "WARN" },
@@ -1973,7 +2023,7 @@ async fn passthrough_chatgpt_backend(
             "WARN"
         },
         format!(
-            "[chatgpt-relay] resp {status} {client_path} ({} bytes)",
+            "[chatgpt-relay] resp {status} {relay_log_path} ({} bytes)",
             resp_body.len()
         ),
     );
@@ -1994,7 +2044,7 @@ async fn passthrough_chatgpt_backend(
             telemetry.logs.add(
                 "ERROR",
                 format!(
-                    "[chatgpt-relay] 上游 401 → chatgpt 账号 token 服务端失效,已回灌 relogin_required(后续 401 静默): {client_path}"
+                    "[chatgpt-relay] 上游 401 → chatgpt 账号 token 服务端失效,已回灌 relogin_required(后续 401 静默): {relay_log_path}"
                 ),
             );
         }

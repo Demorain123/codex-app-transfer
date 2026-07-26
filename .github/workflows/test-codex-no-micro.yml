@@ -21,6 +21,7 @@ on:
       - 'scripts/no_micro_mock_fixture.mjs'
       - 'scripts/test_no_micro_launcher.mjs'
       - 'scripts/apply_no_micro_r23_restart_pipeline.py'
+      - 'scripts/apply_no_micro_r23_restart_review.py'
       - '.github/workflows/test-codex-no-micro.yml'
   pull_request:
     branches:
@@ -41,6 +42,7 @@ on:
       - 'scripts/no_micro_mock_fixture.mjs'
       - 'scripts/test_no_micro_launcher.mjs'
       - 'scripts/apply_no_micro_r23_restart_pipeline.py'
+      - 'scripts/apply_no_micro_r23_restart_review.py'
       - '.github/workflows/test-codex-no-micro.yml'
 
 permissions:
@@ -62,21 +64,27 @@ jobs:
 
       - name: Apply r23 shared restart pipeline overlay
         shell: bash
-        run: python scripts/apply_no_micro_r23_restart_pipeline.py
+        run: |
+          python scripts/apply_no_micro_r23_restart_pipeline.py
+          python scripts/apply_no_micro_r23_restart_review.py
 
       - name: Verify r23 A/B shares the proven restart pipeline
         shell: bash
         run: |
           set -euo pipefail
           grep -F -q 'CAS-NO-MICRO-R23-SHARED-RESTART-PIPELINE' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'CAS-NO-MICRO-R23-LEGACY-RESTART-PRESERVED' src-tauri/src/admin/services/desktop/process.rs
           grep -F -q 'launch_codex_app_restart_with' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'if crate::windows_msix::try_launch_codex(&should_attach_debug_port())' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'launch_codex_app_restart_with(platform, || open_codex_app(platform))' src-tauri/src/admin/services/desktop/process.rs
           grep -F -q 'CAS-NO-MICRO-R23-SHARED-DESKTOP-PREP' src-tauri/src/admin/handlers/desktop.rs
           grep -F -q 'prepare_codex_restart_runtime' src-tauri/src/admin/handlers/desktop.rs
           grep -F -q 'CAS-NO-MICRO-R23-LAUNCH-ARGS' src-tauri/src/admin/services/desktop/no_micro.rs
           grep -F -q 'launch_with_args' src-tauri/src/admin/services/desktop/no_micro.rs
           grep -F -q 'CAS-NO-MICRO-R23-AB-SHARED-PIPELINE' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q 'process::launch_codex_app_restart(std::env::consts::OS)' src-tauri/src/admin/handlers/no_micro.rs
-          grep -F -q 'process::launch_codex_app_restart_with(std::env::consts::OS' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'process::launch_codex_app_restart_with(std::env::consts::OS, ||' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'process::prepare_codex_alternate_launch_args()' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q 'pipeline=legacy-restart-shared' src-tauri/src/admin/handlers/no_micro.rs
           if grep -F -q 'activate_packaged_app(&aumid, "")' src-tauri/src/admin/handlers/no_micro.rs; then
             echo '::error::A still has an independent MSIX activation path instead of legacy restart'

@@ -32,6 +32,15 @@ replace_once(
     "r24 generator metadata serialization",
 )
 
+# 1b. `String::replace` already returns String; the original non-Windows branch
+# accidentally called Cow::into_owned() on it. Fix the generator before Linux CI compiles.
+replace_once(
+    GEN,
+    "        raw.into_owned()\n",
+    "        raw\n",
+    "r24 generator non-Windows path normalization",
+)
+
 # 2. Repair current-r23 CRUD anchor drift. The long explanatory grokWeb comment is
 # before the actual validation block, so use the stable MOC-257 line that really follows
 # the block. Both the generator's anchor and replacement carry the same trailing line,
@@ -59,6 +68,12 @@ if generated.exists():
         '"overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()',
         '"overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()',
         "generated metadata serialization",
+    )
+    replace_once(
+        generated,
+        "        raw.into_owned()\n",
+        "        raw\n",
+        "generated non-Windows path normalization",
     )
 
 # 4. Restore the true catalog source BEFORE taking a snapshot. In preflight the r24

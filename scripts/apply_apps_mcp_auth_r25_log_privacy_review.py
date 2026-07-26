@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 
 ROOT = Path(__file__).resolve().parents[1]
 forward = (ROOT / "crates/proxy/src/forward.rs").read_text(encoding="utf-8")
@@ -25,5 +26,19 @@ for marker in required:
 # is telemetry-only; changing the request URL would be a functional OAuth regression.
 if 'let upstream = format!("https://chatgpt.com{client_path}");' not in forward:
     raise SystemExit("r25 relay log privacy review: real upstream URL no longer uses original client_path")
+
+# Final account-state companion: after all transport/privacy guards are materialized,
+# refuse a bearer the existing 401 state machine already knows is revoked. Keep this
+# chained into the standard hardening path so the normal compat composer cannot stamp
+# r25 without the revocation guard.
+for companion in (
+    "scripts/apply_apps_mcp_auth_r25_revocation_hardening.py",
+    "scripts/apply_apps_mcp_auth_r25_revocation_review.py",
+):
+    companion_path = ROOT / companion
+    if not companion_path.is_file():
+        raise SystemExit(f"r25 revocation companion missing: {companion}")
+    print(f"applying {companion}")
+    runpy.run_path(str(companion_path), run_name="__main__")
 
 print("r25 Apps MCP relay telemetry query privacy review: PASS")

@@ -88,8 +88,27 @@ jobs:
           workspaces: '. -> target'
           key: no-micro-windows
 
-      - name: Rustfmt check
-        run: cargo fmt --all -- --check
+      - name: Format Rust for validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          git diff -- \
+            src-tauri/src/admin/services/desktop/no_micro.rs \
+            src-tauri/src/admin/services/desktop/mod.rs \
+            src-tauri/src/admin/handlers/no_micro.rs \
+            src-tauri/src/admin/handlers/mod.rs \
+            src-tauri/src/admin/mod.rs > no-micro-rustfmt.diff
+
+      - name: Upload rustfmt patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-micro-rustfmt
+          path: no-micro-rustfmt.diff
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Check Tauri application
         run: cargo check -p codex-app-transfer

@@ -5,6 +5,17 @@ on:
   push:
     branches:
       - sub2api-grok-compat-next-r26-runtime-diag
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r24-auto-review-overlay
+    paths:
+      - 'scripts/apply_runtime_diag_r26.py'
+      - 'scripts/runtime_diag_r26.rs'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'src-tauri/**'
+      - 'crates/proxy/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - '.github/workflows/materialize-r26-runtime-diag.yml'
 
 permissions:
   contents: write
@@ -15,12 +26,12 @@ concurrency:
 
 jobs:
   materialize-and-test:
-    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[r26-generated]') }}
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[r26-generated]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -37,6 +48,7 @@ jobs:
           grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
           grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-RESULT' crates/proxy/src/forward.rs
+          grep -F -q 'compat_revision=26' SUB2API_GROK_COMPAT_VERSION.txt
 
       - uses: dtolnay/rust-toolchain@stable
         with:

@@ -1,0 +1,114 @@
+name: Materialize r26 Runtime Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r26-runtime-diag
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r24-auto-review-overlay
+    paths:
+      - 'scripts/apply_runtime_diag_r26.py'
+      - 'scripts/apply_runtime_diag_r26_review.py'
+      - 'scripts/runtime_diag_r26.rs'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'src-tauri/**'
+      - 'crates/proxy/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - '.github/workflows/materialize-r26-runtime-diag.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: r26-runtime-diag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  materialize-and-test:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[r26-generated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check r26 Python overlays
+        run: python -m py_compile scripts/apply_runtime_diag_r26.py scripts/apply_runtime_diag_r26_review.py scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Materialize base r26 diagnostics
+        run: python scripts/apply_runtime_diag_r26.py
+
+      - name: Apply r26 self-review hardening
+        run: python scripts/apply_runtime_diag_r26_review.py
+
+      - name: Compose complete compat revision
+        run: python scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Verify r26 materialization markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
+          grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
+          grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-RESULT' crates/proxy/src/forward.rs
+          grep -F -q 'chatgpt.exe' src-tauri/src/runtime_diag.rs
+          grep -F -q 'stream_disconnected' src-tauri/src/runtime_diag.rs
+          ! grep -F -q 'line_fp = %line_fp' src-tauri/src/runtime_diag.rs
+          grep -F -q 'compat_revision=26' SUB2API_GROK_COMPAT_VERSION.txt
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format, test, and prove r26 overlay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+          git diff --binary > /tmp/r26-first.diff
+
+          python scripts/apply_runtime_diag_r26.py
+          python scripts/apply_runtime_diag_r26_review.py
+          cargo fmt --all
+          git diff --check
+          git diff --binary > /tmp/r26-second.diff
+          if ! cmp -s /tmp/r26-first.diff /tmp/r26-second.diff; then
+            echo '::error::r26 complete diagnostics overlay is not idempotent after rustfmt'
+            diff -u /tmp/r26-first.diff /tmp/r26-second.diff || true
+            exit 1
+          fi
+
+      - name: Commit generated r26 source
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            src-tauri/src/runtime_diag.rs \
+            src-tauri/src/main.rs \
+            crates/proxy/src/forward.rs \
+            src-tauri/Cargo.toml \
+            src-tauri/tauri.conf.json \
+            Cargo.lock \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts \
+            frontend/src/layout/AppLayout.vue \
+            SUB2API_GROK_COMPAT_VERSION.txt
+          if git diff --cached --quiet; then
+            echo 'No generated r26 source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'diag(runtime): materialize r26 diagnostics [r26-generated]'
+          git push origin "HEAD:${GITHUB_REF_NAME}"

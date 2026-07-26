@@ -56,6 +56,41 @@ for rel_path, marker in r24_required_markers.items():
         raise SystemExit(f"r24 materialization missing marker in {rel_path}: {marker}")
 print("r24 materialization gate: complete")
 
+# CAS-RUNTIME-DIAG-R26-COMPOSE: r26 is deliberately a diagnostics-only layer stacked
+# on the latest r24 head. Keep it optional so the same revision patcher remains usable
+# on r24 itself; the r26 branch carries the overlay asset and therefore materializes it
+# before any visible version identity is changed.
+r26_overlay = ROOT / "scripts/apply_runtime_diag_r26.py"
+if r26_overlay.exists():
+    print("applying scripts/apply_runtime_diag_r26.py")
+    runpy.run_path(str(r26_overlay), run_name="__main__")
+    r26_review = ROOT / "scripts/apply_runtime_diag_r26_review.py"
+    if r26_review.exists():
+        print("applying scripts/apply_runtime_diag_r26_review.py")
+        runpy.run_path(str(r26_review), run_name="__main__")
+    r26_required_markers = {
+        "src-tauri/src/runtime_diag.rs": "CAS-RUNTIME-DIAG-R26",
+        "src-tauri/src/main.rs": "CAS-RUNTIME-DIAG-R26-START",
+        "crates/proxy/src/forward.rs": "CAS-SUBAGENT-FAILURE-CHAIN-R26-RESULT",
+    }
+    for rel_path, marker in r26_required_markers.items():
+        candidate = ROOT / rel_path
+        if not candidate.is_file():
+            raise SystemExit(f"r26 materialization missing generated file: {rel_path}")
+        content = candidate.read_text(encoding="utf-8")
+        if marker not in content:
+            raise SystemExit(f"r26 materialization missing marker in {rel_path}: {marker}")
+    if r26_review.exists():
+        runtime_diag = (ROOT / "src-tauri/src/runtime_diag.rs").read_text(encoding="utf-8")
+        for marker in [
+            'name.eq_ignore_ascii_case("chatgpt.exe")',
+            'event = "stream_disconnected"',
+            "let line_bytes = line.len() as u64;",
+        ]:
+            if marker not in runtime_diag:
+                raise SystemExit(f"r26 self-review materialization missing marker: {marker}")
+    print("r26 materialization gate: complete")
+
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()
 if not revision.isdigit() or int(revision) < 1:
     raise SystemExit("SUB2API_GROK_COMPAT_REVISION.txt must contain a positive integer")

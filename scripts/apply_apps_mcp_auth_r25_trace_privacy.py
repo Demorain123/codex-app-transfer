@@ -66,13 +66,14 @@ if "CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH" not in text:
     )
 
 # Behaviour regressions live in diagnostics.rs's existing test module so they execute
-# in the same crate without exposing private scrub helpers.
+# in the same crate without exposing private scrub helpers. The test name intentionally
+# includes `apps_mcp_auth_r25` so the dedicated filtered proxy test cannot skip it.
 if "CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-TEST" not in text:
     test_anchor = '''    #[test]
     fn passthrough_non_standard_cookie_and_credential_still_redacted() {'''
     test_block = '''    // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-TEST
     #[test]
-    fn r25_chatgpt_account_id_is_redacted_in_all_diagnostic_header_paths() {
+    fn apps_mcp_auth_r25_chatgpt_account_id_is_redacted_in_all_diagnostic_header_paths() {
         let mut h = reqwest::header::HeaderMap::new();
         h.insert("chatgpt-account-id", "acct-r25-private-123".parse().unwrap());
         h.insert("content-type", "application/json".parse().unwrap());

@@ -84,7 +84,7 @@ print("r26 review: orphan codex.exe anomaly scope ready")
 if '"stream_disconnected"' not in text:
     text, count = re.subn(
         r'(?m)^(\s*)\("response\.failed",\s*"response_failed",\s*"WARN"\),\s*$',
-        r'\1("stream disconnected", "stream_disconnected", "WARN"),\n\1("response.failed", "response_failed", "WARN"),',
+        r'\1// CAS-RUNTIME-DIAG-R26-STREAM-MARKER: event = "stream_disconnected"\n\1("stream disconnected", "stream_disconnected", "WARN"),\n\1("response.failed", "response_failed", "WARN"),',
         text,
         count=1,
     )

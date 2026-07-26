@@ -11,7 +11,7 @@ const isWindows = navigator.userAgent.includes('Windows')
   <div class="app-shell">
     <!-- macOS overlay 标题栏:红绿灯浮在左上,应用名居中,整条可拖拽窗口。Windows 有原生标题栏 → 隐藏。 -->
     <div v-if="!isWindows" class="titlebar" data-tauri-drag-region>
-      <span class="titlebar__title">Codex App Transfer — Sub2API Grok Compat r22 — v2.4.5+22</span>
+      <span class="titlebar__title">Codex App Transfer — Sub2API Grok Compat r23 — v2.4.5+23</span>
     </div>
     <TopTabBar />
     <main class="app-shell__content">

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { rename, writeFile } from "node:fs/promises";
+import { rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,7 @@ try {
 
   phase = "stub-marker-verified";
   await delay(700);
-  if (child.exitCode !== null) {
+  if (!isPidAlive(child.pid)) {
     throw new Error(`Codex exited after resume (exit ${child.exitCode})`);
   }
 
@@ -72,7 +72,7 @@ try {
   process.stdout.write(`${JSON.stringify(status)}\n`);
   process.exitCode = 0;
 } catch (error) {
-  const cleanup = await cleanupOwnChild(child);
+  const cleanup = await cleanupOwnChild(child, executable);
   const status = {
     schemaVersion: 1,
     mode: MODE,
@@ -114,7 +114,7 @@ function stubExpression(expectedPid, expectedExecutable) {
   const expectedPath = JSON.stringify(normalizedExecutable(expectedExecutable));
   return String.raw`
 (() => {
-  const actualPath = String(process.execPath || "").replaceAll("\\\\", "/").toLowerCase();
+  const actualPath = String(process.execPath || "").replaceAll("\\", "/").toLowerCase();
   if (process.pid !== ${expectedPid}) {
     throw new Error("No Micro inspector target PID mismatch");
   }
@@ -246,7 +246,7 @@ async function waitForInspector(portNumber, childProcess, timeoutMs) {
   let lastError = "inspector did not respond";
 
   while (Date.now() < deadline) {
-    if (childProcess.exitCode !== null) {
+    if (!isPidAlive(childProcess.pid)) {
       throw new Error(`Codex exited before the startup hook (exit ${childProcess.exitCode})`);
     }
     try {
@@ -393,14 +393,24 @@ async function installStub(webSocketUrl, expectedPid, expectedExecutable) {
   });
 }
 
-async function cleanupOwnChild(childProcess) {
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function cleanupOwnChild(childProcess, expectedExecutable) {
   if (!childProcess?.pid) return "not-started";
-  if (childProcess.exitCode !== null) return "already-exited";
+  if (!isPidAlive(childProcess.pid)) return "already-exited";
 
   try {
     childProcess.kill("SIGKILL");
   } catch {}
-  if (await waitForExit(childProcess, 1200)) return "terminated-own-child";
+  if (await waitForPidExit(childProcess.pid, 1200)) return "terminated-own-child";
 
   if (process.platform === "win32") {
     const ps = spawnSync(
@@ -410,11 +420,28 @@ async function cleanupOwnChild(childProcess) {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        `Stop-Process -Id ${childProcess.pid} -Force -ErrorAction Stop`,
+        [
+          "$ErrorActionPreference = 'Stop'",
+          "$pidToStop = [int]$env:CAS_NO_MICRO_CHILD_PID",
+          "$expected = $env:CAS_NO_MICRO_EXPECTED_EXE",
+          "$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$pidToStop\"",
+          "if ($null -eq $p) { exit 0 }",
+          "if (-not $p.ExecutablePath) { exit 3 }",
+          "if (-not [string]::Equals($p.ExecutablePath, $expected, [System.StringComparison]::OrdinalIgnoreCase)) { exit 4 }",
+          "Stop-Process -Id $pidToStop -Force -ErrorAction Stop",
+        ].join("; "),
       ],
-      { stdio: "ignore", windowsHide: true },
+      {
+        stdio: "ignore",
+        windowsHide: true,
+        env: {
+          ...process.env,
+          CAS_NO_MICRO_CHILD_PID: String(childProcess.pid),
+          CAS_NO_MICRO_EXPECTED_EXE: path.resolve(expectedExecutable),
+        },
+      },
     );
-    if (ps.status === 0 && await waitForExit(childProcess, 1200)) {
+    if (ps.status === 0 && await waitForPidExit(childProcess.pid, 1600)) {
       return "terminated-own-child-powershell";
     }
   }
@@ -422,20 +449,29 @@ async function cleanupOwnChild(childProcess) {
   return "cleanup-failed";
 }
 
-async function waitForExit(childProcess, timeoutMs) {
+async function waitForPidExit(pid, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (childProcess.exitCode !== null) return true;
+    if (!isPidAlive(pid)) return true;
     await delay(60);
   }
-  return childProcess.exitCode !== null;
+  return !isPidAlive(pid);
 }
 
 async function writeStatusBestEffort(status) {
   try {
     const temporaryPath = `${statusPath}.tmp`;
+    await rm(temporaryPath, { force: true });
     await writeFile(temporaryPath, `${JSON.stringify(status, null, 2)}\n`, "utf8");
-    await rename(temporaryPath, statusPath);
+    try {
+      await rename(temporaryPath, statusPath);
+    } catch (error) {
+      // Windows can reject rename-over-existing in some filesystem/AV combinations.
+      // Status is diagnostic only, so replace the old breadcrumb and retry once.
+      if (process.platform !== "win32") throw error;
+      await rm(statusPath, { force: true });
+      await rename(temporaryPath, statusPath);
+    }
     return { ok: true };
   } catch (error) {
     return { ok: false, error: safeError(error) };

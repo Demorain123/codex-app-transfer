@@ -5,9 +5,8 @@ The revision composer runs this script before AND after the base r24 generator:
 - preflight patches generator defects/anchor drift before generation can fail;
 - postflight fixes/validates generated Rust ordering and serialization.
 
-The generated r24 Rust module is now also materialized in the branch. Therefore
-postflight checks must be semantic/idempotent rather than depend on one exact
-rustfmt layout.
+Generated r24 files are materialized in the branch, so replay checks must be
+semantic/idempotent rather than depend on one exact rustfmt layout.
 """
 from __future__ import annotations
 
@@ -29,7 +28,6 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
 
 
 def harden_generated_metadata(path: Path) -> None:
-    """Accept both generator formatting and rustfmt materialized formatting."""
     text = path.read_text(encoding="utf-8")
     old = '"overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()'
     fixed_single = '"overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()'
@@ -59,11 +57,9 @@ def harden_generated_non_windows_path(path: Path) -> None:
     raise SystemExit("r24 hardening semantic check failed: generated non-Windows path normalization")
 
 
-# 0. Make the generator replay-safe after generated Rust has been materialized and rustfmt'd.
-# The original helper only recognized byte-identical `new` blocks. rustfmt can wrap imports
-# and expressions without changing semantics, which made the next replay try the old anchor
-# again and fail. Whitespace-normalized comparison is only an idempotence fast-path; actual
-# mutation still requires the exact old anchor, preserving fail-closed behavior on real drift.
+# 0. Make generator replay-safe after generated files have been materialized/rustfmt'd.
+# Exact old anchors are still required for mutation. Semantic markers are only used
+# to prove that a particular patch is already present, so genuine source drift fails closed.
 gen_text = GEN.read_text(encoding="utf-8")
 old_replace_once = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
     if new in text:
@@ -75,8 +71,38 @@ old_replace_once = '''def replace_once(text: str, old: str, new: str, label: str
 new_replace_once = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
     if new in text:
         return text
-    # Materialized generated files may have been rustfmt'd. Treat whitespace-only
-    # layout differences as already applied, while keeping exact old-anchor mutation.
+    # rustfmt can change wrapping/order around already-materialized patches.
+    # Each rule names the final semantic marker and the minimum expected count.
+    semantic_markers = {
+        "ApplyConfig field": ("pub auto_review_model_overrides: Option<&'a serde_json::Value>", 1),
+        "restore before apply": ("restore_source_if_overlay_active(paths)?", 1),
+        "overlay after catalog": ("apply_auto_review_overrides(", 1),
+        "provider helper": ("fn provider_auto_review_model_overrides", 1),
+        "snapshot imports": ("provider_auto_review_model_overrides", 1),
+        "target field": ("pub auto_review_model_overrides: Value", 1),
+        "target init": ("auto_review_model_overrides: provider_auto_review_model_overrides(provider)", 1),
+        "ApplyConfig init": ("auto_review_model_overrides: Some(&target.auto_review_model_overrides)", 1),
+        "CRUD validator": ("fn validate_auto_review_model_overrides_input", 1),
+        "CRUD input field": ("pub auto_review_model_overrides: Option<Value>", 1),
+        "add validation": ("input.auto_review_model_overrides.as_ref()", 2),
+        "update validation": ("input.auto_review_model_overrides.as_ref()", 2),
+        "add persistence": ("new_provider.insert(\\\"autoReviewModelOverrides\\\"", 1),
+        "update persistence": ("updated.insert(\\\"autoReviewModelOverrides\\\"", 1),
+        "Provider type": ("autoReviewModelOverrides?: Record<string, string>", 2),
+        "ProviderPayload type": ("autoReviewModelOverrides?: Record<string, string>", 2),
+        "form field": ("autoReviewModelOverrides: '', // CAS-AUTO-REVIEW-R24", 1),
+        "edit load": ("form.autoReviewModelOverrides = stringifyIfAny", 1),
+        "save local": ("let autoReviewModelOverrides: Record<string, unknown> | undefined", 1),
+        "parse overrides": ("autoReviewModelOverrides = parseJsonObj(", 1),
+        "payload field": ("autoReviewModelOverrides: (autoReviewModelOverrides || {})", 1),
+        "UI row": ("providerForm.autoReviewModelOverrides", 1),
+    }
+    rule = semantic_markers.get(label)
+    if rule is not None:
+        marker, minimum = rule
+        if text.count(marker) >= minimum:
+            return text
+    # Whitespace-only layout changes are also safe to treat as already applied.
     if re.sub(r"\\s+", "", new) in re.sub(r"\\s+", "", text):
         return text
     if old not in text:
@@ -91,6 +117,26 @@ elif old_replace_once in gen_text:
 else:
     raise SystemExit("r24 hardening anchor not found: generator replace_once helper")
 
+# The provider-form reset/preset code used an unconditional str.replace, so every replay
+# could append another assignment. Turn it into an explicit idempotent insertion.
+gen_text = GEN.read_text(encoding="utf-8")
+old_reset = '''    # reset and preset: the same literal appears twice; replace all remaining exact anchors intentionally.
+    text = text.replace("  form.reviewModelSlot = ''\\n", "  form.reviewModelSlot = ''\\n  form.autoReviewModelOverrides = ''\\n")
+'''
+new_reset = '''    # reset and preset: insert only when the r24 assignment is not already adjacent.
+    reset_anchor = "  form.reviewModelSlot = ''\\n"
+    reset_repl = "  form.reviewModelSlot = ''\\n  form.autoReviewModelOverrides = ''\\n"
+    if reset_repl not in text:
+        text = text.replace(reset_anchor, reset_repl)
+'''
+if new_reset in gen_text:
+    print("r24 provider-form reset replay: already hardened")
+elif old_reset in gen_text:
+    GEN.write_text(gen_text.replace(old_reset, new_reset, 1), encoding="utf-8")
+    print("r24 provider-form reset replay: hardened")
+else:
+    raise SystemExit("r24 hardening anchor not found: provider-form reset replay")
+
 # 1. Fix generator metadata serialization so generated Rust compiles.
 replace_once(
     GEN,
@@ -100,7 +146,7 @@ replace_once(
 )
 
 # 1b. `String::replace` already returns String; the original non-Windows branch
-# accidentally called Cow::into_owned() on it. Fix the generator before Linux CI compiles.
+# accidentally called Cow::into_owned() on it.
 replace_once(
     GEN,
     "        raw.into_owned()\n",
@@ -108,10 +154,7 @@ replace_once(
     "r24 generator non-Windows path normalization",
 )
 
-# 2. Repair current-r23 CRUD anchor drift. The long explanatory grokWeb comment is
-# before the actual validation block, so use the stable MOC-257 line that really follows
-# the block. Both the generator's anchor and replacement carry the same trailing line,
-# therefore replacing the two embedded comment lines is sufficient and deterministic.
+# 2. Repair current-r23 CRUD anchor drift.
 gen_text = GEN.read_text(encoding="utf-8")
 old_comment = "    // silent-failure-hunter H2 + chatgpt-codex P2:grokWeb 结构在 save 时校验,\n"
 new_comment = "    // [MOC-257 review] 标记本次是否新建了「首个 provider」(自动成 active)——闭包内置位,闭包外据此补\n"
@@ -133,8 +176,7 @@ if generated.exists():
     harden_generated_metadata(generated)
     harden_generated_non_windows_path(generated)
 
-# 4. Restore the true catalog source BEFORE taking a snapshot. In preflight the r24
-# block does not exist yet, so defer this check to the postflight invocation.
+# 4. Restore the true catalog source BEFORE taking a snapshot.
 apply_path = ROOT / "crates/codex_integration/src/apply.rs"
 if apply_path.exists():
     text = apply_path.read_text(encoding="utf-8")

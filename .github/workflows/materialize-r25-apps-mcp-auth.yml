@@ -73,7 +73,8 @@ jobs:
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-STATE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT' crates/proxy/src/forward.rs
           grep -F -q 'Apps MCP cross-origin redirect blocked' crates/proxy/src/forward.rs
-          test "$(grep -F -c 'set_sensitive(true)' crates/proxy/src/forward.rs)" -ge 2
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
           grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-ROUTER' crates/proxy/src/server.rs
@@ -86,15 +87,21 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Format, proxy-test, and prove complete r25 replay idempotence
+      - name: Normalize and diff-check generated Rust
         shell: bash
         run: |
           set -euo pipefail
           cargo fmt --all
           git diff --check
-          cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
           git diff --binary > /tmp/r25-first.diff
 
+      - name: Run r25 proxy regressions
+        run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
+
+      - name: Prove complete r25 replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
           python scripts/apply_sub2api_grok_compat_revision.py
           cargo fmt --all
           git diff --check

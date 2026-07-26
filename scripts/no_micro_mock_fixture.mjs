@@ -1,5 +1,4 @@
 import { writeFile } from "node:fs/promises";
-import { Worker } from "node:worker_threads";
 
 const outputPath = process.env.CAS_NO_MICRO_FIXTURE_RESULT;
 if (!outputPath) throw new Error("CAS_NO_MICRO_FIXTURE_RESULT is required");
@@ -13,6 +12,10 @@ if (globalThis.__CODEX_MICRO_DISABLED_LOCAL__ !== true) {
   throw new Error("global No Micro marker is missing");
 }
 
+// Resolve Worker only after the startup hook has run. A static ESM import is bound during
+// module instantiation, before the first user call frame where --inspect-brk lets us inject.
+// The No Micro mitigation is specifically about workers created through the post-hook builtin.
+const Worker = process.getBuiltinModule("worker_threads").Worker;
 const workerExecArgv = await new Promise((resolve, reject) => {
   const worker = new Worker(
     `const { parentPort } = require('node:worker_threads'); parentPort.postMessage(process.execArgv);`,

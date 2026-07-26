@@ -27,17 +27,19 @@ for marker in required:
 if 'let upstream = format!("https://chatgpt.com{client_path}");' not in forward:
     raise SystemExit("r25 relay log privacy review: real upstream URL no longer uses original client_path")
 
-# Final account-state companion: after all transport/privacy guards are materialized,
-# refuse a bearer the existing 401 state machine already knows is revoked. Keep this
-# chained into the standard hardening path so the normal compat composer cannot stamp
-# r25 without the revocation guard.
+# Final privacy/account-state companions. The OAuth trace query patch is kept narrow
+# to the hosted Apps MCP namespace; then the revocation gate refuses a bearer the
+# existing 401 state machine already knows is invalid. Chaining both here keeps the
+# standard compat materialization fail-closed without duplicating composer logic.
 for companion in (
+    "scripts/apply_apps_mcp_auth_r25_trace_query_privacy.py",
+    "scripts/apply_apps_mcp_auth_r25_trace_query_privacy_review.py",
     "scripts/apply_apps_mcp_auth_r25_revocation_hardening.py",
     "scripts/apply_apps_mcp_auth_r25_revocation_review.py",
 ):
     companion_path = ROOT / companion
     if not companion_path.is_file():
-        raise SystemExit(f"r25 revocation companion missing: {companion}")
+        raise SystemExit(f"r25 final hardening companion missing: {companion}")
     print(f"applying {companion}")
     runpy.run_path(str(companion_path), run_name="__main__")
 

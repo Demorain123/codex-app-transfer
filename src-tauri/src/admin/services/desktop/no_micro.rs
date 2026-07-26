@@ -81,13 +81,21 @@ pub fn doctor() -> NoMicroDoctor {
     }
 }
 
+// CAS-NO-MICRO-R23-LAUNCH-ARGS
 pub fn launch() -> Result<Value, String> {
+    launch_with_args(&[])
+}
+
+/// Launch through the hardened No Micro injector while preserving the same Codex
+/// launch arguments prepared by the legacy Restart pipeline (CDP/theme/quota/etc.).
+pub fn launch_with_args(extra_args: &[String]) -> Result<Value, String> {
     #[cfg(target_os = "windows")]
     {
-        launch_windows()
+        launch_windows(extra_args)
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = extra_args;
         Err("Codex No Micro 目前仅支持 Windows".to_owned())
     }
 }
@@ -452,7 +460,7 @@ fn write_launcher() -> Result<PathBuf, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn launch_windows() -> Result<Value, String> {
+fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
     let report = doctor_windows();
     if !report.compatible {
         return Err(report
@@ -490,6 +498,7 @@ fn launch_windows() -> Result<Value, String> {
     command
         .arg(&launcher)
         .arg(&executable)
+        .args(extra_args)
         .env("CAS_NO_MICRO_STATUS_PATH", &status_path)
         .env(
             "CAS_NO_MICRO_PACKAGE_VERSION",

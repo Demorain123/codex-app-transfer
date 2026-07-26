@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 
 ROOT = Path(__file__).resolve().parents[1]
 FORWARD = ROOT / "crates/proxy/src/forward.rs"
@@ -172,5 +173,19 @@ for marker in (
         raise SystemExit(f"r25 redirect/privacy hardening marker missing: {marker}")
 if "Apps MCP cross-origin redirect blocked" not in text:
     raise SystemExit("r25 redirect hardening error path missing")
+
+# Keep all credential-boundary hardening in one replayable bundle. The composer
+# already invokes this script for every r25 materialization; chaining the trace
+# privacy patch here ensures future official rebases cannot stamp r25 while omitting
+# account-id redaction, even before workflow-specific checks run.
+for companion in (
+    "scripts/apply_apps_mcp_auth_r25_trace_privacy.py",
+    "scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py",
+):
+    companion_path = ROOT / companion
+    if not companion_path.is_file():
+        raise SystemExit(f"r25 hardening companion missing: {companion}")
+    print(f"applying {companion}")
+    runpy.run_path(str(companion_path), run_name="__main__")
 
 print("r25 Apps MCP redirect/privacy hardening: complete")

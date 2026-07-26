@@ -13,6 +13,31 @@ def replace_once(text: str, old: str, new: str, *, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_once_in_chatgpt_passthrough(text: str, old: str, new: str, *, label: str) -> str:
+    """Replace exactly one anchor inside passthrough_chatgpt_backend only.
+
+    `forward.rs` has several generic reqwest execute/read paths. r25 privacy hardening
+    must not rewrite those unrelated routes. Scope the mutation to the ChatGPT backend
+    passthrough function and fail closed if that function/anchor drifts.
+    """
+    start_marker = "async fn passthrough_chatgpt_backend("
+    end_marker = "\nfn is_chatgpt_token_invalidated("
+    start = text.find(start_marker)
+    if start < 0:
+        raise SystemExit(f"{label}: ChatGPT passthrough function start not found")
+    end = text.find(end_marker, start)
+    if end < 0:
+        raise SystemExit(f"{label}: ChatGPT passthrough function end not found")
+    region = text[start:end]
+    count = region.count(old)
+    if count != 1:
+        raise SystemExit(
+            f"{label}: expected exactly one anchor inside ChatGPT passthrough, found {count}"
+        )
+    region = region.replace(old, new, 1)
+    return text[:start] + region + text[end:]
+
+
 text = FORWARD.read_text(encoding="utf-8")
 
 # CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY
@@ -107,7 +132,7 @@ if "CAS-APPS-MCP-AUTH-R25-LOG-SAFE-PATH-WIRE" not in text:
 # ForwardError telemetry path can stringify an Apps MCP failure; preserve existing
 # URL-rich diagnostics for all non-MCP requests.
 if "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY" not in text:
-    text = replace_once(
+    text = replace_once_in_chatgpt_passthrough(
         text,
         '''    let req = rb.build()?;''',
         '''    let req = rb
@@ -115,7 +140,7 @@ if "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY" not in text:
         .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?; // CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY''',
         label="r25 request-build error URL privacy",
     )
-    text = replace_once(
+    text = replace_once_in_chatgpt_passthrough(
         text,
         '''    let resp = state.http.execute(req).await?;''',
         '''    let resp = state
@@ -125,7 +150,7 @@ if "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY" not in text:
         .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;''',
         label="r25 execute error URL privacy",
     )
-    text = replace_once(
+    text = replace_once_in_chatgpt_passthrough(
         text,
         '''    let resp_body = resp.bytes().await.map_err(ForwardError::Upstream)?;''',
         '''    let resp_body = resp

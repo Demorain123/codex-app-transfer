@@ -56,6 +56,43 @@ for rel_path, marker in r24_required_markers.items():
         raise SystemExit(f"r24 materialization missing marker in {rel_path}: {marker}")
 print("r24 materialization gate: complete")
 
+# CAS-APPS-MCP-AUTH-R25: keep hosted Apps MCP auth compatibility as a separate,
+# replayable layer on top of r24. The base overlay performs the narrow code changes;
+# the second script is a fail-closed semantic/security review and never widens scope.
+for overlay_script in [
+    "scripts/apply_apps_mcp_auth_r25.py",
+    "scripts/apply_apps_mcp_auth_r25_review.py",
+]:
+    overlay_path = ROOT / overlay_script
+    if overlay_path.exists():
+        print(f"applying {overlay_script}")
+        runpy.run_path(str(overlay_path), run_name="__main__")
+
+# CAS-APPS-MCP-AUTH-R25-MATERIALIZATION-GATE: r25 must never be packaged with only
+# one side of the relay/auth wiring present. This is intentionally checked before
+# version stamping so a partial overlay cannot masquerade as a valid r25 package.
+r25_required_markers = {
+    "crates/proxy/src/forward.rs": [
+        "CAS-APPS-MCP-AUTH-R25-STATE",
+        "CAS-APPS-MCP-AUTH-R25-HELPERS",
+        "CAS-APPS-MCP-AUTH-R25-REHYDRATE",
+        "CAS-APPS-MCP-AUTH-R25-401-FP",
+    ],
+    "crates/proxy/src/server.rs": ["CAS-APPS-MCP-AUTH-R25-ROUTER"],
+    "crates/proxy/src/lib.rs": ["CAS-APPS-MCP-AUTH-R25-EXPORT"],
+    "src-tauri/src/codex_real_account.rs": ["CAS-APPS-MCP-AUTH-R25-SNAPSHOT"],
+    "src-tauri/src/proxy_runner.rs": ["CAS-APPS-MCP-AUTH-R25-WIRE"],
+}
+for rel_path, markers in r25_required_markers.items():
+    candidate = ROOT / rel_path
+    if not candidate.is_file():
+        raise SystemExit(f"r25 materialization missing generated file: {rel_path}")
+    content = candidate.read_text(encoding="utf-8")
+    for marker in markers:
+        if marker not in content:
+            raise SystemExit(f"r25 materialization missing marker in {rel_path}: {marker}")
+print("r25 materialization gate: complete")
+
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()
 if not revision.isdigit() or int(revision) < 1:
     raise SystemExit("SUB2API_GROK_COMPAT_REVISION.txt must contain a positive integer")

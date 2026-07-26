@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+forward = (ROOT / "crates/proxy/src/forward.rs").read_text(encoding="utf-8")
+
+# CAS-APPS-MCP-AUTH-R25-REDIRECT-REVIEW
+# Fail closed if a later upstream/replay change weakens the custom identity-header
+# redirect boundary introduced by r25.
+required = [
+    "CAS-APPS-MCP-AUTH-R25-REDIRECT",
+    'origin.scheme() == "https"',
+    'origin.host_str() == Some("chatgpt.com")',
+    'attempt.url().scheme() == "https"',
+    'attempt.url().host_str() == Some("chatgpt.com")',
+    "attempt.url().port_or_known_default()",
+    "origin.port_or_known_default()",
+    "Apps MCP cross-origin redirect blocked",
+]
+for marker in required:
+    if marker not in forward:
+        raise SystemExit(f"r25 redirect review: missing security invariant: {marker}")
+
+if forward.count("set_sensitive(true)") < 2:
+    raise SystemExit(
+        "r25 redirect review: bearer and ChatGPT-Account-ID must both be marked sensitive"
+    )
+
+# The redirect restriction must remain scoped to the Apps MCP origin. A global
+# same-origin-only policy would be an unrelated behavioural regression for third-party
+# providers and other ChatGPT backend traffic.
+if 'origin.path() == "/backend-api/ps/mcp"' not in forward or 'origin.path().starts_with("/backend-api/ps/mcp/")' not in forward:
+    raise SystemExit("r25 redirect review: Apps MCP origin path scope missing")
+
+print("r25 Apps MCP redirect/privacy review: PASS")

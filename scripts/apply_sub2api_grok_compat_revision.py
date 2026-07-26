@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import runpy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,42 @@ def write(path: str, text: str) -> None:
     p.write_text(text, encoding="utf-8")
     print(f"patched {path}")
 
+
+# CAS-AUTO-REVIEW-R24: compose the feature as a replayable thin overlay.
+# Preflight hardening first repairs generator-anchor drift against the current r23
+# tree; postflight hardening validates/fixes generated output (snapshot ordering,
+# metadata serialization). Existing Apply/Windows/pristine flows already invoke
+# this revision script last, so no duplicate workflow-specific implementation is needed.
+for overlay_script in [
+    "scripts/apply_auto_review_model_overlay_r24_hardening.py",
+    "scripts/apply_auto_review_model_overlay_r24.py",
+    "scripts/apply_auto_review_model_overlay_r24_hardening.py",
+]:
+    overlay_path = ROOT / overlay_script
+    if overlay_path.exists():
+        print(f"applying {overlay_script}")
+        runpy.run_path(str(overlay_path), run_name="__main__")
+
+# CAS-AUTO-REVIEW-R24-MATERIALIZATION-GATE: do not let CI/package builds continue
+# with the half-generated state that previously committed ApplyConfig/call-sites but
+# omitted the generated module, module registration, or provider helper. Workflows
+# intentionally replay this revision script, so validate the complete generated tree
+# immediately after replay and fail with a precise error before Rust compilation.
+r24_required_markers = {
+    "crates/codex_integration/src/auto_review_overlay.rs": "CAS-AUTO-REVIEW-R24",
+    "crates/codex_integration/src/lib.rs": "pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24",
+    "crates/codex_integration/src/apply.rs": "crate::auto_review_overlay::apply_auto_review_overrides(",
+    "src-tauri/src/admin/handlers/providers/mod.rs": "provider_auto_review_model_overrides",
+    "src-tauri/src/admin/services/desktop/snapshot.rs": "auto_review_model_overrides: Some(&target.auto_review_model_overrides)",
+}
+for rel_path, marker in r24_required_markers.items():
+    candidate = ROOT / rel_path
+    if not candidate.is_file():
+        raise SystemExit(f"r24 materialization missing generated file: {rel_path}")
+    content = candidate.read_text(encoding="utf-8")
+    if marker not in content:
+        raise SystemExit(f"r24 materialization missing marker in {rel_path}: {marker}")
+print("r24 materialization gate: complete")
 
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()
 if not revision.isdigit() or int(revision) < 1:

@@ -27,6 +27,7 @@ export interface Provider {
   default: boolean
   isBuiltin: boolean
   reviewModelSlot: string
+  autoReviewModelOverrides?: Record<string, string>
   mappings: ProviderMappings
   logo?: string
   icon?: string
@@ -66,5 +67,6 @@ export interface ProviderPayload {
   sub2apiGrokCompat?: boolean
   sub2apiGrokFreeCacheCompat?: boolean
   reviewModelSlot?: string | null
+  autoReviewModelOverrides?: Record<string, string>
   grokWeb?: unknown
 }

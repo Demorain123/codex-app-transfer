@@ -86,6 +86,10 @@ pub struct ApplyConfig<'a> {
     /// catalog entry 的 `auto_review_model_override`,让审查脱钩主模型走该槽位的现有映射。
     #[serde(skip)]
     pub review_model_slot: Option<&'a str>,
+    /// CAS-AUTO-REVIEW-R24: explicit main-model slug -> guardian reviewer slug.
+    /// Unspecified models inherit their source catalog metadata unchanged.
+    #[serde(skip)]
+    pub auto_review_model_overrides: Option<&'a serde_json::Value>,
     /// 应用版本(写入快照 manifest,便于诊断)。
     pub app_version: &'a str,
     /// 是否允许 Codex shell 工具网络访问(写入 `[sandbox_workspace_write]
@@ -131,6 +135,10 @@ fn proxy_port_from_url(base_url: &str) -> u16 {
 }
 
 pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResult, CodexError> {
+    // CAS-AUTO-REVIEW-R24: restore our temporary shadow pointer first. Snapshot must see
+    // the real user/Transfer source catalog, never the copy-on-write overlay.
+    crate::auto_review_overlay::restore_source_if_overlay_active(paths)?;
+
     // 1. snapshot(幂等;已有快照不会覆盖)
     let snapshot_taken_now = !has_snapshot(paths);
     snapshot_codex_state(
@@ -330,6 +338,13 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
             sync_root_value(&paths.config_toml, "model_context_window", None)?;
         }
     }
+
+    // CAS-AUTO-REVIEW-R24: only after the normal catalog path has been resolved/generated,
+    // build a copy-on-write shadow if explicit per-model overrides exist.
+    crate::auto_review_overlay::apply_auto_review_overrides(
+        paths,
+        cfg.auto_review_model_overrides,
+    )?;
 
     // 4. auth.json: auth_mode + OPENAI_API_KEY
     let mut auth = read_auth(&paths.auth_json)?;
@@ -691,9 +706,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -744,9 +761,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v2.0.0-stage2.5",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -801,9 +820,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v2.0.0-stage2.5",
                 codex_network_access: true,
                 preserve_chatgpt_auth: true,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -849,9 +870,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: false,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -896,9 +919,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -965,9 +990,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1033,9 +1060,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1098,9 +1127,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1139,9 +1170,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1188,9 +1221,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1229,9 +1264,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1250,9 +1287,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1302,9 +1341,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1348,9 +1389,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1413,9 +1456,11 @@ mod tests {
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1597,9 +1642,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v-active",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1666,9 +1713,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1687,9 +1736,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1722,9 +1773,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1749,9 +1802,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1783,9 +1838,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1823,9 +1880,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1875,9 +1934,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1930,9 +1991,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -1985,9 +2048,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();
@@ -2293,9 +2358,11 @@ model = \"gpt-5.5\"
                 is_qoder: false,
                 model_display_names: None,
                 review_model_slot: None,
+                auto_review_model_overrides: None,
                 app_version: "v-test",
                 codex_network_access: true,
                 preserve_chatgpt_auth: false,
+                preserve_external_model_catalog: false,
             },
         )
         .unwrap();

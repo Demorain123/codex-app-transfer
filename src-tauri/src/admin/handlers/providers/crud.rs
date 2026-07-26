@@ -107,6 +107,33 @@ fn format_grok_web_errs(errs: &[String]) -> String {
     format!("grokWeb 校验失败({} 项):\n{}", errs.len(), lines.join("\n"))
 }
 
+/// CAS-AUTO-REVIEW-R24: validate main-model -> reviewer-model slug map at save time.
+fn validate_auto_review_model_overrides_input(value: &Value) -> Result<(), String> {
+    if value.is_null() {
+        return Ok(());
+    }
+    let Some(map) = value.as_object() else {
+        return Err("autoReviewModelOverrides 必须是 JSON object".into());
+    };
+    if map.len() > 128 {
+        return Err("autoReviewModelOverrides 条目过多(最多 128)".into());
+    }
+    for (main, reviewer) in map {
+        if main.trim().is_empty() {
+            return Err("autoReviewModelOverrides 不允许空模型名".into());
+        }
+        let reviewer = reviewer
+            .as_str()
+            .ok_or_else(|| format!("autoReviewModelOverrides[{main}] 必须是 string"))?;
+        if reviewer.trim().is_empty() {
+            return Err(format!(
+                "autoReviewModelOverrides[{main}] reviewer 不能为空"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn list_providers() -> impl IntoResponse {
     let cfg = match load_registry() {
         Ok(c) => c,
@@ -181,6 +208,9 @@ pub struct AddProviderInput {
     /// 回退复用主模型)。经 `Provider.extra` flatten 透传持久化为 `reviewModelSlot`。
     #[serde(rename = "reviewModelSlot")]
     pub review_model_slot: Option<String>,
+    /// CAS-AUTO-REVIEW-R24: per-model guardian override map; empty object clears.
+    #[serde(rename = "autoReviewModelOverrides")]
+    pub auto_review_model_overrides: Option<Value>,
     /// Sub2API mixed-provider compatibility: only grok-* Responses requests use
     /// the existing Grok custom/namespace/tool_search lowering + response shim.
     #[serde(rename = "sub2apiGrokCompat")]
@@ -237,6 +267,11 @@ pub async fn add_provider(
     if let Some(gw) = input.grok_web.as_ref() {
         if let Err(errs) = validate_grok_web_input(gw) {
             return err(StatusCode::BAD_REQUEST, format_grok_web_errs(&errs)).into_response();
+        }
+    }
+    if let Some(overrides) = input.auto_review_model_overrides.as_ref() {
+        if let Err(message) = validate_auto_review_model_overrides_input(overrides) {
+            return err(StatusCode::BAD_REQUEST, message).into_response();
         }
     }
 
@@ -327,6 +362,11 @@ pub async fn add_provider(
         {
             new_provider.insert("reviewModelSlot".into(), Value::String(slot));
         }
+        if let Some(overrides) = input.auto_review_model_overrides.clone() {
+            if overrides.as_object().is_some_and(|map| !map.is_empty()) {
+                new_provider.insert("autoReviewModelOverrides".into(), overrides);
+            }
+        }
         if let Some(gw) = input.grok_web.clone() {
             if !gw.is_null() {
                 new_provider.insert("grokWeb".into(), gw);
@@ -382,6 +422,11 @@ pub async fn update_provider(
     if let Some(gw) = input.grok_web.as_ref() {
         if let Err(errs) = validate_grok_web_input(gw) {
             return err(StatusCode::BAD_REQUEST, format_grok_web_errs(&errs)).into_response();
+        }
+    }
+    if let Some(overrides) = input.auto_review_model_overrides.as_ref() {
+        if let Err(message) = validate_auto_review_model_overrides_input(overrides) {
+            return err(StatusCode::BAD_REQUEST, message).into_response();
         }
     }
 
@@ -443,6 +488,13 @@ pub async fn update_provider(
                 updated.remove("reviewModelSlot");
             } else {
                 updated.insert("reviewModelSlot".into(), Value::String(slot.to_string()));
+            }
+        }
+        if let Some(overrides) = input.auto_review_model_overrides.clone() {
+            if overrides.as_object().is_some_and(|map| map.is_empty()) {
+                updated.remove("autoReviewModelOverrides");
+            } else {
+                updated.insert("autoReviewModelOverrides".into(), overrides);
             }
         }
         if let Some(gw) = input.grok_web.clone() {

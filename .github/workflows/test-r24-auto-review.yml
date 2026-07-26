@@ -1,0 +1,228 @@
+name: Test r24 Auto Review Catalog Overlay
+
+on:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r24-auto-review-overlay
+    paths:
+      - 'scripts/apply_auto_review_model_overlay_r24.py'
+      - 'scripts/apply_auto_review_model_overlay_r24_hardening.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'crates/codex_integration/**'
+      - 'src-tauri/src/admin/handlers/providers/**'
+      - 'src-tauri/src/admin/services/desktop/snapshot.rs'
+      - 'frontend/src/components/provider/ProviderFormModal.vue'
+      - 'frontend/src/api/types.ts'
+      - 'frontend/src/i18n/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - '.github/workflows/test-r24-auto-review.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-no-micro-ui
+    paths:
+      - 'scripts/apply_auto_review_model_overlay_r24.py'
+      - 'scripts/apply_auto_review_model_overlay_r24_hardening.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'crates/codex_integration/**'
+      - 'src-tauri/src/admin/handlers/providers/**'
+      - 'src-tauri/src/admin/services/desktop/snapshot.rs'
+      - 'frontend/src/components/provider/ProviderFormModal.vue'
+      - 'frontend/src/api/types.ts'
+      - 'frontend/src/i18n/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - '.github/workflows/test-r24-auto-review.yml'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-r24:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply r24 overlay through production revision path
+        id: apply
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/apply_sub2api_grok_compat_revision.py > r24-apply.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 apply diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-apply-diagnostic
+          path: r24-apply.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r24 apply failed
+        if: steps.apply.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-apply.log
+          exit 1
+
+      - name: Verify generated invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+          grep -F -q 'restore_source_if_overlay_active(paths)?' crates/codex_integration/src/apply.rs
+          grep -F -q 'auto_review_model_overrides' crates/codex_integration/src/apply.rs
+          grep -F -q 'autoReviewModelOverrides' src-tauri/src/admin/handlers/providers/crud.rs
+          grep -F -q 'autoReviewModelOverrides' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q '"grok-4.5":"gpt-5.6-luna"' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'compat_revision=24' SUB2API_GROK_COMPAT_VERSION.txt
+
+      - name: Prove overlay replay is idempotent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/apply_sub2api_grok_compat_revision.py
+          grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format generated Rust
+        run: cargo fmt --all
+
+      - name: Run copy-on-write unit test diagnostic
+        id: unit
+        shell: bash
+        run: |
+          set +e
+          cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture > r24-unit.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 unit-test diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-unit-diagnostic
+          path: r24-unit.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r24 unit test failed
+        if: steps.unit.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-unit.log
+          exit 1
+
+      - name: Check Codex integration crate
+        run: cargo check -p codex-app-transfer-codex-integration --lib
+
+      - name: Install Tauri Linux system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Run Tauri backend compile diagnostic
+        id: backend
+        shell: bash
+        run: |
+          set +e
+          cargo check -p codex-app-transfer > r24-backend.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 backend diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-backend-diagnostic
+          path: r24-backend.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Run frontend build diagnostic
+        id: frontend
+        shell: bash
+        run: |
+          set +e
+          {
+            npm --prefix frontend ci
+            npm --prefix frontend run build
+          } > r24-frontend.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r24 frontend diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r24-frontend-diagnostic
+          path: r24-frontend.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r24 backend compile failed
+        if: steps.backend.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-backend.log
+          exit 1
+
+      - name: Fail if r24 frontend build failed
+        if: steps.frontend.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r24-frontend.log
+          exit 1
+
+      - name: Show r24 generated diff
+        if: always()
+        shell: bash
+        run: |
+          git status --short
+          git diff -- \
+            crates/codex_integration/src/auto_review_overlay.rs \
+            crates/codex_integration/src/lib.rs \
+            crates/codex_integration/src/apply.rs \
+            src-tauri/src/admin/handlers/providers/mod.rs \
+            src-tauri/src/admin/handlers/providers/crud.rs \
+            src-tauri/src/admin/services/desktop/snapshot.rs \
+            frontend/src/api/types.ts \
+            frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts \
+            src-tauri/tauri.conf.json \
+            src-tauri/Cargo.toml \
+            Cargo.lock \
+            SUB2API_GROK_COMPAT_VERSION.txt || true

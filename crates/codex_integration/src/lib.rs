@@ -21,6 +21,7 @@
 //! 路径解析全部走 [`CodexPaths`],测试可注入临时目录。
 
 pub mod apply;
+pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24
 pub mod auth;
 pub mod mcp_credentials;
 pub mod model_catalog;

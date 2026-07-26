@@ -91,6 +91,17 @@ pub(crate) fn provider_review_model_slot(provider: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// CAS-AUTO-REVIEW-R24: provider-scoped per-model guardian overrides.
+/// Object keys/values are catalog slugs. Missing/invalid shape is treated as empty here;
+/// CRUD validation rejects malformed user input before it reaches this read path.
+pub(crate) fn provider_auto_review_model_overrides(provider: &Value) -> Value {
+    provider
+        .get("autoReviewModelOverrides")
+        .filter(|v| v.is_object())
+        .cloned()
+        .unwrap_or_else(|| json!({}))
+}
+
 /// 把 `provider.apiFormat` 字段的字面值规范化成后端可持久化的 canonical 值。
 ///
 /// **未知值 / 缺失 fallback 到 `"openai_chat"`**(跟 `Provider::api_format`

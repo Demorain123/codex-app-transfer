@@ -1,6 +1,6 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r23 · v2.4.5+23",
+  "compat.buildBadge": "Sub2API Grok Compat r24 · v2.4.5+24",
   "providerForm.grokCompatSection": "Sub2API · Grok 兼容",
   "providerForm.grokCompat": "Grok MCP / Tools 兼容",
   "providerForm.grokCompatHint": "仅对 grok-* 的 Responses 请求启用 Codex custom / namespace / tool_search 兼容；Luna / GPT 保持原生直透。",
@@ -1037,6 +1037,8 @@ export default {
   "providerForm.authScheme": "鉴权方式",
   "providerForm.modelMapSection": "模型映射",
   "providerForm.slotFallbackPlaceholder": "留空回落默认模型",
+  "providerForm.autoReviewModelOverrides": "按模型覆盖 Auto Review",
+  "providerForm.autoReviewModelOverridesHint": "JSON：主模型 slug → 审查模型 slug。未列出的模型完全继承当前 model_catalog_json；外部目录只读，Transfer 仅生成 shadow 副本。修改后需重启 Codex。",
   "providerForm.reviewModelSlot": "自动审查模型",
   "providerForm.advancedToggle": "高级 · 额外请求头 / 模型能力 / 请求选项(JSON)",
   "providerForm.extraHeaders": "额外请求头",

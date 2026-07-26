@@ -41,10 +41,22 @@ export interface NoMicroLaunchResult {
   success: boolean
   doctor: NoMicroDoctor
   launch: NoMicroLaunchState
+  abRunId?: string
+  mode?: 'no-micro'
+}
+
+export interface NormalAbLaunchResult {
+  success: boolean
+  abRunId: string
+  mode: 'normal'
 }
 
 export function getNoMicroDoctor() {
   return api<NoMicroDoctor>('GET', '/api/desktop/no-micro/doctor')
+}
+
+export function launchCodexNormalAb() {
+  return api<NormalAbLaunchResult>('POST', '/api/desktop/no-micro/launch?mode=normal')
 }
 
 export function launchCodexNoMicro() {

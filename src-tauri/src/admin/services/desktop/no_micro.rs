@@ -63,7 +63,9 @@ impl NoMicroDoctor {
             compatible: false,
             launch_ready: false,
             last_launch: read_last_launch(),
-            warnings: vec!["Codex No Micro 目前仅支持 Windows Store/MSIX 版 Codex Desktop".to_owned()],
+            warnings: vec![
+                "Codex No Micro 目前仅支持 Windows Store/MSIX 版 Codex Desktop".to_owned(),
+            ],
         }
     }
 }
@@ -266,12 +268,15 @@ fn exact_codex_process_state(executable: &Path) -> (String, Vec<u32>, Option<Str
     let script = r#"
 $ErrorActionPreference = 'Stop'
 $target = $env:CAS_NO_MICRO_EXE
-$items = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' OR Name='Codex.exe'" | Where-Object {
+$candidates = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' OR Name='Codex.exe'")
+$matched = @($candidates | Where-Object {
   $_.ExecutablePath -and [string]::Equals($_.ExecutablePath, $target, [System.StringComparison]::OrdinalIgnoreCase)
 })
+$unreadable = @($candidates | Where-Object { -not $_.ExecutablePath })
 [pscustomobject]@{
-  state = $(if ($items.Count -gt 0) { 'running' } else { 'not-running' })
-  pids = @($items | ForEach-Object { [int64]$_.ProcessId })
+  state = $(if ($matched.Count -gt 0) { 'running' } elseif ($unreadable.Count -gt 0) { 'unknown' } else { 'not-running' })
+  pids = @($matched | ForEach-Object { [int64]$_.ProcessId })
+  unreadableCount = [int]$unreadable.Count
 } | ConvertTo-Json -Compress
 "#;
     match run_powershell(script, &[("CAS_NO_MICRO_EXE", target)]) {
@@ -293,7 +298,16 @@ $items = @(Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe' OR Name='Co
                             .collect()
                     })
                     .unwrap_or_default();
-                (state, pids, None)
+                let warning = (state == "unknown").then(|| {
+                    let count = value
+                        .get("unreadableCount")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1);
+                    format!(
+                        "发现 {count} 个 ChatGPT.exe/Codex.exe 候选进程，但 Windows 未允许读取 ExecutablePath"
+                    )
+                });
+                (state, pids, warning)
             }
             Err(e) => (
                 "unknown".to_owned(),
@@ -364,7 +378,8 @@ fn doctor_windows() -> NoMicroDoctor {
     }
 
     if let Some((node, version)) = resolve_node() {
-        report.node_compatible = parse_node_major(&version).is_some_and(|major| major >= MIN_NODE_MAJOR);
+        report.node_compatible =
+            parse_node_major(&version).is_some_and(|major| major >= MIN_NODE_MAJOR);
         report.node_path = Some(node.to_string_lossy().into_owned());
         report.node_version = Some(version.clone());
         if !report.node_compatible {
@@ -443,7 +458,8 @@ fn launch_windows() -> Result<Value, String> {
         return Err(if report.process_state == "running" {
             "Codex 仍在运行。请先完全退出 Codex，再点击 No Micro 启动。".to_owned()
         } else {
-            "无法可靠确认 Codex 已完全退出；为避免误杀或留下暂停进程，本次 No Micro 启动已取消。".to_owned()
+            "无法可靠确认 Codex 已完全退出；为避免误杀或留下暂停进程，本次 No Micro 启动已取消。"
+                .to_owned()
         });
     }
 
@@ -460,7 +476,8 @@ fn launch_windows() -> Result<Value, String> {
             .ok_or_else(|| "No Micro doctor 未返回 Node executable".to_owned())?,
     );
     let launcher = write_launcher()?;
-    let status_path = last_launch_path().ok_or_else(|| "无法解析 No Micro 状态文件路径".to_owned())?;
+    let status_path =
+        last_launch_path().ok_or_else(|| "无法解析 No Micro 状态文件路径".to_owned())?;
 
     let mut command = Command::new(&node);
     command
@@ -479,10 +496,16 @@ fn launch_windows() -> Result<Value, String> {
         .map_err(|e| format!("无法启动 No Micro launcher: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let parsed = serde_json::from_str::<Value>(&stdout).ok().or_else(read_last_launch);
+    let parsed = serde_json::from_str::<Value>(&stdout)
+        .ok()
+        .or_else(read_last_launch);
     if output.status.success() {
         let value = parsed.ok_or_else(|| "No Micro launcher 成功退出但没有可解析状态".to_owned())?;
-        if value.pointer("/injection/status").and_then(Value::as_str) == Some("success") {
+        if value
+            .pointer("/injection/status")
+            .and_then(Value::as_str)
+            == Some("success")
+        {
             return Ok(json!({
                 "success": true,
                 "doctor": report,
@@ -507,7 +530,10 @@ fn launch_windows() -> Result<Value, String> {
     Err(if stderr.is_empty() {
         format!("No Micro launcher 失败(exit={:?})", output.status.code())
     } else {
-        format!("No Micro launcher 失败: {}", stderr.chars().take(1200).collect::<String>())
+        format!(
+            "No Micro launcher 失败: {}",
+            stderr.chars().take(1200).collect::<String>()
+        )
     })
 }
 

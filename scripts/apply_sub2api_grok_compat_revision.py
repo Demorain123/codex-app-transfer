@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import runpy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,19 @@ def write(path: str, text: str) -> None:
     p.write_text(text, encoding="utf-8")
     print(f"patched {path}")
 
+
+# CAS-AUTO-REVIEW-R24: keep the new feature as a thin replayable overlay without
+# duplicating it across every packaging workflow. All existing Apply/Windows/pristine
+# flows already invoke this revision script last, so compose r24 immediately before
+# visible-version normalization. Hardening also fixes older generated r24 output if needed.
+for overlay_script in [
+    "scripts/apply_auto_review_model_overlay_r24.py",
+    "scripts/apply_auto_review_model_overlay_r24_hardening.py",
+]:
+    overlay_path = ROOT / overlay_script
+    if overlay_path.exists():
+        print(f"applying {overlay_script}")
+        runpy.run_path(str(overlay_path), run_name="__main__")
 
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()
 if not revision.isdigit() or int(revision) < 1:

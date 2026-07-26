@@ -20,13 +20,19 @@ server = read("crates/proxy/src/server.rs")
 # assertions rather than source rewrites: if upstream drift changes a security boundary,
 # packaging must stop and require a human review instead of guessing.
 
-# 1) Scope must remain exact: only /backend-api/ps/mcp and descendants.
+# 1) Scope must remain exact: only canonical /backend-api/ps/mcp and descendants.
 if 'p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")' not in forward:
-    raise SystemExit("r25 review: MCP allowlist widened or missing")
-if "!headers.contains_key(http::header::AUTHORIZATION)" not in forward:
+    raise SystemExit("r25 review: MCP diagnostic allowlist widened or missing")
+if "headers.contains_key(http::header::AUTHORIZATION)" not in forward:
     raise SystemExit("r25 review: inbound Authorization no-overwrite guard missing")
 if '"/backend-api/ps/mcpish"' not in forward or '"/backend-api/ps/plugins/installed"' not in forward:
     raise SystemExit("r25 review: negative allowlist regressions missing")
+if '"/backend-api/ps/mcp/../plugins/installed"' not in forward or '%2e%2e/plugins/installed' not in forward:
+    raise SystemExit("r25 review: canonical-path escape regressions missing")
+if 'reqwest::Url::parse(&format!("https://chatgpt.com{path}"))' not in forward:
+    raise SystemExit("r25 review: MCP auth allowlist is not checked on canonical outbound URL")
+if 'url.host_str() != Some("chatgpt.com")' not in forward or 'url.scheme() != "https"' not in forward:
+    raise SystemExit("r25 review: canonical URL host/scheme pin missing")
 
 # 2) Synthetic mode must be a hard stop in both the relay and the auth source.
 if "fake_account_mode_enabled()" not in forward or "reason=synthetic_account" not in forward:

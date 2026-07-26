@@ -1,4 +1,10 @@
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::Query,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,6 +13,11 @@ use crate::admin::handlers::common::err;
 use crate::admin::services::desktop::{no_micro, process};
 
 static AB_RUN_SEQ: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Default, Deserialize)]
+pub struct LaunchQuery {
+    mode: Option<String>,
+}
 
 fn next_ab_run_id() -> String {
     let millis = SystemTime::now()
@@ -63,7 +74,7 @@ fn spawn_process_exit_marker(run_id: String, mode: &'static str) {
 ///
 /// 只读检查 Windows AppX / ChatGPT.exe / bundled Node / app.asar 目标模块与
 /// 当前进程状态。不会启动 Codex、不会修改 AppX/config/auth/session。
-pub async fn doctor() -> impl IntoResponse {
+pub async fn doctor() -> Response {
     match tokio::task::spawn_blocking(no_micro::doctor).await {
         Ok(report) => Json(report).into_response(),
         Err(e) => err(
@@ -74,12 +85,9 @@ pub async fn doctor() -> impl IntoResponse {
     }
 }
 
-/// POST /api/desktop/no-micro/launch-normal
-///
-/// A/B 对照的 A 路径：要求 Codex 已完全退出，然后按 Transfer 现有的普通 Windows 启动
-/// 路径拉起，不做 No Micro 注入，也不调用 desktop provider/config 同步。这样 A/B 日志拥有
-/// 明确 mode=normal 标记，同时尽量只让 Micro 注入成为变量。
-pub async fn launch_normal() -> impl IntoResponse {
+/// A/B 对照的 A 路径。复用现有 `/api/desktop/no-micro/launch?mode=normal`，避免再扩一条
+/// admin route；要求 Codex 已完全退出，且不执行 No Micro 注入。
+async fn launch_normal() -> Response {
     if std::env::consts::OS != "windows" {
         return err(StatusCode::NOT_IMPLEMENTED, "A/B 普通启动目前仅支持 Windows").into_response();
     }
@@ -131,11 +139,15 @@ pub async fn launch_normal() -> impl IntoResponse {
     }
 }
 
-/// POST /api/desktop/no-micro/launch
+/// POST /api/desktop/no-micro/launch[?mode=normal]
 ///
-/// 仅执行 fail-closed 的旁路实验启动，不同步/改写 config.toml。若 Codex 仍在运行
-/// 或进程身份无法确认，会拒绝启动，而不是自动杀用户现有进程。
-pub async fn launch() -> impl IntoResponse {
+/// 默认执行 fail-closed 的 No Micro 旁路实验启动；`mode=normal` 则执行 A/B 对照的普通启动。
+/// 两条路径都会把稳定的 `[codex-ab]` marker 写进同一份 proxy-YYYY-MM-DD.log。
+pub async fn launch(Query(query): Query<LaunchQuery>) -> Response {
+    if query.mode.as_deref() == Some("normal") {
+        return launch_normal().await;
+    }
+
     let run_id = next_ab_run_id();
     ab_log("INFO", &run_id, "no-micro", "launch_requested", None);
     match tokio::task::spawn_blocking(no_micro::launch).await {

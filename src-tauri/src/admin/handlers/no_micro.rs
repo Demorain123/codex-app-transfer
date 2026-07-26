@@ -85,8 +85,9 @@ pub async fn doctor() -> Response {
     }
 }
 
-/// A/B 对照的 A 路径。复用现有 `/api/desktop/no-micro/launch?mode=normal`，避免再扩一条
-/// admin route；要求 Codex 已完全退出，且不执行 No Micro 注入。
+/// A/B 对照的 A 路径。要求 Codex 已完全退出，然后直接用官方 Windows MSIX
+/// ActivateApplication 拉起当前 Codex，参数为空，不走 No Micro、provider/config sync、
+/// CDP 注入或“先杀再重启”路径，尽量让它等价于用户从开始菜单做一次普通启动。
 async fn launch_normal() -> Response {
     if std::env::consts::OS != "windows" {
         return err(StatusCode::NOT_IMPLEMENTED, "A/B 普通启动目前仅支持 Windows").into_response();
@@ -115,15 +116,32 @@ async fn launch_normal() -> Response {
 
     let run_id = next_ab_run_id();
     ab_log("INFO", &run_id, "normal", "launch_requested", None);
-    let launched = tokio::task::spawn_blocking(|| process::launch_codex_app_restart("windows")).await;
+    let launched = tokio::task::spawn_blocking(|| -> Result<u32, String> {
+        // Recheck immediately before activation. Unlike the normal restart endpoint this A/B path
+        // never kills an existing process: a race is surfaced instead of silently changing A.
+        if process::is_codex_app_running("windows") {
+            return Err("Codex started during A/B preflight; refusing to alter the running instance".to_owned());
+        }
+        let aumid = crate::windows_msix::resolve_codex_aumid()
+            .ok_or_else(|| "无法解析 OpenAI.Codex AUMID".to_owned())?;
+        crate::windows_msix::activate_packaged_app(&aumid, "")
+    })
+    .await;
     match launched {
-        Ok(Ok(())) => {
-            ab_log("INFO", &run_id, "normal", "launch_success", None);
+        Ok(Ok(pid)) => {
+            ab_log(
+                "INFO",
+                &run_id,
+                "normal",
+                "launch_success",
+                Some(&format!("pid={pid}")),
+            );
             spawn_process_exit_marker(run_id.clone(), "normal");
             Json(json!({
                 "success": true,
                 "abRunId": run_id,
-                "mode": "normal"
+                "mode": "normal",
+                "processId": pid
             }))
             .into_response()
         }
@@ -144,8 +162,16 @@ async fn launch_normal() -> Response {
 /// 默认执行 fail-closed 的 No Micro 旁路实验启动；`mode=normal` 则执行 A/B 对照的普通启动。
 /// 两条路径都会把稳定的 `[codex-ab]` marker 写进同一份 proxy-YYYY-MM-DD.log。
 pub async fn launch(Query(query): Query<LaunchQuery>) -> Response {
-    if query.mode.as_deref() == Some("normal") {
-        return launch_normal().await;
+    match query.mode.as_deref() {
+        Some("normal") => return launch_normal().await,
+        None | Some("no-micro") => {}
+        Some(other) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                format!("unsupported A/B launch mode: {other}"),
+            )
+            .into_response()
+        }
     }
 
     let run_id = next_ab_run_id();

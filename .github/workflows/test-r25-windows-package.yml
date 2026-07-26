@@ -56,13 +56,19 @@ jobs:
             scripts/apply_apps_mcp_auth_r25_redirect_hardening.py \
             scripts/apply_apps_mcp_auth_r25_review.py \
             scripts/apply_apps_mcp_auth_r25_redirect_review.py \
+            scripts/apply_apps_mcp_auth_r25_trace_privacy.py \
+            scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py \
             scripts/apply_sub2api_grok_compat_revision.py
           python scripts/apply_sub2api_grok_compat_revision.py
           grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
-          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD' crates/proxy/src/forward.rs
           grep -F -q 'Apps MCP cross-origin redirect blocked' crates/proxy/src/forward.rs
-          test "$(grep -F -c 'set_sensitive(true)' crates/proxy/src/forward.rs)" -ge 2
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-GENERIC' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH' crates/proxy/src/diagnostics.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-SNAPSHOT' src-tauri/src/codex_real_account.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-WIRE' src-tauri/src/proxy_runner.rs
           grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
@@ -104,7 +110,7 @@ jobs:
           cargo fmt --all
           git diff --check
 
-      - name: Run r25 proxy scope and header regressions
+      - name: Run r25 proxy scope, redirect and privacy regressions
         run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
 
       - name: Run r25 active-account credential regressions

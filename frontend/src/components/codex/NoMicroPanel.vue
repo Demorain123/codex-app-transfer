@@ -19,12 +19,18 @@ const normalLaunching = ref(false)
 const noMicroLaunching = ref(false)
 
 const busy = computed(() => loading.value || normalLaunching.value || noMicroLaunching.value)
+const processStateKnown = computed(
+  () => doctor.value?.processState === 'not-running' || doctor.value?.processState === 'running',
+)
 const normalReady = computed(
   () =>
     !!doctor.value?.supported &&
     !!doctor.value?.packageFound &&
     !!doctor.value?.executablePath &&
-    doctor.value?.processState === 'not-running',
+    processStateKnown.value,
+)
+const noMicroReady = computed(
+  () => !!doctor.value?.supported && !!doctor.value?.compatible && processStateKnown.value,
 )
 
 const zh = computed(() => i18nState.locale === 'zh')
@@ -32,61 +38,61 @@ const copy = computed(() =>
   zh.value
     ? {
         title: 'Codex No Micro A/B（实验性）',
-        desc: '用同一面板做最小 A/B：A 为普通启动，B 为 No Micro 启动。两种启动都会把明确的 [codex-ab]、run_id、mode 和启动结果写入 Transfer 的 proxy 日志，后续分析不再依赖手工记时间。',
+        desc: 'r23 的 A/B 直接复用已验证正常的“重启 Codex App”流程：A 使用相同配置/代理/启动路径并正常加载 Micro；B 使用相同准备与关闭/清理流程，只在最后一步改为 No Micro 注入。两边都会把 [codex-ab]、run_id、mode 和阶段写入同一份 proxy 日志。',
         doctor: '兼容性检查',
         checking: '检查中…',
         normalLaunch: '普通启动（A）',
         normalLaunching: 'A 启动中…',
         noMicroLaunch: 'No Micro 启动（B）',
         noMicroLaunching: 'B 启动中…',
-        ready: '环境兼容，可以进行 A/B 实验。每一轮开始前都必须先完全退出 Codex。',
-        running: 'Codex 仍在运行。请先从 Codex 菜单完全退出，再开始下一轮 A/B。',
-        incompatible: 'No Micro 注入兼容性未通过；普通 A 仍可在 Codex 完全退出后使用。',
-        unknown: '暂时无法确认环境状态。请重新检查。',
+        ready: '环境兼容，可以进行 A/B。Codex 即使正在运行也可以点击；r23 会先复用原“重启 Codex App”的安全关闭/清理流程。',
+        running: 'Codex 当前正在运行；可以直接开始下一轮，r23 会先按原“重启 Codex App”流程关闭并重新启动。',
+        incompatible: 'No Micro 注入兼容性未通过；A 仍可用于验证原“重启 Codex App”对照路径。',
+        unknown: '无法可靠确认 Codex 进程状态。为避免误操作，A/B 暂时禁用，请重新兼容性检查。',
         normalConfirmTitle: '普通启动 Codex（A）？',
         normalConfirmMessage:
-          '这是 A/B 的普通对照启动，不做 No Micro 注入。Transfer 会把 mode=normal 的明确标识写进 proxy 日志。开始前请确保 Codex 已完全退出。',
+          'A 会复用原有“重启 Codex App”的配置同步、关闭/清理和正常启动路径，Micro 正常加载；额外只写入 mode=normal 的 A/B 日志标识。',
         normalConfirmLabel: '启动 A',
         noMicroConfirmTitle: '以 No Micro 模式启动 Codex（B）？',
         noMicroConfirmMessage:
-          '这是 A/B 的 No Micro 实验启动，只拦截 @worklouder/device-kit-oai。Transfer 会把 mode=no-micro 的明确标识写进同一份 proxy 日志。开始前请确保 Codex 已完全退出。',
+          'B 会复用与 A 相同的配置同步和关闭/清理流程，只把最终启动替换为 No Micro 注入（拦截 @worklouder/device-kit-oai）；并写入 mode=no-micro 标识。',
         noMicroConfirmLabel: '启动 B',
-        normalLaunchOk: '普通 A 已启动并写入日志标识',
+        normalLaunchOk: '普通 A 已按原重启流程启动并写入日志标识',
         noMicroLaunchOk: 'No Micro B 注入已验证并写入日志标识',
         lastSuccess: '最近一次 B：注入成功',
         lastFailed: '最近一次 B：注入失败',
         never: '尚无 No Micro B 启动记录',
         unsupported: '当前平台暂不支持（仅 Windows Store/MSIX Codex）。',
-        logHint: '日志关键字：[codex-ab]。A 看 mode=normal + launch_success；B 看 mode=no-micro + injection_success。每轮 run_id 独立。',
+        logHint: '日志关键字：[codex-ab]。A：mode=normal + environment_ready + launch_success；B：mode=no-micro + environment_ready + injection_success。每轮 run_id 独立。',
       }
     : {
         title: 'Codex No Micro A/B (experimental)',
-        desc: 'Run the minimal A/B from one panel: A is a normal launch, B is a No Micro launch. Both write explicit [codex-ab] run_id/mode/result markers into the Transfer proxy log, so later analysis does not depend on manually noted timestamps.',
+        desc: 'r23 reuses the proven Restart Codex App pipeline for both sides. A keeps the same config/proxy/restart path with Micro enabled; B uses the same preparation and quit/reap path and changes only the final launcher to No Micro. Both write [codex-ab] run_id/mode/phase markers to the same proxy log.',
         doctor: 'Compatibility check',
         checking: 'Checking…',
         normalLaunch: 'Normal launch (A)',
         normalLaunching: 'Launching A…',
         noMicroLaunch: 'No Micro launch (B)',
         noMicroLaunching: 'Launching B…',
-        ready: 'Environment is compatible and ready for A/B. Fully quit Codex before every run.',
-        running: 'Codex is still running. Fully quit Codex before starting the next A/B run.',
-        incompatible: 'No Micro compatibility did not pass; normal A can still be used after Codex is fully stopped.',
-        unknown: 'Environment state is not yet known. Run the check again.',
+        ready: 'Environment is compatible and ready for A/B. Codex may already be running; r23 will reuse the legacy safe quit/restart flow first.',
+        running: 'Codex is currently running. You may start the next run directly; r23 will first reuse the legacy safe quit/restart flow.',
+        incompatible: 'No Micro compatibility did not pass; A can still validate the legacy Restart Codex App control path.',
+        unknown: 'Codex process state cannot be verified reliably. A/B is disabled until compatibility is checked again.',
         normalConfirmTitle: 'Launch normal Codex (A)?',
         normalConfirmMessage:
-          'This is the normal A/B control path and does not inject No Micro. Transfer will write an explicit mode=normal marker to the proxy log. Fully quit Codex first.',
+          'A reuses the existing Restart Codex App config sync, safe quit/reap, and normal launch path with Micro enabled. The only addition is an explicit mode=normal A/B log marker.',
         normalConfirmLabel: 'Launch A',
         noMicroConfirmTitle: 'Launch Codex with No Micro (B)?',
         noMicroConfirmMessage:
-          'This is the No Micro B path and only intercepts @worklouder/device-kit-oai. Transfer will write an explicit mode=no-micro marker to the same proxy log. Fully quit Codex first.',
+          'B reuses the same config sync and safe quit/reap path as A, but replaces only the final launcher with the No Micro interception for @worklouder/device-kit-oai. It writes a mode=no-micro marker.',
         noMicroConfirmLabel: 'Launch B',
-        normalLaunchOk: 'Normal A launched and its log marker was written',
-        noMicroLaunchOk: 'No Micro B injection verified and its log marker was written',
+        normalLaunchOk: 'Normal A launched through the legacy restart path and its marker was written',
+        noMicroLaunchOk: 'No Micro B injection verified and its marker was written',
         lastSuccess: 'Last B: injection succeeded',
         lastFailed: 'Last B: injection failed',
         never: 'No No Micro B launch has been recorded yet',
         unsupported: 'This feature currently supports Windows Store/MSIX Codex only.',
-        logHint: 'Log key: [codex-ab]. A uses mode=normal + launch_success; B uses mode=no-micro + injection_success. Every run has a unique run_id.',
+        logHint: 'Log key: [codex-ab]. A: mode=normal + environment_ready + launch_success. B: mode=no-micro + environment_ready + injection_success. Every run has a unique run_id.',
       },
 )
 
@@ -94,10 +100,10 @@ const stateText = computed(() => {
   const d = doctor.value
   if (!d) return copy.value.unknown
   if (!d.supported) return copy.value.unsupported
-  if (d.processState === 'running') return copy.value.running
-  if (d.launchReady) return copy.value.ready
+  if (!processStateKnown.value) return copy.value.unknown
   if (!d.compatible) return copy.value.incompatible
-  return copy.value.unknown
+  if (d.processState === 'running') return copy.value.running
+  return copy.value.ready
 })
 
 const metaText = computed(() => {
@@ -155,7 +161,7 @@ async function launchNormal() {
 }
 
 async function launchNoMicro() {
-  if (busy.value || !doctor.value?.launchReady) return
+  if (busy.value || !noMicroReady.value) return
   const ok = await confirm({
     title: copy.value.noMicroConfirmTitle,
     message: copy.value.noMicroConfirmMessage,
@@ -189,7 +195,7 @@ onMounted(() => void refresh())
       <span class="no-micro-panel__badge">Windows</span>
     </div>
 
-    <div class="no-micro-panel__status" :class="{ 'no-micro-panel__status--ok': doctor?.launchReady }">
+    <div class="no-micro-panel__status" :class="{ 'no-micro-panel__status--ok': noMicroReady }">
       <div class="no-micro-panel__state">{{ stateText }}</div>
       <div v-if="metaText" class="no-micro-panel__meta">{{ metaText }}</div>
       <div class="no-micro-panel__last">{{ lastText }}</div>
@@ -206,7 +212,7 @@ onMounted(() => void refresh())
       <AppButton variant="secondary" :disabled="busy || !normalReady" @click="launchNormal">
         {{ normalLaunching ? copy.normalLaunching : copy.normalLaunch }}
       </AppButton>
-      <AppButton variant="primary" :disabled="busy || !doctor?.launchReady" @click="launchNoMicro">
+      <AppButton variant="primary" :disabled="busy || !noMicroReady" @click="launchNoMicro">
         {{ noMicroLaunching ? copy.noMicroLaunching : copy.noMicroLaunch }}
       </AppButton>
     </div>

@@ -42,13 +42,24 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Format and run r26 proxy regressions
+      - name: Format, test, and prove r26 overlay idempotence
         shell: bash
         run: |
           set -euo pipefail
           cargo fmt --all
           git diff --check
           cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+          git diff --binary > /tmp/r26-first.diff
+
+          python scripts/apply_runtime_diag_r26.py
+          cargo fmt --all
+          git diff --check
+          git diff --binary > /tmp/r26-second.diff
+          if ! cmp -s /tmp/r26-first.diff /tmp/r26-second.diff; then
+            echo '::error::r26 thin overlay is not idempotent after rustfmt'
+            diff -u /tmp/r26-first.diff /tmp/r26-second.diff || true
+            exit 1
+          fi
 
       - name: Commit generated r26 source
         if: ${{ github.event_name == 'push' }}

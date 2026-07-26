@@ -56,35 +56,61 @@ for rel_path, marker in r24_required_markers.items():
         raise SystemExit(f"r24 materialization missing marker in {rel_path}: {marker}")
 print("r24 materialization gate: complete")
 
-# CAS-APPS-MCP-AUTH-R25: keep hosted Apps MCP auth compatibility as a separate,
-# replayable layer on top of r24. The base overlay performs the narrow code changes;
-# redirect hardening protects the synthesized custom account identity across 3xx;
-# both review scripts are fail-closed gates and never widen the feature scope.
-for overlay_script in [
+# CAS-APPS-MCP-AUTH-R25: keep each security/privacy layer explicit and single-purpose.
+# Do not hide companion execution inside another overlay: a future upstream drift must
+# fail with the exact layer name that changed, and reviewers must be able to replay the
+# stack in the same order without reconstructing nested Python execution.
+r25_overlay_scripts = [
+    # Materialize behavior first.
     "scripts/apply_apps_mcp_auth_r25.py",
     "scripts/apply_apps_mcp_auth_r25_redirect_hardening.py",
+    "scripts/apply_apps_mcp_auth_r25_trace_privacy.py",
+    "scripts/apply_apps_mcp_auth_r25_log_privacy.py",
+    "scripts/apply_apps_mcp_auth_r25_trace_query_privacy.py",
+    "scripts/apply_apps_mcp_auth_r25_revocation_hardening.py",
+    # Then independently audit every boundary before stamping r25.
     "scripts/apply_apps_mcp_auth_r25_review.py",
     "scripts/apply_apps_mcp_auth_r25_redirect_review.py",
-]:
+    "scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py",
+    "scripts/apply_apps_mcp_auth_r25_log_privacy_review.py",
+    "scripts/apply_apps_mcp_auth_r25_trace_query_privacy_review.py",
+    "scripts/apply_apps_mcp_auth_r25_revocation_review.py",
+]
+for overlay_script in r25_overlay_scripts:
     overlay_path = ROOT / overlay_script
-    if overlay_path.exists():
-        print(f"applying {overlay_script}")
-        runpy.run_path(str(overlay_path), run_name="__main__")
+    if not overlay_path.is_file():
+        raise SystemExit(f"r25 overlay/review script missing: {overlay_script}")
+    print(f"applying {overlay_script}")
+    runpy.run_path(str(overlay_path), run_name="__main__")
 
-# CAS-APPS-MCP-AUTH-R25-MATERIALIZATION-GATE: r25 must never be packaged with only
-# one side of the relay/auth wiring present. This is intentionally checked before
-# version stamping so a partial overlay cannot masquerade as a valid r25 package.
+# CAS-APPS-MCP-AUTH-R25-MATERIALIZATION-GATE: refuse a version stamp if any behavior,
+# identity source, privacy boundary, or desktop wiring is missing. Use exact markers
+# rather than broad substring/count heuristics so similarly-named helpers cannot create
+# a false-positive security gate.
 r25_required_markers = {
     "crates/proxy/src/forward.rs": [
         "CAS-APPS-MCP-AUTH-R25-STATE",
-        "CAS-APPS-MCP-AUTH-R25-REDIRECT",
+        "CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD",
+        "CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE",
+        "CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE",
         "CAS-APPS-MCP-AUTH-R25-HELPERS",
+        "CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY",
+        "CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY",
         "CAS-APPS-MCP-AUTH-R25-REHYDRATE",
         "CAS-APPS-MCP-AUTH-R25-401-FP",
     ],
+    "crates/proxy/src/diagnostics.rs": [
+        "CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-GENERIC",
+        "CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP",
+        "CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH",
+        "CAS-APPS-MCP-AUTH-R25-TRACE-QUERY-PRIVACY",
+    ],
     "crates/proxy/src/server.rs": ["CAS-APPS-MCP-AUTH-R25-ROUTER"],
     "crates/proxy/src/lib.rs": ["CAS-APPS-MCP-AUTH-R25-EXPORT"],
-    "src-tauri/src/codex_real_account.rs": ["CAS-APPS-MCP-AUTH-R25-SNAPSHOT"],
+    "src-tauri/src/codex_real_account.rs": [
+        "CAS-APPS-MCP-AUTH-R25-SNAPSHOT",
+        "CAS-APPS-MCP-AUTH-R25-REVOCATION",
+    ],
     "src-tauri/src/proxy_runner.rs": ["CAS-APPS-MCP-AUTH-R25-WIRE"],
 }
 for rel_path, markers in r25_required_markers.items():
@@ -95,8 +121,6 @@ for rel_path, markers in r25_required_markers.items():
     for marker in markers:
         if marker not in content:
             raise SystemExit(f"r25 materialization missing marker in {rel_path}: {marker}")
-if read("crates/proxy/src/forward.rs").count("set_sensitive(true)") < 2:
-    raise SystemExit("r25 materialization missing sensitive flags on synthesized identity headers")
 print("r25 materialization gate: complete")
 
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()

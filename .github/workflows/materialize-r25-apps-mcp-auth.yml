@@ -57,8 +57,31 @@ jobs:
       - name: Materialize base r25 Apps MCP auth
         run: python scripts/apply_apps_mcp_auth_r25.py
 
-      - name: Apply r25 redirect and trace privacy hardening
-        run: python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
+      - name: Run r25 redirect/privacy hardening diagnostic
+        id: hardening
+        shell: bash
+        run: |
+          set +e
+          python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py > r25-hardening.log 2>&1
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload r25 hardening diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r25-hardening-diagnostic
+          path: r25-hardening.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail if r25 redirect/privacy hardening failed
+        if: steps.hardening.outputs.rc != '0'
+        shell: bash
+        run: |
+          cat r25-hardening.log
+          exit 1
 
       - name: Apply r25 deep self-review gates
         shell: bash

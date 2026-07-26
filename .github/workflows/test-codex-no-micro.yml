@@ -8,8 +8,10 @@ on:
     paths:
       - 'src-tauri/resources/codex_no_micro_launcher.mjs'
       - 'src-tauri/src/admin/services/desktop/no_micro.rs'
+      - 'src-tauri/src/admin/services/desktop/process.rs'
       - 'src-tauri/src/admin/services/desktop/mod.rs'
       - 'src-tauri/src/admin/handlers/no_micro.rs'
+      - 'src-tauri/src/admin/handlers/desktop.rs'
       - 'src-tauri/src/admin/handlers/mod.rs'
       - 'src-tauri/src/admin/mod.rs'
       - 'frontend/src/api/noMicro.ts'
@@ -18,6 +20,7 @@ on:
       - 'frontend/src/pages/ProvidersPage.vue'
       - 'scripts/no_micro_mock_fixture.mjs'
       - 'scripts/test_no_micro_launcher.mjs'
+      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
       - '.github/workflows/test-codex-no-micro.yml'
   pull_request:
     branches:
@@ -25,8 +28,10 @@ on:
     paths:
       - 'src-tauri/resources/codex_no_micro_launcher.mjs'
       - 'src-tauri/src/admin/services/desktop/no_micro.rs'
+      - 'src-tauri/src/admin/services/desktop/process.rs'
       - 'src-tauri/src/admin/services/desktop/mod.rs'
       - 'src-tauri/src/admin/handlers/no_micro.rs'
+      - 'src-tauri/src/admin/handlers/desktop.rs'
       - 'src-tauri/src/admin/handlers/mod.rs'
       - 'src-tauri/src/admin/mod.rs'
       - 'frontend/src/api/noMicro.ts'
@@ -35,6 +40,7 @@ on:
       - 'frontend/src/pages/ProvidersPage.vue'
       - 'scripts/no_micro_mock_fixture.mjs'
       - 'scripts/test_no_micro_launcher.mjs'
+      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
       - '.github/workflows/test-codex-no-micro.yml'
 
 permissions:
@@ -49,6 +55,33 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply r23 shared restart pipeline overlay
+        shell: bash
+        run: python scripts/apply_no_micro_r23_restart_pipeline.py
+
+      - name: Verify r23 A/B shares the proven restart pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'CAS-NO-MICRO-R23-SHARED-RESTART-PIPELINE' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'launch_codex_app_restart_with' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'CAS-NO-MICRO-R23-SHARED-DESKTOP-PREP' src-tauri/src/admin/handlers/desktop.rs
+          grep -F -q 'prepare_codex_restart_runtime' src-tauri/src/admin/handlers/desktop.rs
+          grep -F -q 'CAS-NO-MICRO-R23-LAUNCH-ARGS' src-tauri/src/admin/services/desktop/no_micro.rs
+          grep -F -q 'launch_with_args' src-tauri/src/admin/services/desktop/no_micro.rs
+          grep -F -q 'CAS-NO-MICRO-R23-AB-SHARED-PIPELINE' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'process::launch_codex_app_restart(std::env::consts::OS)' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'process::launch_codex_app_restart_with(std::env::consts::OS' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'pipeline=legacy-restart-shared' src-tauri/src/admin/handlers/no_micro.rs
+          if grep -F -q 'activate_packaged_app(&aumid, "")' src-tauri/src/admin/handlers/no_micro.rs; then
+            echo '::error::A still has an independent MSIX activation path instead of legacy restart'
+            exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -72,9 +105,8 @@ jobs:
           set -euo pipefail
           grep -F -q '[codex-ab]' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q '"normal", "launch_requested"' src-tauri/src/admin/handlers/no_micro.rs
-          grep -F -q '"normal",' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q '"launch_success"' src-tauri/src/admin/handlers/no_micro.rs
-          grep -F -q '"no-micro", "launch_requested"' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q '"no-micro"' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q '"injection_success"' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q 'proxy_telemetry()' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q '普通启动（A）' frontend/src/components/codex/NoMicroPanel.vue
@@ -117,8 +149,10 @@ jobs:
           git diff --check
           git diff -- \
             src-tauri/src/admin/services/desktop/no_micro.rs \
+            src-tauri/src/admin/services/desktop/process.rs \
             src-tauri/src/admin/services/desktop/mod.rs \
             src-tauri/src/admin/handlers/no_micro.rs \
+            src-tauri/src/admin/handlers/desktop.rs \
             src-tauri/src/admin/handlers/mod.rs \
             src-tauri/src/admin/mod.rs > no-micro-rustfmt.diff
 

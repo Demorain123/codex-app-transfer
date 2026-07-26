@@ -41,7 +41,6 @@ export interface NoMicroLaunchResult {
   success: boolean
   doctor: NoMicroDoctor
   launch: NoMicroLaunchState
-  desktopSync?: unknown
 }
 
 export function getNoMicroDoctor() {

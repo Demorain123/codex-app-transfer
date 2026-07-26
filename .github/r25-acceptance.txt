@@ -1,1 +1,0 @@
-Build acceptance is not root-cause proof. Real-device acceptance requires [apps-mcp-auth] action=rehydrate on /backend-api/ps/mcp* followed by observing the actual upstream status.

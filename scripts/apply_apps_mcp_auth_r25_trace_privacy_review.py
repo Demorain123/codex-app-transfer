@@ -13,7 +13,7 @@ required = [
     'norm == "chatgptaccountid" // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP',
     '"chatgpt-account-id" // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH',
     "CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-TEST",
-    "r25_chatgpt_account_id_is_redacted_in_all_diagnostic_header_paths",
+    "apps_mcp_auth_r25_chatgpt_account_id_is_redacted_in_all_diagnostic_header_paths",
     'assert_eq!(mcp["req_headers"]["ChatGPT-Account-ID"], "***")',
 ]
 for marker in required:

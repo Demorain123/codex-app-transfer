@@ -139,7 +139,13 @@ fn hide_console_window(command: &mut Command) -> &mut Command {
 fn run_powershell(script: &str, envs: &[(&str, &str)]) -> Result<String, String> {
     let mut command = Command::new("powershell.exe");
     command
-        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -172,8 +178,8 @@ if ($null -eq $pkg) { throw 'OpenAI.Codex AppX package not found' }
 } | ConvertTo-Json -Compress
 "#;
     let text = run_powershell(script, &[])?;
-    let value: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("无法解析 OpenAI.Codex AppX 信息: {e}"))?;
+    let value: Value =
+        serde_json::from_str(&text).map_err(|e| format!("无法解析 OpenAI.Codex AppX 信息: {e}"))?;
     let version = value
         .get("version")
         .and_then(Value::as_str)
@@ -243,8 +249,9 @@ fn resolve_node() -> Option<(PathBuf, String)> {
             }
         }
     }
-    candidates.sort();
-    candidates.dedup();
+    // Keep insertion order: the Codex bundled runtime is deliberately preferred over PATH.
+    // Sorting here would often put C:\Program Files\nodejs ahead of C:\Users\...\.cache,
+    // defeating the documented bundled-first behavior and potentially selecting an old Node.
     for path in candidates {
         if !path.is_file() {
             continue;
@@ -500,12 +507,9 @@ fn launch_windows() -> Result<Value, String> {
         .ok()
         .or_else(read_last_launch);
     if output.status.success() {
-        let value = parsed.ok_or_else(|| "No Micro launcher 成功退出但没有可解析状态".to_owned())?;
-        if value
-            .pointer("/injection/status")
-            .and_then(Value::as_str)
-            == Some("success")
-        {
+        let value =
+            parsed.ok_or_else(|| "No Micro launcher 成功退出但没有可解析状态".to_owned())?;
+        if value.pointer("/injection/status").and_then(Value::as_str) == Some("success") {
             return Ok(json!({
                 "success": true,
                 "doctor": report,

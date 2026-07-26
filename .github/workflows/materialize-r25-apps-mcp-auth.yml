@@ -10,7 +10,9 @@ on:
       - sub2api-grok-compat-next-r24-auto-review-overlay
     paths:
       - 'scripts/apply_apps_mcp_auth_r25.py'
+      - 'scripts/apply_apps_mcp_auth_r25_redirect_hardening.py'
       - 'scripts/apply_apps_mcp_auth_r25_review.py'
+      - 'scripts/apply_apps_mcp_auth_r25_redirect_review.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'crates/proxy/**'
       - 'src-tauri/**'
@@ -40,13 +42,26 @@ jobs:
           python-version: '3.12'
 
       - name: Check r25 Python overlays
-        run: python -m py_compile scripts/apply_apps_mcp_auth_r25.py scripts/apply_apps_mcp_auth_r25_review.py scripts/apply_sub2api_grok_compat_revision.py
+        run: >-
+          python -m py_compile
+          scripts/apply_apps_mcp_auth_r25.py
+          scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
+          scripts/apply_apps_mcp_auth_r25_review.py
+          scripts/apply_apps_mcp_auth_r25_redirect_review.py
+          scripts/apply_sub2api_grok_compat_revision.py
 
       - name: Materialize base r25 Apps MCP auth
         run: python scripts/apply_apps_mcp_auth_r25.py
 
+      - name: Apply r25 redirect/privacy hardening
+        run: python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
+
       - name: Apply r25 deep self-review gates
-        run: python scripts/apply_apps_mcp_auth_r25_review.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/apply_apps_mcp_auth_r25_review.py
+          python scripts/apply_apps_mcp_auth_r25_redirect_review.py
 
       - name: Compose complete compat revision
         run: python scripts/apply_sub2api_grok_compat_revision.py
@@ -56,6 +71,9 @@ jobs:
         run: |
           set -euo pipefail
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-STATE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT' crates/proxy/src/forward.rs
+          grep -F -q 'Apps MCP cross-origin redirect blocked' crates/proxy/src/forward.rs
+          test "$(grep -F -c 'set_sensitive(true)' crates/proxy/src/forward.rs)" -ge 2
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
           grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-ROUTER' crates/proxy/src/server.rs

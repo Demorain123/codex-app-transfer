@@ -84,6 +84,47 @@ pub struct ProxyState {
 /// 等关键字**(否则等于把 strip 的 UA 又自己写回来)。
 const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("CARGO_PKG_VERSION"));
 
+// CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER
+fn apps_mcp_redirect_target_allowed(origin: &reqwest::Url, next: &reqwest::Url) -> bool {
+    let origin_is_apps_mcp = origin.scheme() == "https"
+        && origin.host_str() == Some("chatgpt.com")
+        && (origin.path() == "/backend-api/ps/mcp"
+            || origin.path().starts_with("/backend-api/ps/mcp/"));
+    if !origin_is_apps_mcp {
+        return true;
+    }
+    next.scheme() == "https"
+        && next.host_str() == Some("chatgpt.com")
+        && next.port_or_known_default() == origin.port_or_known_default()
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_redirect_tests {
+    use super::*;
+
+    #[test]
+    fn synthesized_identity_never_crosses_origin_but_other_paths_keep_old_policy() {
+        let origin = reqwest::Url::parse(
+            "https://chatgpt.com/backend-api/ps/mcp/.well-known/oauth-protected-resource",
+        )
+        .unwrap();
+        let same = reqwest::Url::parse("https://chatgpt.com/backend-api/ps/mcp/next").unwrap();
+        let other_host = reqwest::Url::parse("https://example.com/next").unwrap();
+        let other_scheme =
+            reqwest::Url::parse("http://chatgpt.com/backend-api/ps/mcp/next").unwrap();
+        let other_port =
+            reqwest::Url::parse("https://chatgpt.com:444/backend-api/ps/mcp/next").unwrap();
+        assert!(apps_mcp_redirect_target_allowed(&origin, &same));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_host));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_scheme));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_port));
+
+        let non_mcp =
+            reqwest::Url::parse("https://chatgpt.com/backend-api/ps/plugins/installed").unwrap();
+        assert!(apps_mcp_redirect_target_allowed(&non_mcp, &other_host));
+    }
+}
+
 impl ProxyState {
     pub fn new(resolver: SharedResolver) -> Self {
         Self {
@@ -106,6 +147,13 @@ impl ProxyState {
                 .redirect(reqwest::redirect::Policy::custom(|attempt| {
                     if attempt.previous().len() >= 5 {
                         return attempt.error("too many redirects".to_string());
+                    }
+                    // CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD
+                    if let Some(origin) = attempt.previous().first() {
+                        if !apps_mcp_redirect_target_allowed(origin, attempt.url()) {
+                            return attempt
+                                .error("Apps MCP cross-origin redirect blocked".to_string());
+                        }
                     }
                     let host = attempt.url().host_str().unwrap_or("").to_string();
                     match redirect_host_is_safe(&host) {
@@ -1651,10 +1699,11 @@ fn prepare_chatgpt_mcp_relay_auth(
     if auth.access_token.trim().is_empty() {
         return None;
     }
-    let authorization = reqwest::header::HeaderValue::from_bytes(
+    let mut authorization = reqwest::header::HeaderValue::from_bytes(
         format!("Bearer {}", auth.access_token).as_bytes(),
     )
     .ok()?;
+    authorization.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE
     let account_id = if inbound_headers.contains_key("chatgpt-account-id") {
         None
     } else {
@@ -1662,6 +1711,10 @@ fn prepare_chatgpt_mcp_relay_auth(
             .as_deref()
             .filter(|value| !value.trim().is_empty())
             .and_then(|value| reqwest::header::HeaderValue::from_bytes(value.as_bytes()).ok())
+            .map(|mut value| {
+                value.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE
+                value
+            })
     };
     Some(PreparedChatgptMcpRelayAuth {
         authorization,
@@ -1726,7 +1779,20 @@ mod apps_mcp_auth_r25_proxy_tests {
         )
         .expect("valid bearer");
         assert_eq!(prepared.authorization, "Bearer token-from-auth-json");
+        assert!(prepared.authorization.is_sensitive());
         assert!(prepared.account_id.is_none());
+
+        // CAS-APPS-MCP-AUTH-R25-SENSITIVITY-TEST
+        let with_account = prepare_chatgpt_mcp_relay_auth(
+            ChatgptMcpRelayAuth {
+                access_token: "token-from-auth-json".to_string(),
+                account_id: Some("account-local".to_string()),
+            },
+            &HeaderMap::new(),
+        )
+        .expect("valid bearer/account");
+        assert!(with_account.authorization.is_sensitive());
+        assert!(with_account.account_id.as_ref().unwrap().is_sensitive());
 
         let malformed = prepare_chatgpt_mcp_relay_auth(
             ChatgptMcpRelayAuth {

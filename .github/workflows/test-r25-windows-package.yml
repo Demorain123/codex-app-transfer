@@ -51,9 +51,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/apply_apps_mcp_auth_r25.py scripts/apply_apps_mcp_auth_r25_review.py scripts/apply_sub2api_grok_compat_revision.py
+          python -m py_compile \
+            scripts/apply_apps_mcp_auth_r25.py \
+            scripts/apply_apps_mcp_auth_r25_redirect_hardening.py \
+            scripts/apply_apps_mcp_auth_r25_review.py \
+            scripts/apply_apps_mcp_auth_r25_redirect_review.py \
+            scripts/apply_sub2api_grok_compat_revision.py
           python scripts/apply_sub2api_grok_compat_revision.py
           grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT' crates/proxy/src/forward.rs
+          grep -F -q 'Apps MCP cross-origin redirect blocked' crates/proxy/src/forward.rs
+          test "$(grep -F -c 'set_sensitive(true)' crates/proxy/src/forward.rs)" -ge 2
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-SNAPSHOT' src-tauri/src/codex_real_account.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-WIRE' src-tauri/src/proxy_runner.rs

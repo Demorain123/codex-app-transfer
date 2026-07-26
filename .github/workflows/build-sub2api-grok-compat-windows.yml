@@ -28,6 +28,8 @@ on:
       - 'scripts/apply_sub2api_mcp_relay_diag.py'
       - 'scripts/apply_no_micro_r23_restart_pipeline.py'
       - 'scripts/apply_no_micro_r23_restart_review.py'
+      - 'scripts/apply_auto_review_model_overlay_r24.py'
+      - 'scripts/apply_auto_review_model_overlay_r24_hardening.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -60,6 +62,8 @@ on:
       - 'scripts/apply_sub2api_mcp_relay_diag.py'
       - 'scripts/apply_no_micro_r23_restart_pipeline.py'
       - 'scripts/apply_no_micro_r23_restart_review.py'
+      - 'scripts/apply_auto_review_model_overlay_r24.py'
+      - 'scripts/apply_auto_review_model_overlay_r24_hardening.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -173,6 +177,12 @@ jobs:
         with:
           workspaces: '. -> target'
           key: sub2api-grok-compat-windows
+
+      - name: Test r24 Auto Review catalog overlay
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Check r24 Codex integration crate
+        run: cargo check -p codex-app-transfer-codex-integration --lib
 
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli

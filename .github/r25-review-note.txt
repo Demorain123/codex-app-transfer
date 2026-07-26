@@ -1,0 +1,1 @@
+Keep r25 draft until materialization, Windows package, deep PR diff review, and real-device Apps MCP reproduction are complete.

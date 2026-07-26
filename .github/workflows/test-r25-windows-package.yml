@@ -1,0 +1,174 @@
+name: Test r25 Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r25-apps-mcp-auth
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r25-windows-package.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r24-auto-review-overlay
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r25-windows-package.yml'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-r25-windows:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Replay complete r24 plus r25 Apps MCP auth overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_apps_mcp_auth_r25.py scripts/apply_apps_mcp_auth_r25_review.py scripts/apply_sub2api_grok_compat_revision.py
+          python scripts/apply_sub2api_grok_compat_revision.py
+          grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-SNAPSHOT' src-tauri/src/codex_real_account.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-WIRE' src-tauri/src/proxy_runner.rs
+          grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
+          grep -F -q 'compat_revision=25' SUB2API_GROK_COMPAT_VERSION.txt
+          ! grep -E '\[apps-mcp-auth\].*(access_token|Bearer |refresh_token|account_id=)' crates/proxy/src/forward.rs
+
+      - name: Resolve r25 package version
+        id: compat-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          BASE_VERSION="${APP_VERSION%%+*}"
+          REVISION="${APP_VERSION#*+}"
+          SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
+          test "$REVISION" = "25"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Packaging Sub2API Grok Compat v${APP_VERSION} / r${REVISION}"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r25-windows-package
+
+      - name: Normalize and diff-check generated Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+
+      - name: Run r25 proxy scope and header regressions
+        run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
+
+      - name: Run r25 active-account credential regressions
+        run: cargo test -p codex-app-transfer apps_mcp_auth_r25 -- --nocapture
+
+      - name: Compile complete Windows app with r25 wiring
+        run: cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Recheck r24 catalog semantics
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Test adapter regressions
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r25' frontend/dist
+          grep -R -F -q 'No Micro' frontend/dist
+          grep -R -F -q 'Auto Review' frontend/dist
+
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: Build Windows NSIS and MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage r25 Windows bundles
+        shell: bash
+        env:
+          SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
+        run: |
+          set -euo pipefail
+          BDIR="target/x86_64-pc-windows-msvc/release/bundle"
+          mkdir -p staging
+          shopt -s nullglob
+          for f in "$BDIR"/nsis/*-setup.exe; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
+          done
+          for f in "$BDIR"/msi/*.msi; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
+          done
+          files=(staging/*)
+          if (( ${#files[@]} == 0 )); then
+            echo '::error::No r25 Windows bundles found'
+            exit 1
+          fi
+          ls -lh staging/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-${{ steps.compat-version.outputs.safe_version }}-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

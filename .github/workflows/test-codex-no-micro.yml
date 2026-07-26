@@ -1,0 +1,82 @@
+name: Test Codex No Micro
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-no-micro-ui
+    paths:
+      - 'src-tauri/resources/codex_no_micro_launcher.mjs'
+      - 'src-tauri/src/admin/services/desktop/no_micro.rs'
+      - 'src-tauri/src/admin/services/desktop/mod.rs'
+      - 'src-tauri/src/admin/handlers/no_micro.rs'
+      - 'src-tauri/src/admin/handlers/mod.rs'
+      - 'src-tauri/src/admin/mod.rs'
+      - 'frontend/src/api/noMicro.ts'
+      - 'frontend/src/components/codex/NoMicroPanel.vue'
+      - 'frontend/src/pages/CodexPage.vue'
+      - 'scripts/no_micro_mock_fixture.mjs'
+      - 'scripts/test_no_micro_launcher.mjs'
+      - '.github/workflows/test-codex-no-micro.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat
+    paths:
+      - 'src-tauri/resources/codex_no_micro_launcher.mjs'
+      - 'src-tauri/src/admin/services/desktop/no_micro.rs'
+      - 'src-tauri/src/admin/services/desktop/mod.rs'
+      - 'src-tauri/src/admin/handlers/no_micro.rs'
+      - 'src-tauri/src/admin/handlers/mod.rs'
+      - 'src-tauri/src/admin/mod.rs'
+      - 'frontend/src/api/noMicro.ts'
+      - 'frontend/src/components/codex/NoMicroPanel.vue'
+      - 'frontend/src/pages/CodexPage.vue'
+      - 'scripts/no_micro_mock_fixture.mjs'
+      - 'scripts/test_no_micro_launcher.mjs'
+      - '.github/workflows/test-codex-no-micro.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-micro-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Check launcher syntax
+        run: node --check src-tauri/resources/codex_no_micro_launcher.mjs
+
+      - name: Run No Micro inspector + Worker mock
+        run: node scripts/test_no_micro_launcher.mjs
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: no-micro-windows
+
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check
+
+      - name: Check Tauri application
+        run: cargo check -p codex-app-transfer
+
+      - name: Run No Micro Rust unit tests
+        run: cargo test -p codex-app-transfer no_micro -- --nocapture

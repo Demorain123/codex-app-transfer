@@ -39,12 +39,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Validate and materialize r26 thin overlay
+      - name: Check r26 Python overlays
+        run: python -m py_compile scripts/apply_runtime_diag_r26.py scripts/apply_runtime_diag_r26_review.py scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Materialize base r26 diagnostics
+        run: python scripts/apply_runtime_diag_r26.py
+
+      - name: Apply r26 self-review hardening
+        run: python scripts/apply_runtime_diag_r26_review.py
+
+      - name: Compose complete compat revision
+        run: python scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Verify r26 materialization markers
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/apply_runtime_diag_r26.py scripts/apply_runtime_diag_r26_review.py
-          python scripts/apply_sub2api_grok_compat_revision.py
           grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
           grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
           grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs

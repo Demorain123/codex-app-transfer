@@ -1,0 +1,76 @@
+name: Materialize r26 Runtime Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r26-runtime-diag
+
+permissions:
+  contents: write
+
+concurrency:
+  group: r26-runtime-diag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  materialize-and-test:
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[r26-generated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate and materialize r26 thin overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_runtime_diag_r26.py
+          python scripts/apply_sub2api_grok_compat_revision.py
+          grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
+          grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
+          grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-RESULT' crates/proxy/src/forward.rs
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format and run r26 proxy regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+
+      - name: Commit generated r26 source
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            src-tauri/src/runtime_diag.rs \
+            src-tauri/src/main.rs \
+            crates/proxy/src/forward.rs \
+            src-tauri/Cargo.toml \
+            src-tauri/tauri.conf.json \
+            Cargo.lock \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts \
+            frontend/src/layout/AppLayout.vue \
+            SUB2API_GROK_COMPAT_VERSION.txt
+          if git diff --cached --quiet; then
+            echo 'No generated r26 source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'diag(runtime): materialize r26 diagnostics [r26-generated]'
+          git push origin "HEAD:${GITHUB_REF_NAME}"

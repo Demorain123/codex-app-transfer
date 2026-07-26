@@ -10,6 +10,7 @@ on:
       - sub2api-grok-compat-next-r24-auto-review-overlay
     paths:
       - 'scripts/apply_runtime_diag_r26.py'
+      - 'scripts/apply_runtime_diag_r26_review.py'
       - 'scripts/runtime_diag_r26.rs'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'src-tauri/**'
@@ -42,12 +43,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/apply_runtime_diag_r26.py
+          python -m py_compile scripts/apply_runtime_diag_r26.py scripts/apply_runtime_diag_r26_review.py
           python scripts/apply_sub2api_grok_compat_revision.py
           grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
           grep -F -q 'CAS-RUNTIME-DIAG-R26-START' src-tauri/src/main.rs
           grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-SUBAGENT-FAILURE-CHAIN-R26-RESULT' crates/proxy/src/forward.rs
+          grep -F -q 'chatgpt.exe' src-tauri/src/runtime_diag.rs
+          grep -F -q 'stream_disconnected' src-tauri/src/runtime_diag.rs
+          ! grep -F -q 'line_fp = %line_fp' src-tauri/src/runtime_diag.rs
           grep -F -q 'compat_revision=26' SUB2API_GROK_COMPAT_VERSION.txt
 
       - uses: dtolnay/rust-toolchain@stable
@@ -64,11 +68,12 @@ jobs:
           git diff --binary > /tmp/r26-first.diff
 
           python scripts/apply_runtime_diag_r26.py
+          python scripts/apply_runtime_diag_r26_review.py
           cargo fmt --all
           git diff --check
           git diff --binary > /tmp/r26-second.diff
           if ! cmp -s /tmp/r26-first.diff /tmp/r26-second.diff; then
-            echo '::error::r26 thin overlay is not idempotent after rustfmt'
+            echo '::error::r26 complete diagnostics overlay is not idempotent after rustfmt'
             diff -u /tmp/r26-first.diff /tmp/r26-second.diff || true
             exit 1
           fi

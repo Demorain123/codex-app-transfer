@@ -87,10 +87,12 @@ jobs:
           workspaces: '. -> target'
           key: r26-windows-package
 
-      - name: Check formatting and r26 proxy regressions
+      - name: Format, diff-check, and run r26 Windows regressions
         shell: bash
         run: |
-          cargo fmt --all -- --check
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
           cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
           cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
 

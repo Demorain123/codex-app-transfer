@@ -1,17 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { i18nState, t } from '@/i18n'
+import { t } from '@/i18n'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import ManagedMarkdownPanel from '@/components/codex/ManagedMarkdownPanel.vue'
 import McpPanel from '@/components/codex/McpPanel.vue'
 import ConversationsPanel from '@/components/codex/ConversationsPanel.vue'
-import NoMicroPanel from '@/components/codex/NoMicroPanel.vue'
 
-type Tab = 'agents' | 'memories' | 'skills' | 'mcp' | 'conversations' | 'desktop'
-const BASE_TABS: Tab[] = ['agents', 'memories', 'skills', 'mcp', 'conversations']
-const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
-const allowedTabs = computed<Tab[]>(() => (isWindows ? [...BASE_TABS, 'desktop'] : BASE_TABS))
+type Tab = 'agents' | 'memories' | 'skills' | 'mcp' | 'conversations'
+const allowedTabs: Tab[] = ['agents', 'memories', 'skills', 'mcp', 'conversations']
 
 const route = useRoute()
 const router = useRouter()
@@ -22,16 +19,13 @@ const tabOptions = computed<{ value: Tab; label: string }[]>(() => [
   { value: 'skills', label: t('codex.tabSkills') },
   { value: 'mcp', label: t('codex.tabMcp') },
   { value: 'conversations', label: t('codex.tabConversations') },
-  ...(isWindows
-    ? [{ value: 'desktop' as const, label: i18nState.locale === 'zh' ? '桌面' : 'Desktop' }]
-    : []),
 ])
 
 // 子 tab 同步 ?tab= query(deeplink 友好;旧 SPA 用 ?tab=)
 const tab = computed<Tab>({
   get() {
     const q = route.query.tab as Tab | undefined
-    return q && allowedTabs.value.includes(q) ? q : 'agents'
+    return q && allowedTabs.includes(q) ? q : 'agents'
   },
   set(v) {
     router.replace({ query: { ...route.query, tab: v } })
@@ -52,7 +46,6 @@ const tab = computed<Tab>({
       <ManagedMarkdownPanel v-else-if="tab === 'skills'" key="skills" resource="skills" />
       <McpPanel v-else-if="tab === 'mcp'" key="mcp" />
       <ConversationsPanel v-else-if="tab === 'conversations'" key="conversations" />
-      <NoMicroPanel v-else-if="tab === 'desktop'" key="desktop" />
     </KeepAlive>
   </div>
 </template>

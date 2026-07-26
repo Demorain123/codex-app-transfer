@@ -37,19 +37,22 @@ Imported/pinned mirror credentials are deliberately excluded. r25 never refreshe
 - both synthesized identity header values are marked sensitive;
 - an Apps MCP redirect is allowed to retain synthesized identity only on the original `https://chatgpt.com` origin; a cross-host, cross-scheme, or cross-port redirect is blocked before the custom `ChatGPT-Account-ID` can follow it;
 - the redirect restriction is scoped only to chains originating from the hosted Apps MCP namespace, so unrelated providers keep the existing redirect behaviour;
+- `ChatGPT-Account-ID` is explicitly masked in generic forward traces, ChatGPT-backend passthrough traces, and MCP recorder header traces;
 - 401 revocation correlation fingerprints the actually prepared outbound request, so an injected bearer is correlated correctly;
 - existing inbound Authorization and account identity are preserved;
 - the existing proxy-only/router API remains available without desktop-auth dependencies.
 
 ## Deep self-review findings
 
-The implementation was deliberately reviewed beyond compilation. Three concrete issues were found and corrected before acceptance:
+The implementation was deliberately reviewed beyond compilation. Five concrete issues were found and corrected before acceptance:
 
 1. header construction originally used a less robust parsing path; r25 now uses byte-validated header construction and fails closed on malformed values;
 2. a raw prefix-only path check could authorize a dot-segment escape after URL normalization; the injection allowlist now evaluates the canonical outbound URL and has negative regressions for literal and percent-encoded `..`;
-3. reqwest strips `Authorization` on cross-origin redirects but does not know that `ChatGPT-Account-ID` is also identity-sensitive; r25 now adds an Apps-MCP-only same-origin redirect guard and marks both synthesized values sensitive.
+3. reqwest strips `Authorization` on cross-origin redirects but does not know that `ChatGPT-Account-ID` is also identity-sensitive; r25 now adds an Apps-MCP-only same-origin redirect guard and marks both synthesized values sensitive;
+4. an early hardening marker used `REDIRECT` while another marker was named `REDIRECT-HELPER`, so a substring test could falsely conclude that the actual guard had already been installed; the guard now has an exact `REDIRECT-GUARD` marker and the review gate checks exact behaviour markers instead of substring/count heuristics;
+5. the existing diagnostic serializers did not classify `ChatGPT-Account-ID` as credential-bearing, so enabling protocol diagnostics could write the synthesized account identifier to local traces; r25 now masks it across all three relevant diagnostic header paths and has a filtered Rust behavior regression that verifies the raw account id never survives serialization.
 
-The replayable revision stack contains separate base, redirect-hardening, semantic-review, and redirect-review scripts so these security properties are checked again after future upstream rebases.
+The replayable revision stack contains base, redirect/privacy hardening, semantic review, exact redirect review, diagnostic trace privacy, and trace-privacy review gates. The hardening bundle invokes the diagnostic privacy companions as part of every r25 materialization so the standard compat revision path cannot silently omit them on a future upstream rebase.
 
 ## Evidence boundary
 

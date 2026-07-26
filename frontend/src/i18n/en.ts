@@ -1,6 +1,6 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r23 · v2.4.5+23",
+  "compat.buildBadge": "Sub2API Grok Compat r24 · v2.4.5+24",
   "providerForm.grokCompatSection": "Sub2API · Grok Compatibility",
   "providerForm.grokCompat": "Grok MCP / Tools compatibility",
   "providerForm.grokCompatHint": "Enable Codex custom / namespace / tool_search compatibility only for grok-* Responses requests; Luna / GPT remain native passthrough.",
@@ -907,6 +907,8 @@ export default {
   "providerForm.authScheme": "Auth Scheme",
   "providerForm.modelMapSection": "Model mapping",
   "providerForm.slotFallbackPlaceholder": "Leave blank to fall back to default model",
+  "providerForm.autoReviewModelOverrides": "Per-model Auto Review overrides",
+  "providerForm.autoReviewModelOverridesHint": "JSON: main model slug → reviewer slug. Unlisted models inherit the current model_catalog_json unchanged. External catalogs are read-only; Transfer only creates a shadow copy. Restart Codex after changing this.",
   "providerForm.reviewModelSlot": "AutoReview Model",
   "providerForm.advancedToggle": "Advanced · Extra headers / model capabilities / request options (JSON)",
   "providerForm.extraHeaders": "Extra Headers",

@@ -11,9 +11,9 @@ use serde_json::{json, Value};
 
 use crate::admin::handlers::common::{active_provider_name, read_setting_bool, APP_VERSION};
 use crate::admin::handlers::providers::{
-    active_provider, provider_default_model, provider_display_name, provider_index,
-    provider_model_capabilities, provider_model_mappings, provider_review_model_slot,
-    provider_supports_1m,
+    active_provider, provider_auto_review_model_overrides, provider_default_model,
+    provider_display_name, provider_index, provider_model_capabilities, provider_model_mappings,
+    provider_review_model_slot, provider_supports_1m,
 };
 use crate::admin::handlers::proxy::{ensure_gateway_key, read_proxy_port, start_proxy_if_needed};
 use crate::admin::registry_io::{load as load_registry, with_config_write, ConfigMutation};
@@ -43,6 +43,8 @@ pub struct DesktopConfigTarget {
     /// 从 provider `reviewModelSlot` 读;透传给 catalog 生成写每个 entry 的
     /// `auto_review_model_override`,让审查脱钩主模型走该槽位的现有映射。
     pub review_model_slot: Option<String>,
+    /// CAS-AUTO-REVIEW-R24: main-model slug -> reviewer slug.
+    pub auto_review_model_overrides: Value,
     /// [correctness review HIGH] 是否 QoderWork provider(authScheme qoder_oauth)。透传给
     /// `ApplyConfig.is_qoder`,让 catalog 只在 qoder 上下文解析 qoder 网关 key 的 reasoning/context,
     /// 避免 `auto` 等通用别名撞 WorkBuddy 等同名 model。见 [`provider_is_qoder`]。
@@ -190,6 +192,7 @@ pub fn desktop_config_target_for_provider(
         codex_network_access,
         model_display_names: model_display_names_for_provider(provider, &api_format_lower),
         review_model_slot: provider_review_model_slot(provider),
+        auto_review_model_overrides: provider_auto_review_model_overrides(provider),
         is_qoder: provider_is_qoder(provider),
         // CAS-SUB2API-GROK-COMPAT-HOOK: wire shim, not a model-catalog owner.
         preserve_external_model_catalog: api_format_lower == "responses"
@@ -284,6 +287,7 @@ fn apply_desktop_target_impl(
             is_qoder: target.is_qoder,
             model_display_names: Some(&target.model_display_names),
             review_model_slot: target.review_model_slot.as_deref(),
+            auto_review_model_overrides: Some(&target.auto_review_model_overrides),
             app_version: APP_VERSION,
             codex_network_access: target.codex_network_access,
             preserve_chatgpt_auth,

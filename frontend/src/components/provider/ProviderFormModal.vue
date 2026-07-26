@@ -103,6 +103,7 @@ const form = reactive({
   apiFormat: 'openai_chat',
   authScheme: 'bearer',
   reviewModelSlot: '',
+  autoReviewModelOverrides: '', // CAS-AUTO-REVIEW-R24 JSON map: main slug -> reviewer slug
   models: {
     default: '',
     gpt_5_5: '',
@@ -309,6 +310,7 @@ function resetToCustom() {
   form.apiFormat = 'openai_chat'
   form.authScheme = 'bearer'
   form.reviewModelSlot = ''
+  form.autoReviewModelOverrides = ''
   for (const s of MODEL_SLOTS) form.models[s.key] = ''
   form.extraHeaders = ''
   form.modelCapabilities = ''
@@ -345,6 +347,7 @@ function applyPreset(p: Preset) {
   form.apiFormat = p.apiFormat || 'openai_chat'
   form.authScheme = p.authScheme || 'bearer'
   form.reviewModelSlot = ''
+  form.autoReviewModelOverrides = ''
   for (const s of MODEL_SLOTS) form.models[s.key] = p.models?.[s.key] || ''
   form.extraHeaders = stringifyIfAny(p.extraHeaders)
   form.modelCapabilities = stringifyIfAny(p.modelCapabilities)
@@ -469,6 +472,7 @@ onMounted(async () => {
   opencodeLoggedIn.value = !!p.hasOpencodeCookie
   kimiLoggedIn.value = !!p.hasKimiCookie
   form.reviewModelSlot = p.reviewModelSlot || ''
+  form.autoReviewModelOverrides = stringifyIfAny(p.autoReviewModelOverrides)
   for (const s of MODEL_SLOTS) {
     form.models[s.key] = (p.mappings as Record<string, string>)[s.key] || ''
   }
@@ -511,10 +515,15 @@ async function save() {
   let extraHeaders: Record<string, unknown> | undefined
   let modelCapabilities: Record<string, unknown> | undefined
   let requestOptions: Record<string, unknown> | undefined
+  let autoReviewModelOverrides: Record<string, unknown> | undefined
   try {
     extraHeaders = parseJsonObj(t('providerForm.extraHeaders'), form.extraHeaders)
     modelCapabilities = parseJsonObj(t('providerForm.modelCapabilities'), form.modelCapabilities)
     requestOptions = parseJsonObj(t('providerForm.requestOptions'), form.requestOptions)
+    autoReviewModelOverrides = parseJsonObj(
+      t('providerForm.autoReviewModelOverrides'),
+      form.autoReviewModelOverrides,
+    )
   } catch (e) {
     error.value = (e as Error).message
     return
@@ -530,6 +539,8 @@ async function save() {
     authScheme: form.authScheme,
     models,
     reviewModelSlot: form.reviewModelSlot.trim() || null,
+    // Empty object is intentional on update: it clears a previously saved map.
+    autoReviewModelOverrides: (autoReviewModelOverrides || {}) as Record<string, string>,
     extraHeaders: extraHeaders as Record<string, string> | undefined,
     modelCapabilities,
     requestOptions,
@@ -662,6 +673,17 @@ async function save() {
       </SettingsRow>
       <SettingsRow :title="t('providerForm.reviewModelSlot')">
         <AppInput v-model="form.reviewModelSlot" placeholder="default" />
+      </SettingsRow>
+      <SettingsRow :title="t('providerForm.autoReviewModelOverrides')">
+        <div class="pf__auto-review">
+          <textarea
+            v-model="form.autoReviewModelOverrides"
+            class="pf__json"
+            spellcheck="false"
+            placeholder='{"grok-4.5":"gpt-5.6-luna"}'
+          ></textarea>
+          <small>{{ t('providerForm.autoReviewModelOverridesHint') }}</small>
+        </div>
       </SettingsRow>
 
       <template v-if="isCustomProvider">

@@ -37,8 +37,6 @@ def harden_generated_metadata(path: Path) -> None:
         path.write_text(text.replace(old, fixed_single, 1), encoding="utf-8")
         print("generated metadata serialization: hardened")
         return
-    # rustfmt expands the iterator chain over several lines. These markers prove the
-    # same semantic conversion String -> Value is present without pinning whitespace.
     if (
         '"overrides": overrides' in text
         and "Value::String(reviewer.clone())" in text
@@ -60,6 +58,38 @@ def harden_generated_non_windows_path(path: Path) -> None:
         return
     raise SystemExit("r24 hardening semantic check failed: generated non-Windows path normalization")
 
+
+# 0. Make the generator replay-safe after generated Rust has been materialized and rustfmt'd.
+# The original helper only recognized byte-identical `new` blocks. rustfmt can wrap imports
+# and expressions without changing semantics, which made the next replay try the old anchor
+# again and fail. Whitespace-normalized comparison is only an idempotence fast-path; actual
+# mutation still requires the exact old anchor, preserving fail-closed behavior on real drift.
+gen_text = GEN.read_text(encoding="utf-8")
+old_replace_once = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if new in text:
+        return text
+    if old not in text:
+        raise SystemExit(f"r24 anchor not found: {label}")
+    return text.replace(old, new, 1)
+'''
+new_replace_once = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if new in text:
+        return text
+    # Materialized generated files may have been rustfmt'd. Treat whitespace-only
+    # layout differences as already applied, while keeping exact old-anchor mutation.
+    if re.sub(r"\\s+", "", new) in re.sub(r"\\s+", "", text):
+        return text
+    if old not in text:
+        raise SystemExit(f"r24 anchor not found: {label}")
+    return text.replace(old, new, 1)
+'''
+if new_replace_once in gen_text:
+    print("r24 generator replay helper: already hardened")
+elif old_replace_once in gen_text:
+    GEN.write_text(gen_text.replace(old_replace_once, new_replace_once, 1), encoding="utf-8")
+    print("r24 generator replay helper: hardened")
+else:
+    raise SystemExit("r24 hardening anchor not found: generator replace_once helper")
 
 # 1. Fix generator metadata serialization so generated Rust compiles.
 replace_once(
@@ -98,7 +128,6 @@ else:
     raise SystemExit(f"r24 hardening anchor count unexpected: {count}")
 
 # 3. Fix/validate already-generated Rust if generation happened before this postflight pass.
-# This must tolerate rustfmt because the generated module is now materialized in the branch.
 generated = ROOT / "crates/codex_integration/src/auto_review_overlay.rs"
 if generated.exists():
     harden_generated_metadata(generated)

@@ -20,11 +20,13 @@ def write(path: str, text: str) -> None:
     print(f"patched {path}")
 
 
-# CAS-AUTO-REVIEW-R24: keep the new feature as a thin replayable overlay without
-# duplicating it across every packaging workflow. All existing Apply/Windows/pristine
-# flows already invoke this revision script last, so compose r24 immediately before
-# visible-version normalization. Hardening also fixes older generated r24 output if needed.
+# CAS-AUTO-REVIEW-R24: compose the feature as a replayable thin overlay.
+# Preflight hardening first repairs generator-anchor drift against the current r23
+# tree; postflight hardening validates/fixes generated output (snapshot ordering,
+# metadata serialization). Existing Apply/Windows/pristine flows already invoke
+# this revision script last, so no duplicate workflow-specific implementation is needed.
 for overlay_script in [
+    "scripts/apply_auto_review_model_overlay_r24_hardening.py",
     "scripts/apply_auto_review_model_overlay_r24.py",
     "scripts/apply_auto_review_model_overlay_r24_hardening.py",
 ]:

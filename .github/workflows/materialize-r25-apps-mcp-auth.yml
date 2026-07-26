@@ -9,12 +9,7 @@ on:
     branches:
       - sub2api-grok-compat-next-r24-auto-review-overlay
     paths:
-      - 'scripts/apply_apps_mcp_auth_r25.py'
-      - 'scripts/apply_apps_mcp_auth_r25_redirect_hardening.py'
-      - 'scripts/apply_apps_mcp_auth_r25_review.py'
-      - 'scripts/apply_apps_mcp_auth_r25_redirect_review.py'
-      - 'scripts/apply_apps_mcp_auth_r25_trace_privacy.py'
-      - 'scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py'
+      - 'scripts/apply_apps_mcp_auth_r25*.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'crates/proxy/**'
       - 'src-tauri/**'
@@ -43,73 +38,70 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check r25 Python overlays
-        run: >-
-          python -m py_compile
-          scripts/apply_apps_mcp_auth_r25.py
-          scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
-          scripts/apply_apps_mcp_auth_r25_review.py
-          scripts/apply_apps_mcp_auth_r25_redirect_review.py
-          scripts/apply_apps_mcp_auth_r25_trace_privacy.py
-          scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py
-          scripts/apply_sub2api_grok_compat_revision.py
-
-      - name: Materialize base r25 Apps MCP auth
-        run: python scripts/apply_apps_mcp_auth_r25.py
-
-      - name: Run r25 redirect/privacy hardening diagnostic
-        id: hardening
-        shell: bash
-        run: |
-          set +e
-          python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py > r25-hardening.log 2>&1
-          rc=$?
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Upload r25 hardening diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: r25-hardening-diagnostic
-          path: r25-hardening.log
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Fail if r25 redirect/privacy hardening failed
-        if: steps.hardening.outputs.rc != '0'
-        shell: bash
-        run: |
-          cat r25-hardening.log
-          exit 1
-
-      - name: Apply r25 deep self-review gates
+      - name: Check every r25 Python overlay and review
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/apply_apps_mcp_auth_r25_review.py
-          python scripts/apply_apps_mcp_auth_r25_redirect_review.py
-          python scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py
+          python -m py_compile scripts/apply_apps_mcp_auth_r25*.py scripts/apply_sub2api_grok_compat_revision.py
 
-      - name: Compose complete compat revision
+      - name: 01 Materialize base r25 Apps MCP auth
+        run: python scripts/apply_apps_mcp_auth_r25.py
+
+      - name: 02 Apply redirect and sensitive-header hardening
+        run: python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
+
+      - name: 03 Apply diagnostic account-id privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_privacy.py
+
+      - name: 04 Apply relay telemetry and reqwest-error URL privacy
+        run: python scripts/apply_apps_mcp_auth_r25_log_privacy.py
+
+      - name: 05 Apply hosted Apps MCP OAuth trace-query privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_query_privacy.py
+
+      - name: 06 Apply known-revoked bearer hardening
+        run: python scripts/apply_apps_mcp_auth_r25_revocation_hardening.py
+
+      - name: 07 Review base auth scope and identity source
+        run: python scripts/apply_apps_mcp_auth_r25_review.py
+
+      - name: 08 Review redirect and header sensitivity
+        run: python scripts/apply_apps_mcp_auth_r25_redirect_review.py
+
+      - name: 09 Review diagnostic account-id privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py
+
+      - name: 10 Review relay telemetry and reqwest-error privacy
+        run: python scripts/apply_apps_mcp_auth_r25_log_privacy_review.py
+
+      - name: 11 Review hosted Apps MCP OAuth trace-query privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_query_privacy_review.py
+
+      - name: 12 Review revoked-bearer fail-closed behavior
+        run: python scripts/apply_apps_mcp_auth_r25_revocation_review.py
+
+      - name: 13 Compose complete compat revision from already-materialized tree
         run: python scripts/apply_sub2api_grok_compat_revision.py
 
-      - name: Verify r25 materialization and privacy markers
+      - name: Verify complete r25 materialization and privacy markers
         shell: bash
         run: |
           set -euo pipefail
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-STATE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD' crates/proxy/src/forward.rs
-          grep -F -q 'Apps MCP cross-origin redirect blocked' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
           grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-ROUTER' crates/proxy/src/server.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-GENERIC' crates/proxy/src/diagnostics.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP' crates/proxy/src/diagnostics.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-QUERY-PRIVACY' crates/proxy/src/diagnostics.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-SNAPSHOT' src-tauri/src/codex_real_account.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REVOCATION' src-tauri/src/codex_real_account.rs
           grep -F -q 'CAS-APPS-MCP-AUTH-R25-WIRE' src-tauri/src/proxy_runner.rs
           grep -F -q 'compat_revision=25' SUB2API_GROK_COMPAT_VERSION.txt
           ! grep -E '\[apps-mcp-auth\].*(access_token|Bearer |refresh_token|account_id=)' crates/proxy/src/forward.rs
@@ -126,7 +118,7 @@ jobs:
           git diff --check
           git diff --binary > /tmp/r25-first.diff
 
-      - name: Run r25 proxy regressions
+      - name: Run all filtered r25 proxy behavior regressions
         run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
 
       - name: Prove complete r25 replay idempotence

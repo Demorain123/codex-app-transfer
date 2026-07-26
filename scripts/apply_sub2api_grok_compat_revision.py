@@ -58,10 +58,13 @@ print("r24 materialization gate: complete")
 
 # CAS-APPS-MCP-AUTH-R25: keep hosted Apps MCP auth compatibility as a separate,
 # replayable layer on top of r24. The base overlay performs the narrow code changes;
-# the second script is a fail-closed semantic/security review and never widens scope.
+# redirect hardening protects the synthesized custom account identity across 3xx;
+# both review scripts are fail-closed gates and never widen the feature scope.
 for overlay_script in [
     "scripts/apply_apps_mcp_auth_r25.py",
+    "scripts/apply_apps_mcp_auth_r25_redirect_hardening.py",
     "scripts/apply_apps_mcp_auth_r25_review.py",
+    "scripts/apply_apps_mcp_auth_r25_redirect_review.py",
 ]:
     overlay_path = ROOT / overlay_script
     if overlay_path.exists():
@@ -74,6 +77,7 @@ for overlay_script in [
 r25_required_markers = {
     "crates/proxy/src/forward.rs": [
         "CAS-APPS-MCP-AUTH-R25-STATE",
+        "CAS-APPS-MCP-AUTH-R25-REDIRECT",
         "CAS-APPS-MCP-AUTH-R25-HELPERS",
         "CAS-APPS-MCP-AUTH-R25-REHYDRATE",
         "CAS-APPS-MCP-AUTH-R25-401-FP",
@@ -91,6 +95,8 @@ for rel_path, markers in r25_required_markers.items():
     for marker in markers:
         if marker not in content:
             raise SystemExit(f"r25 materialization missing marker in {rel_path}: {marker}")
+if read("crates/proxy/src/forward.rs").count("set_sensitive(true)") < 2:
+    raise SystemExit("r25 materialization missing sensitive flags on synthesized identity headers")
 print("r25 materialization gate: complete")
 
 revision = REVISION_FILE.read_text(encoding="utf-8").strip()

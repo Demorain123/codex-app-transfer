@@ -393,25 +393,41 @@ pub async fn desktop_snapshot_status() -> impl IntoResponse {
     .into_response()
 }
 
-pub async fn restart_codex_app(State(state): State<crate::admin::AdminState>) -> impl IntoResponse {
-    let desktop_sync = snapshot::sync_desktop_for_active_provider(&state).await;
+// CAS-NO-MICRO-R23-SHARED-DESKTOP-PREP
+/// The exact config/provider preparation used by the proven legacy Restart Codex App path.
+/// No Micro A/B must call this helper instead of maintaining a second approximation.
+pub(crate) async fn prepare_codex_restart_runtime(
+    state: &crate::admin::AdminState,
+) -> Result<Value, String> {
+    let desktop_sync = snapshot::sync_desktop_for_active_provider(state).await;
     if desktop_sync.get("attempted").and_then(|v| v.as_bool()) == Some(true)
         && desktop_sync.get("success").and_then(|v| v.as_bool()) != Some(true)
     {
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            desktop_sync
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Codex 配置同步失败"),
-        )
-        .into_response();
+        return Err(desktop_sync
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Codex 配置同步失败")
+            .to_owned());
     }
+    Ok(desktop_sync)
+}
+
+/// Mirror the legacy Restart button's post-launch CDP reinjection behavior.
+pub(crate) async fn reinject_after_codex_restart() {
+    let service = super::plugin_unlock::get_service().await;
+    service.reinject().await;
+}
+
+pub async fn restart_codex_app(State(state): State<crate::admin::AdminState>) -> impl IntoResponse {
+    let desktop_sync = match prepare_codex_restart_runtime(&state).await {
+        Ok(value) => value,
+        Err(message) => {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, message).into_response();
+        }
+    };
     match process::launch_codex_app_restart(std::env::consts::OS) {
         Ok(_) => {
-            // 通知 plugin_unlock daemon 重置 backoff 立刻重新 detect_cdp。
-            let service = super::plugin_unlock::get_service().await;
-            service.reinject().await;
+            reinject_after_codex_restart().await;
             Json(json!({"success": true, "desktopSync": desktop_sync})).into_response()
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),

@@ -6,6 +6,7 @@ import { restartCodexApp } from '@/api/desktop'
 import { useToast } from '@/composables/useToast'
 import ProviderCard from '@/components/provider/ProviderCard.vue'
 import ProviderFormModal from '@/components/provider/ProviderFormModal.vue'
+import NoMicroPanel from '@/components/codex/NoMicroPanel.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import IconPlus from '~icons/lucide/plus'
 import IconRefreshCw from '~icons/lucide/refresh-cw'
@@ -14,6 +15,7 @@ const store = useProvidersStore()
 const { show: toast } = useToast()
 const formOpen = ref(false)
 const formEditId = ref<string | null>(null)
+const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
 onMounted(() => store.load())
 
 function openAdd() {
@@ -100,6 +102,10 @@ function onRemove(id: string) {
       />
     </div>
 
+    <!-- No Micro is a Windows desktop launch/runtime control, not documentation. Keep it next to
+         the existing Restart Codex action where users already manage which provider Codex starts with. -->
+    <NoMicroPanel v-if="isWindows" class="providers__no-micro" />
+
     <div v-if="store.loading" class="providers__hint">{{ t('providers.loading') }}</div>
     <div v-else-if="store.error" class="providers__hint providers__hint--err">{{ store.error }}</div>
     <div v-else-if="!store.list.length" class="providers__hint">{{ t('providers.empty') }}</div>
@@ -140,6 +146,9 @@ function onRemove(id: string) {
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.providers__no-micro {
   margin-bottom: var(--space-4);
 }
 .providers__list {

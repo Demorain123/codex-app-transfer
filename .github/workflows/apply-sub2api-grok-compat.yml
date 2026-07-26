@@ -29,6 +29,8 @@ on:
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_mcp_relay_diag.py'
+      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
+      - 'scripts/apply_no_micro_r23_restart_review.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
@@ -96,6 +98,12 @@ jobs:
 
       - name: Apply r20 MCP relay diagnostic overlay
         run: python3 scripts/apply_sub2api_mcp_relay_diag.py
+
+      - name: Apply r23 No Micro shared restart pipeline
+        run: python3 scripts/apply_no_micro_r23_restart_pipeline.py
+
+      - name: Apply r23 legacy restart preservation review
+        run: python3 scripts/apply_no_micro_r23_restart_review.py
 
       - name: Apply compat revision and visible build identity
         run: python3 scripts/apply_sub2api_grok_compat_revision.py
@@ -170,6 +178,10 @@ jobs:
             crates/proxy/src/resolver.rs \
             crates/proxy/src/forward.rs \
             src-tauri/src/admin/services/desktop/snapshot.rs \
+            src-tauri/src/admin/services/desktop/process.rs \
+            src-tauri/src/admin/services/desktop/no_micro.rs \
+            src-tauri/src/admin/handlers/desktop.rs \
+            src-tauri/src/admin/handlers/no_micro.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
             frontend/src/api/types.ts \
@@ -210,6 +222,10 @@ jobs:
             crates/proxy/src/resolver.rs \
             crates/proxy/src/forward.rs \
             src-tauri/src/admin/services/desktop/snapshot.rs \
+            src-tauri/src/admin/services/desktop/process.rs \
+            src-tauri/src/admin/services/desktop/no_micro.rs \
+            src-tauri/src/admin/handlers/desktop.rs \
+            src-tauri/src/admin/handlers/no_micro.rs \
             src-tauri/src/admin/handlers/providers/crud.rs \
             src-tauri/tauri.conf.json \
             frontend/src/api/types.ts \

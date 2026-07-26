@@ -26,6 +26,8 @@ on:
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_mcp_relay_diag.py'
+      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
+      - 'scripts/apply_no_micro_r23_restart_review.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -56,6 +58,8 @@ on:
       - 'scripts/apply_sub2api_subagent_retry_diag.py'
       - 'scripts/apply_sub2api_stream_retry_diag.py'
       - 'scripts/apply_sub2api_mcp_relay_diag.py'
+      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
+      - 'scripts/apply_no_micro_r23_restart_review.py'
       - 'scripts/apply_sub2api_grok_compat_revision.py'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -100,6 +104,8 @@ jobs:
           python scripts/apply_sub2api_subagent_retry_diag.py
           python scripts/apply_sub2api_stream_retry_diag.py
           python scripts/apply_sub2api_mcp_relay_diag.py
+          python scripts/apply_no_micro_r23_restart_pipeline.py
+          python scripts/apply_no_micro_r23_restart_review.py
           python scripts/apply_sub2api_grok_compat_revision.py
 
           grep -F "v-if=\"form.apiFormat === 'responses'\"" \
@@ -129,6 +135,12 @@ jobs:
           grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL' crates/proxy/src/forward.rs
           grep -F -q 'CAS-MCP-RELAY-DIAG-R20-HOOK' crates/proxy/src/forward.rs
           grep -F -q 'CAS-MCP-RELAY-DIAG-R20-RESOLVE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-NO-MICRO-R23-SHARED-RESTART-PIPELINE' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'CAS-NO-MICRO-R23-LEGACY-RESTART-PRESERVED' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'CAS-NO-MICRO-R23-SHARED-DESKTOP-PREP' src-tauri/src/admin/handlers/desktop.rs
+          grep -F -q 'CAS-NO-MICRO-R23-LAUNCH-ARGS' src-tauri/src/admin/services/desktop/no_micro.rs
+          grep -F -q 'CAS-NO-MICRO-R23-AB-SHARED-PIPELINE' src-tauri/src/admin/handlers/no_micro.rs
+          grep -F -q 'process::prepare_codex_alternate_launch_args()' src-tauri/src/admin/handlers/no_micro.rs
 
       - name: Resolve visible compat version
         id: compat-version
@@ -197,7 +209,8 @@ jobs:
           grep -R -F -q 'Grok MCP / Tools' frontend/dist
           grep -R -F -q "Sub2API Grok Compat r${REVISION}" frontend/dist
           grep -R -F -q "v${APP_VERSION}" frontend/dist
-          echo "Verified bundle contains Grok controls + r${REVISION} + v${APP_VERSION}"
+          grep -R -F -q 'No Micro' frontend/dist
+          echo "Verified bundle contains Grok controls + No Micro + r${REVISION} + v${APP_VERSION}"
 
       - name: Test local proxy gateway auth
         run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture

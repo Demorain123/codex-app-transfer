@@ -8,7 +8,7 @@ import McpPanel from '@/components/codex/McpPanel.vue'
 import ConversationsPanel from '@/components/codex/ConversationsPanel.vue'
 
 type Tab = 'agents' | 'memories' | 'skills' | 'mcp' | 'conversations'
-const TABS: Tab[] = ['agents', 'memories', 'skills', 'mcp', 'conversations']
+const allowedTabs: Tab[] = ['agents', 'memories', 'skills', 'mcp', 'conversations']
 
 const route = useRoute()
 const router = useRouter()
@@ -25,7 +25,7 @@ const tabOptions = computed<{ value: Tab; label: string }[]>(() => [
 const tab = computed<Tab>({
   get() {
     const q = route.query.tab as Tab | undefined
-    return q && TABS.includes(q) ? q : 'agents'
+    return q && allowedTabs.includes(q) ? q : 'agents'
   },
   set(v) {
     router.replace({ query: { ...route.query, tab: v } })
@@ -45,7 +45,7 @@ const tab = computed<Tab>({
       <ManagedMarkdownPanel v-else-if="tab === 'memories'" key="memories" resource="memories" />
       <ManagedMarkdownPanel v-else-if="tab === 'skills'" key="skills" resource="skills" />
       <McpPanel v-else-if="tab === 'mcp'" key="mcp" />
-      <ConversationsPanel v-else key="conversations" />
+      <ConversationsPanel v-else-if="tab === 'conversations'" key="conversations" />
     </KeepAlive>
   </div>
 </template>

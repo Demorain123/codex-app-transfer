@@ -1004,20 +1004,37 @@ fn open_codex_app(platform: &str) -> Result<(), String> {
         .map_err(|e| format!("cannot launch Codex App: {e}"))
 }
 
-pub fn launch_codex_app_restart(platform: &str) -> Result<(), String> {
+// CAS-NO-MICRO-R23-SHARED-RESTART-PIPELINE
+// CAS-NO-MICRO-R23-LEGACY-RESTART-PRESERVED
+/// Prepare the launch-time state/arguments for an alternate final launcher such as No Micro.
+/// This mirrors the state work performed by `open_codex_app` without changing that proven
+/// legacy function itself. The normal Restart button therefore keeps byte-for-byte behavior.
+pub fn prepare_codex_alternate_launch_args() -> Vec<String> {
+    sync_codex_pet_state();
+    sync_codex_reasoning_efforts_state();
+    should_attach_debug_port()
+}
+
+/// Shared maintenance slot: exact legacy lock + quit + reap/grace sequence, with only the final
+/// launcher supplied by the caller. The legacy Restart path calls `open_codex_app` unchanged;
+/// No Micro uses the same closed/reaped slot and then launches through its inspector hook.
+pub fn launch_codex_app_restart_with<T, F>(platform: &str, launcher: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
     let _guard = CODEX_MAINTENANCE_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let was_running = is_codex_app_running(platform);
     quit_codex_app_with_retries(platform)?;
-    // 退出确认后给 launchd 一段 grace 让它 reap 完旧进程,LaunchServices 才会
-    // 把"Codex 在运行"的缓存清掉。否则紧跟的 `open -a` 会被当成 activate
-    // 一个不存在的实例,啥也不发生(2026-05-06 现场实测)。
-    // 跳过条件:本来就没在运行,根本不需要等。
     if was_running {
         std::thread::sleep(POST_QUIT_LAUNCHD_GRACE);
     }
-    open_codex_app(platform)
+    launcher()
+}
+
+pub fn launch_codex_app_restart(platform: &str) -> Result<(), String> {
+    launch_codex_app_restart_with(platform, || open_codex_app(platform))
 }
 
 /// [CAT-255] **关闭 Codex.app → 跑 `work`(必须 Codex 关闭时做的维护,如就地改它独占的

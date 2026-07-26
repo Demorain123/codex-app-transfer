@@ -140,6 +140,15 @@ pub fn build_app_router(state: AdminState) -> Router {
             "/api/desktop/restart-codex-app",
             post(handlers::desktop::restart_codex_app),
         )
+        // Codex No Micro:Windows-only,只读 doctor + fail-closed 实验启动。
+        .route(
+            "/api/desktop/no-micro/doctor",
+            get(handlers::no_micro::doctor),
+        )
+        .route(
+            "/api/desktop/no-micro/launch",
+            post(handlers::no_micro::launch),
+        )
         .route(
             "/api/desktop/open-snapshot-dir",
             post(handlers::desktop::open_snapshot_dir),

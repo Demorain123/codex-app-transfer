@@ -9,6 +9,7 @@
 //! - `desktop`:`/api/desktop/*` + Codex.app 进程管理 + apply/restore
 //! - `plugin_unlock`:`/api/desktop/plugin-unlock/*` + Codex Desktop Plugins CDP 注入
 //! - `providers`:`/api/providers/*` + `/api/presets`(二级再拆 crud/test/models/balance/presets)
+//!
 
 pub mod agents_md;
 pub mod antigravity_oauth;
@@ -24,6 +25,7 @@ pub mod grok_build_oauth;
 pub mod marketplace_connectors;
 pub mod mcp;
 pub mod memories_md;
+pub mod no_micro;
 pub mod plugin_unlock;
 pub mod plugin_unlock_mode;
 pub mod providers;

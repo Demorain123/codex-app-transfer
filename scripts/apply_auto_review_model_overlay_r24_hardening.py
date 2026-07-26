@@ -57,6 +57,65 @@ def harden_generated_non_windows_path(path: Path) -> None:
     raise SystemExit("r24 hardening semantic check failed: generated non-Windows path normalization")
 
 
+def harden_apply_test_fixtures(path: Path) -> None:
+    """Keep historical ApplyConfig test literals compiling as fields are added.
+
+    This intentionally touches only the #[cfg(test)] module. Production callers are
+    wired explicitly elsewhere. Old tests inherit legacy behavior: no per-model Auto
+    Review override and no external-catalog preservation.
+    """
+    text = path.read_text(encoding="utf-8")
+    marker = "#[cfg(test)]\nmod tests {"
+    if marker not in text:
+        raise SystemExit("r24 hardening: apply.rs test module marker missing")
+    prefix, tests = text.split(marker, 1)
+    apply_config_count = tests.count("&ApplyConfig {")
+    if apply_config_count == 0:
+        raise SystemExit("r24 hardening: no ApplyConfig test fixtures found")
+
+    lines = tests.splitlines(keepends=True)
+    out: list[str] = []
+    inserted_auto = 0
+    inserted_preserve = 0
+    for index, line in enumerate(lines):
+        out.append(line)
+        stripped = line.strip()
+        indent = line[: len(line) - len(line.lstrip())]
+        next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+        if stripped.startswith("review_model_slot:") and not next_line.startswith(
+            "auto_review_model_overrides:"
+        ):
+            out.append(f"{indent}auto_review_model_overrides: None,\n")
+            inserted_auto += 1
+        if stripped.startswith("preserve_chatgpt_auth:") and not next_line.startswith(
+            "preserve_external_model_catalog:"
+        ):
+            out.append(f"{indent}preserve_external_model_catalog: false,\n")
+            inserted_preserve += 1
+
+    hardened_tests = "".join(out)
+    # Every ApplyConfig test literal in this module is expected to carry both defaults.
+    # Count only the exact fixture defaults to fail closed if upstream introduces a
+    # structurally different initializer that this compatibility pass did not understand.
+    auto_count = hardened_tests.count("auto_review_model_overrides: None,")
+    preserve_count = hardened_tests.count("preserve_external_model_catalog: false,")
+    if auto_count < apply_config_count or preserve_count < apply_config_count:
+        raise SystemExit(
+            "r24 hardening: ApplyConfig fixture coverage incomplete "
+            f"(fixtures={apply_config_count}, auto={auto_count}, preserve={preserve_count})"
+        )
+
+    hardened = prefix + marker + hardened_tests
+    if hardened != text:
+        path.write_text(hardened, encoding="utf-8")
+        print(
+            "r24 ApplyConfig test fixtures: hardened "
+            f"(auto +{inserted_auto}, preserve +{inserted_preserve})"
+        )
+    else:
+        print("r24 ApplyConfig test fixtures: already hardened")
+
+
 # 0. Make generator replay-safe after generated files have been materialized/rustfmt'd.
 # Exact old anchors are still required for mutation. Semantic markers are only used
 # to prove that a particular patch is already present, so genuine source drift fails closed.
@@ -210,5 +269,9 @@ if apply_path.exists():
         print("r24 snapshot ordering: hardened")
     else:
         print("r24 snapshot ordering: preflight (generated block not present yet)")
+
+    # 5. r24/r6 added ApplyConfig fields must also be represented in historical
+    # unit-test struct literals. Keep this compatibility-only and test-scoped.
+    harden_apply_test_fixtures(apply_path)
 
 print("r24 auto-review hardening complete")

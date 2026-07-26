@@ -103,6 +103,9 @@ pub struct ApplyConfig<'a> {
     /// 改走现有 `openai_base_url` 根键路径。
     #[serde(default)]
     pub preserve_chatgpt_auth: bool,
+    /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user-owned model_catalog_json.
+    #[serde(default)]
+    pub preserve_external_model_catalog: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -240,7 +243,38 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         cfg.review_model_slot,
         cfg.is_qoder,
     );
-    if models.is_empty() {
+
+    // CAS-SUB2API-GROK-COMPAT-HOOK: preserve a user-owned external catalog.
+    let preserve_external_model_catalog = if cfg.preserve_external_model_catalog {
+        let transfer_catalog = paths
+            .model_catalog_json
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
+        std::fs::read_to_string(&paths.config_toml)
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .take_while(|line| !line.trim_start().starts_with('['))
+                    .find_map(|line| {
+                        crate::residual::parse_root_string_value(
+                            line.trim_start(),
+                            CODEX_MODEL_CATALOG_KEY,
+                        )
+                    })
+            })
+            .is_some_and(|configured| {
+                let configured = configured.replace('\\', "/").to_ascii_lowercase();
+                !configured.trim().is_empty() && configured != transfer_catalog
+            })
+    } else {
+        false
+    };
+
+    if preserve_external_model_catalog {
+        // External catalog is authoritative: keep its path and model_context_window.
+    } else if models.is_empty() {
         // [MOC-234] responses passthrough provider 允许**留空默认模型**(UI 如此 ——
         // model 原样透传给原生上游),此时 catalog models 为空。**绝不写 `models:[]`
         // 覆盖 Codex 内置目录** —— 否则用户按 passthrough 流程配置后,Codex 模型选择器
@@ -339,7 +373,7 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         auth_json_path: paths.auth_json.display().to_string(),
         snapshot_taken: snapshot_taken_now,
         model_context_window_set: cfg.supports_1m && !models.is_empty(),
-        model_catalog_json_set: !models.is_empty(),
+        model_catalog_json_set: preserve_external_model_catalog || !models.is_empty(),
     })
 }
 

@@ -1,5 +1,12 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
+  "compat.buildBadge": "Sub2API Grok Compat r20 · v2.4.5+20",
+  "providerForm.grokCompatSection": "Sub2API · Grok 兼容",
+  "providerForm.grokCompat": "Grok MCP / Tools 兼容",
+  "providerForm.grokCompatHint": "仅对 grok-* 的 Responses 请求启用 Codex custom / namespace / tool_search 兼容；Luna / GPT 保持原生直透。",
+  "providerForm.grokFreeCacheCompat": "Grok Free 缓存兼容",
+  "providerForm.grokFreeCacheCompatHint": "适合实际为 Grok Free、但 Sub2API 没显示 Free 标签的账号：保留 prompt_cache_key，并补 web_search / x_search 争取进入可缓存路由。",
+  "providerForm.grokFreeCacheCompatWarning": "此模式可能改变 Grok 的 auto 工具选择。启用后请在 Sub2API 用量中用 cache_read_tokens / 蓝色缓存数字验证命中。",
   "pluginUnlock.disconnected": "未运行",
   "pluginUnlock.connecting": "连接中…",
   "pluginUnlock.connected": "已连接,等待注入",

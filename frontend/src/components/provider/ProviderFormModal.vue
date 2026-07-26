@@ -11,6 +11,7 @@ import AppInput from '@/components/ui/AppInput.vue'
 import AppCombobox from '@/components/ui/AppCombobox.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
+import Sub2ApiGrokCompatControls from '@/components/provider/Sub2ApiGrokCompatControls.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import IconEye from '~icons/lucide/eye'
 import IconEyeOff from '~icons/lucide/eye-off'
@@ -114,6 +115,8 @@ const form = reactive({
   modelCapabilities: '',
   requestOptions: '',
   grokSso: '',
+  sub2apiGrokCompat: false,
+  sub2apiGrokFreeCacheCompat: false,
 })
 const saving = ref(false)
 const error = ref('')
@@ -280,6 +283,8 @@ async function onTestConnection() {
       authScheme: form.authScheme,
       models,
       extraHeaders: extraHeaders as Record<string, string> | undefined,
+      sub2apiGrokCompat: form.sub2apiGrokCompat,
+      sub2apiGrokFreeCacheCompat: form.sub2apiGrokFreeCacheCompat,
     }
     const res = await providersApi.testProvider(draft)
     toast(res.message ?? '', res.ok ? 'info' : 'error')
@@ -308,6 +313,8 @@ function resetToCustom() {
   form.extraHeaders = ''
   form.modelCapabilities = ''
   form.requestOptions = ''
+  form.sub2apiGrokCompat = false
+  form.sub2apiGrokFreeCacheCompat = false
   availableModels.value = []
 }
 
@@ -342,6 +349,8 @@ function applyPreset(p: Preset) {
   form.extraHeaders = stringifyIfAny(p.extraHeaders)
   form.modelCapabilities = stringifyIfAny(p.modelCapabilities)
   form.requestOptions = stringifyIfAny(p.requestOptions as Record<string, unknown> | undefined)
+  form.sub2apiGrokCompat = false
+  form.sub2apiGrokFreeCacheCompat = false
   // 该上游若之前抓过模型, 带出缓存清单, 否则清空待用户「获取模型」
   availableModels.value = []
   loadCachedModels(form.baseUrl)
@@ -466,6 +475,8 @@ onMounted(async () => {
   form.extraHeaders = stringifyIfAny(p.extraHeaders)
   form.modelCapabilities = stringifyIfAny(p.modelCapabilities)
   form.requestOptions = stringifyIfAny(p.requestOptions)
+  form.sub2apiGrokCompat = !!p.sub2apiGrokCompat
+  form.sub2apiGrokFreeCacheCompat = !!p.sub2apiGrokFreeCacheCompat
   // 该上游之前抓过模型 → 带出本地缓存清单, 无需重新「获取模型」即可切换映射
   loadCachedModels(form.baseUrl)
   loadMsgFiltered(form.baseUrl)
@@ -522,6 +533,8 @@ async function save() {
     extraHeaders: extraHeaders as Record<string, string> | undefined,
     modelCapabilities,
     requestOptions,
+    sub2apiGrokCompat: form.sub2apiGrokCompat,
+    sub2apiGrokFreeCacheCompat: form.sub2apiGrokFreeCacheCompat,
   }
   // grok-web:粘贴的 SSO cookie 封进 grokWeb.cookies.sso(留空=编辑时保持原值)
   if (isGrokWeb.value && form.grokSso.trim()) {
@@ -618,6 +631,12 @@ async function save() {
       <SettingsRow v-if="isCustomProvider" :title="t('providerForm.authScheme')">
         <SegmentedControl v-model="form.authScheme" :options="authOptions" />
       </SettingsRow>
+
+      <Sub2ApiGrokCompatControls
+        v-if="form.apiFormat === 'responses'"
+        v-model:enabled="form.sub2apiGrokCompat"
+        v-model:cache-enabled="form.sub2apiGrokFreeCacheCompat"
+      />
 
       <div class="pf__section-row">
         <span class="pf__section">{{ t('providerForm.modelMapSection') }}</span>

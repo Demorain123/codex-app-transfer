@@ -1,0 +1,225 @@
+name: Apply Sub2API Grok Compat
+
+on:
+  push:
+    branches:
+      - sub2api-grok-compat
+      - 'sub2api-grok-compat-next-*'
+  pull_request:
+    branches:
+      - main
+      - sub2api-grok-compat
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
+      - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
+      - 'scripts/apply_sub2api_grok_terminal_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
+      - 'scripts/apply_sub2api_openai_codex_identity.py'
+      - 'scripts/apply_sub2api_subagent_retry_diag.py'
+      - 'scripts/apply_sub2api_stream_retry_diag.py'
+      - 'scripts/apply_sub2api_mcp_relay_diag.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'scripts/migrate_sub2api_grok_ui_to_overlay.py'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - '.github/workflows/apply-sub2api-grok-compat.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[compat-generated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Apply Responses compat overlay
+        shell: bash
+        run: |
+          if test -f crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            && grep -q 'CAS-SUB2API-GROK-COMPAT-HOOK' crates/adapters/src/mapper/responses.rs \
+            && grep -q 'mod sub2api_grok_compat' crates/adapters/src/mapper/mod.rs; then
+            echo 'Thin Responses compat overlay is already generated; validating existing source.'
+          else
+            python3 scripts/apply_sub2api_grok_compat.py
+          fi
+
+      - name: Apply UI/provider and Codex-config compat overlay
+        run: python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+
+      - name: Apply local gateway auth compat overlay
+        run: python3 scripts/apply_sub2api_grok_gateway_auth.py
+
+      - name: Apply Grok replay and tool_search compat overlay
+        run: python3 scripts/apply_sub2api_grok_replay_compat.py
+
+      - name: Apply Grok apply_patch r14 bootstrap overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
+
+      - name: Apply Grok terminal completion compat overlay
+        run: python3 scripts/apply_sub2api_grok_terminal_compat.py
+
+      - name: Apply Grok apply_patch r16 structural recovery overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
+
+      - name: Apply Grok apply_patch r17 hardening overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
+
+      - name: Apply Grok apply_patch r17 self-review overlay
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
+
+      - name: Apply Grok apply_patch r17 raw-V4A preservation review
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
+
+      - name: Apply Sub2API OpenAI official-Codex identity overlay
+        run: python3 scripts/apply_sub2api_openai_codex_identity.py
+
+      - name: Apply parent/child retry diagnostic overlay
+        run: python3 scripts/apply_sub2api_subagent_retry_diag.py
+
+      - name: Apply r19 stream retry diagnostic overlay
+        run: python3 scripts/apply_sub2api_stream_retry_diag.py
+
+      - name: Apply r20 MCP relay diagnostic overlay
+        run: python3 scripts/apply_sub2api_mcp_relay_diag.py
+
+      - name: Apply compat revision and visible build identity
+        run: python3 scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Build frontend (TypeScript + Vite)
+        run: npm --prefix frontend run build
+
+      - name: Check config integration library
+        run: cargo check -p codex-app-transfer-codex-integration --lib
+
+      - name: Test local proxy gateway auth
+        run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
+
+      - name: Test all adapter regressions
+        shell: bash
+        run: |
+          set +e
+          cargo test -p codex-app-transfer-adapters --lib -- --nocapture > /tmp/adapter-tests.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            tail -n 220 /tmp/adapter-tests.log > adapter-regression-failure.txt
+            echo '::group::Adapter regression failure tail'
+            cat adapter-regression-failure.txt
+            echo '::endgroup::'
+            exit "$rc"
+          fi
+          grep -E 'test result:|running [0-9]+ tests' /tmp/adapter-tests.log | tail -n 20 || true
+
+      - name: Upload adapter failure diagnostic
+        if: failure() && hashFiles('adapter-regression-failure.txt') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-regression-failure
+          path: adapter-regression-failure.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Show generated diff
+        if: always()
+        shell: bash
+        run: |
+          git status --short
+          git diff -- \
+            Cargo.lock \
+            src-tauri/Cargo.toml \
+            crates/adapters/src/mapper/mod.rs \
+            crates/adapters/src/mapper/responses.rs \
+            crates/adapters/src/mapper/grok_build.rs \
+            crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/adapters/src/responses/converter.rs \
+            crates/adapters/src/responses/grok_tool_shim.rs \
+            crates/adapters/src/responses/request/tools.rs \
+            crates/codex_integration/src/apply.rs \
+            crates/proxy/src/resolver.rs \
+            crates/proxy/src/forward.rs \
+            src-tauri/src/admin/services/desktop/snapshot.rs \
+            src-tauri/src/admin/handlers/providers/crud.rs \
+            src-tauri/tauri.conf.json \
+            frontend/src/api/types.ts \
+            frontend/src/api/providers.ts \
+            frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
+            frontend/src/layout/TopTabBar.vue \
+            frontend/src/layout/AppLayout.vue \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts \
+            SUB2API_GROK_COMPAT_VERSION.txt || true
+
+      - name: Commit generated source changes
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          untracked_overlay="$(git ls-files --others --exclude-standard \
+            crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
+            SUB2API_GROK_COMPAT_VERSION.txt)"
+          if git diff --quiet && test -z "$untracked_overlay"; then
+            echo 'No generated changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Cargo.lock \
+            src-tauri/Cargo.toml \
+            crates/adapters/src/mapper/mod.rs \
+            crates/adapters/src/mapper/responses.rs \
+            crates/adapters/src/mapper/grok_build.rs \
+            crates/adapters/src/mapper/sub2api_grok_compat.rs \
+            crates/adapters/src/responses/converter.rs \
+            crates/adapters/src/responses/grok_tool_shim.rs \
+            crates/adapters/src/responses/request/tools.rs \
+            crates/codex_integration/src/apply.rs \
+            crates/proxy/src/resolver.rs \
+            crates/proxy/src/forward.rs \
+            src-tauri/src/admin/services/desktop/snapshot.rs \
+            src-tauri/src/admin/handlers/providers/crud.rs \
+            src-tauri/tauri.conf.json \
+            frontend/src/api/types.ts \
+            frontend/src/api/providers.ts \
+            frontend/src/components/provider/ProviderFormModal.vue \
+            frontend/src/components/provider/Sub2ApiGrokCompatControls.vue \
+            frontend/src/layout/TopTabBar.vue \
+            frontend/src/layout/AppLayout.vue \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts \
+            SUB2API_GROK_COMPAT_VERSION.txt
+          git commit -m 'refactor: apply Sub2API Grok compat revision [compat-generated]'
+          git push origin "HEAD:${GITHUB_REF_NAME}"

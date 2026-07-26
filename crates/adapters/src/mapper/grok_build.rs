@@ -348,21 +348,109 @@ fn normalize_grok_tool_choice(tc: &Value, orig_tools: &[Value]) -> Option<Value>
 /// 把一个 Responses 工具 `t` 适配成 grok 认的形态 push 进 `out`(原 body.tools[] 与 tool_search
 /// 发现的工具共用)。`function` 原样;`web_search` 剥 bare;`namespace` 摊平→function→flat;
 /// `custom`(apply_patch)/ `tool_search` 转 function(convert + reshape);`image_generation`/未知 drop。
+// CAS-SUB2API-GROK-REPLAY-SCHEMA-HOOK
+// Grok validates the *root* of every function parameter schema as an object.
+// Codex deferred/dynamic tools can legitimately expose a root anyOf/oneOf (for
+// example automation_update); those tools are often absent on turn 1 and are
+// replayed later inside tool_search_output. A fresh Grok thread therefore works
+// while an older/resumed one can fail before generation. Flatten only the root
+// union for the Grok wire. The local Codex executor remains authoritative for
+// validating the selected tool's real arguments.
+fn normalize_grok_function_tool_schema(mut tool: Value) -> Value {
+    if tool.get("type").and_then(Value::as_str) != Some("function") {
+        return tool;
+    }
+    let name = tool
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let current = tool.get("parameters").cloned().unwrap_or_else(|| json!({}));
+
+    let already_plain_object = current.as_object().is_some_and(|root| {
+        root.get("type").and_then(Value::as_str) == Some("object")
+            && !root.contains_key("anyOf")
+            && !root.contains_key("oneOf")
+    });
+    if already_plain_object {
+        return tool;
+    }
+
+    let mut flattened = current
+        .as_object()
+        .cloned()
+        .unwrap_or_else(serde_json::Map::new);
+    let mut properties = flattened
+        .remove("properties")
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_else(serde_json::Map::new);
+
+    // Merge every object-like branch's properties. Non-object branches are
+    // intentionally discarded at the Grok wire boundary; additionalProperties
+    // stays permissive so $ref-only or unusual branches are not accidentally
+    // made impossible.
+    for union_key in ["anyOf", "oneOf"] {
+        if let Some(Value::Array(branches)) = flattened.remove(union_key) {
+            for branch in branches {
+                if let Some(branch_obj) = branch.as_object() {
+                    if let Some(Value::Object(branch_props)) = branch_obj.get("properties") {
+                        for (key, value) in branch_props {
+                            properties
+                                .entry(key.clone())
+                                .or_insert_with(|| value.clone());
+                        }
+                    }
+                    // Preserve definitions referenced by merged properties.
+                    for defs_key in ["$defs", "definitions"] {
+                        if let Some(Value::Object(branch_defs)) = branch_obj.get(defs_key) {
+                            let defs = flattened
+                                .entry(defs_key.to_owned())
+                                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+                            if let Some(defs_obj) = defs.as_object_mut() {
+                                for (key, value) in branch_defs {
+                                    defs_obj.entry(key.clone()).or_insert_with(|| value.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    flattened.insert("type".into(), Value::String("object".into()));
+    flattened.insert("properties".into(), Value::Object(properties));
+    // A union's required sets are branch-specific. Combining them would make
+    // mutually exclusive modes impossible, so let Codex's real executor enforce
+    // the selected mode after the model calls the tool.
+    flattened.insert("required".into(), Value::Array(Vec::new()));
+    flattened.insert("additionalProperties".into(), Value::Bool(true));
+
+    if let Some(obj) = tool.as_object_mut() {
+        obj.insert("parameters".into(), Value::Object(flattened));
+    }
+    tracing::warn!(
+        target: "adapters::grok_tools",
+        tool = %name,
+        "normalized non-object/root-union function schema for Grok replay compatibility"
+    );
+    tool
+}
+
 fn push_grok_adapted_tool(t: &Value, provider: &Provider, out: &mut Vec<Value>) {
     match t.get("type").and_then(Value::as_str).unwrap_or("") {
-        // 已是 grok 兼容的 responses-flat function,原样保留。
-        "function" => out.push(t.clone()),
+        // 已是 responses-flat function,但 Grok 的 root schema 约束比 Codex 更窄。
+        "function" => out.push(normalize_grok_function_tool_schema(t.clone())),
         // web_search:grok 认 bare `{type:web_search}`,剥 Codex 的 external_web_access 等子字段。
         "web_search" | "web_search_preview" => out.push(json!({ "type": "web_search" })),
         // namespace(MCP 包):复用 chat 路径转换决策(摊平成 function),再 unwrap 回 flat。
         // custom(apply_patch freeform)/ tool_search:[MOC-301 / MOC-304] 同款请求侧转 function,
         // 响应侧由 grok passthrough 的 tool-call shim 把 grok 回的 `function_call` 重打包回 Codex 的
         // `custom_tool_call` / `tool_search_call`(见 `responses.rs::map_response` + `grok_tool_shim`)。
-        // - apply_patch:`{input:string}` schema + chat 友好 V4A 指引(convert 内特判)。
-        // - tool_search:透传 name/desc/params,让 grok 看到 deferred MCP/连接器 server 列表。
         "namespace" | "custom" | "tool_search" => {
             for ct in convert_responses_tool_to_chat_tool(t, Some(provider)) {
-                out.push(unwrap_chat_tool_to_responses_flat(ct));
+                let flat = unwrap_chat_tool_to_responses_flat(ct);
+                out.push(normalize_grok_function_tool_schema(flat));
             }
         }
         // image_generation / 未知:grok 无等价 → drop(支持度探索见 MOC-305)。
@@ -728,6 +816,52 @@ mod tests {
         let mut p = grok_provider();
         p.auth_scheme = "bearer".into();
         assert!(!responses_upstream_lacks_compaction(&p));
+    }
+
+    #[test]
+    fn replayed_root_union_function_schema_is_flattened_for_grok() {
+        let body = serde_json::to_vec(&json!({
+            "model": "grok-4.5",
+            "input": [{
+                "type": "tool_search_output",
+                "call_id": "search-1",
+                "tools": [{
+                    "type": "function",
+                    "name": "automation_update",
+                    "description": "update an automation",
+                    "parameters": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "mode": {"type": "string"},
+                                    "schedule": {"type": "string"}
+                                },
+                                "required": ["mode"]
+                            },
+                            {"type": "null"}
+                        ]
+                    }
+                }]
+            }],
+            "tools": []
+        }))
+        .unwrap();
+
+        let out = adapt_grok_build_request_body(&Bytes::from(body), &grok_provider())
+            .expect("discovered replay tool should be injected and normalized");
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        let tool = v["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|t| t["name"] == "automation_update"))
+            .expect("automation_update should be replayed into top-level tools");
+        let parameters = &tool["parameters"];
+        assert_eq!(parameters["type"], "object");
+        assert!(parameters.get("anyOf").is_none());
+        assert!(parameters.get("oneOf").is_none());
+        assert_eq!(parameters["required"], json!([]));
+        assert!(parameters["properties"].get("mode").is_some());
+        assert!(parameters["properties"].get("schedule").is_some());
     }
 
     #[test]

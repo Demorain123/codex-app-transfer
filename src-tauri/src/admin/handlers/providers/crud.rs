@@ -181,6 +181,14 @@ pub struct AddProviderInput {
     /// 回退复用主模型)。经 `Provider.extra` flatten 透传持久化为 `reviewModelSlot`。
     #[serde(rename = "reviewModelSlot")]
     pub review_model_slot: Option<String>,
+    /// Sub2API mixed-provider compatibility: only grok-* Responses requests use
+    /// the existing Grok custom/namespace/tool_search lowering + response shim.
+    #[serde(rename = "sub2apiGrokCompat")]
+    pub sub2api_grok_compat: Option<bool>,
+    /// Optional Grok Free cache-routing companion mode. Kept separate because it
+    /// may alter auto tool selection by appending native web_search/x_search.
+    #[serde(rename = "sub2apiGrokFreeCacheCompat")]
+    pub sub2api_grok_free_cache_compat: Option<bool>,
 }
 
 pub async fn add_provider(
@@ -302,6 +310,14 @@ pub async fn add_provider(
             "requestOptions".into(),
             input.request_options.clone().unwrap_or_else(|| json!({})),
         );
+        new_provider.insert(
+            "sub2apiGrokCompat".into(),
+            Value::Bool(input.sub2api_grok_compat.unwrap_or(false)),
+        );
+        new_provider.insert(
+            "sub2apiGrokFreeCacheCompat".into(),
+            Value::Bool(input.sub2api_grok_free_cache_compat.unwrap_or(false)),
+        );
         // [MOC-173] auto-review 审查模型槽位:trim 后非空才写入(空 → 不写 = 复用主模型)。
         if let Some(slot) = input
             .review_model_slot
@@ -413,6 +429,12 @@ pub async fn update_provider(
         }
         if let Some(opts) = input.request_options.clone() {
             updated.insert("requestOptions".into(), opts);
+        }
+        if let Some(enabled) = input.sub2api_grok_compat {
+            updated.insert("sub2apiGrokCompat".into(), Value::Bool(enabled));
+        }
+        if let Some(enabled) = input.sub2api_grok_free_cache_compat {
+            updated.insert("sub2apiGrokFreeCacheCompat".into(), Value::Bool(enabled));
         }
         // [MOC-173] auto-review 审查模型槽位:非空 insert,空字符串 = 用户清除 → remove(复用主模型)。
         if let Some(slot) = input.review_model_slot.clone() {

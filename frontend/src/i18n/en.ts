@@ -1,5 +1,12 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
+  "compat.buildBadge": "Sub2API Grok Compat r20 · v2.4.5+20",
+  "providerForm.grokCompatSection": "Sub2API · Grok Compatibility",
+  "providerForm.grokCompat": "Grok MCP / Tools compatibility",
+  "providerForm.grokCompatHint": "Enable Codex custom / namespace / tool_search compatibility only for grok-* Responses requests; Luna / GPT remain native passthrough.",
+  "providerForm.grokFreeCacheCompat": "Grok Free cache compatibility",
+  "providerForm.grokFreeCacheCompatHint": "For accounts that are actually Grok Free but are not labeled Free by Sub2API: preserve prompt_cache_key and add web_search / x_search to qualify for a cache-capable route.",
+  "providerForm.grokFreeCacheCompatWarning": "This mode may affect Grok auto tool selection. Verify it with cache_read_tokens / the blue cache value in Sub2API usage.",
   "pluginUnlock.disconnected": "Not running",
   "pluginUnlock.connecting": "Connecting…",
   "pluginUnlock.connected": "Connected, awaiting injection",

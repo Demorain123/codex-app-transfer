@@ -1,0 +1,296 @@
+name: Validate Sub2API Grok Overlay on Upstream
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat
+      - 'sub2api-grok-compat-next-*'
+    paths:
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
+      - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
+      - 'scripts/apply_sub2api_grok_terminal_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
+      - 'scripts/apply_sub2api_openai_codex_identity.py'
+      - 'scripts/apply_sub2api_subagent_retry_diag.py'
+      - 'scripts/apply_sub2api_stream_retry_diag.py'
+      - 'scripts/apply_sub2api_mcp_relay_diag.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
+      - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
+  pull_request:
+    branches:
+      - main
+      - sub2api-grok-compat
+    paths:
+      - 'scripts/apply_sub2api_grok_compat.py'
+      - 'scripts/sub2api_grok_compat_overlay.rs'
+      - 'scripts/apply_sub2api_grok_compat_ui.py'
+      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
+      - 'scripts/apply_sub2api_grok_gateway_auth.py'
+      - 'scripts/apply_sub2api_grok_replay_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
+      - 'scripts/apply_sub2api_grok_terminal_compat.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
+      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
+      - 'scripts/apply_sub2api_openai_codex_identity.py'
+      - 'scripts/apply_sub2api_subagent_retry_diag.py'
+      - 'scripts/apply_sub2api_stream_retry_diag.py'
+      - 'scripts/apply_sub2api_mcp_relay_diag.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt'
+      - '.github/workflows/validate-sub2api-grok-overlay-on-upstream.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pristine-upstream-overlay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Preserve complete overlay stack and reset to the exact pristine base
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/sub2api-grok-overlay-assets"
+          rm -rf "$tmp"
+          mkdir -p "$tmp"
+          overlay_assets=(
+            scripts/apply_sub2api_grok_compat.py
+            scripts/sub2api_grok_compat_overlay.rs
+            scripts/apply_sub2api_grok_compat_ui.py
+            scripts/apply_sub2api_grok_compat_ui_dispatch.py
+            scripts/apply_sub2api_grok_gateway_auth.py
+            scripts/apply_sub2api_grok_replay_compat.py
+            scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
+            scripts/apply_sub2api_grok_terminal_compat.py
+            scripts/apply_sub2api_grok_apply_patch_recovery.py
+            scripts/apply_sub2api_grok_apply_patch_hardening.py
+            scripts/apply_sub2api_grok_apply_patch_r17_review.py
+            scripts/apply_sub2api_grok_apply_patch_r17_review2.py
+            scripts/apply_sub2api_openai_codex_identity.py
+            scripts/apply_sub2api_subagent_retry_diag.py
+            scripts/apply_sub2api_stream_retry_diag.py
+            scripts/apply_sub2api_mcp_relay_diag.py
+            scripts/apply_sub2api_grok_compat_revision.py
+            SUB2API_GROK_COMPAT_REVISION.txt
+          )
+
+          echo '=== preserve overlay assets ==='
+          for asset in "${overlay_assets[@]}"; do
+            test -f "$asset" || { echo "::error::Missing overlay asset before reset: $asset"; exit 1; }
+            mkdir -p "$tmp/$(dirname "$asset")"
+            cp "$asset" "$tmp/$asset"
+            echo "preserved $asset"
+          done
+
+          base_sha=""
+          if test -f SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt; then
+            base_sha="$(sed -n '2p' SUB2API_GROK_COMPAT_UPSTREAM_BASE.txt | tr -d '\r' | xargs)"
+          fi
+          if test -z "$base_sha"; then
+            git fetch origin main
+            base_sha="$(git rev-parse origin/main)"
+          fi
+
+          echo "=== reset to pristine base: $base_sha ==="
+          git cat-file -e "${base_sha}^{commit}"
+          git reset --hard "$base_sha"
+          git clean -fdx
+
+          echo '=== restore overlay assets ==='
+          for asset in "${overlay_assets[@]}"; do
+            mkdir -p "$(dirname "$asset")"
+            cp "$tmp/$asset" "$asset"
+          done
+          echo "PRISTINE_BASE_SHA=$base_sha" >> "$GITHUB_ENV"
+
+      # Keep each layer as its own Actions step. When a future upstream change breaks one
+      # anchor, the workflow UI names the exact failing overlay instead of collapsing
+      # everything into the reset step.
+      - name: Apply Responses compat overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_compat.py
+
+      - name: Apply UI/provider compat overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+
+      - name: Apply local gateway auth overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_gateway_auth.py
+
+      - name: Apply Grok replay/tool_search overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_replay_compat.py
+
+      - name: Apply Grok apply_patch r14 bootstrap on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
+
+      - name: Apply Grok terminal completion overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_terminal_compat.py
+
+      - name: Apply Grok apply_patch r16 recovery on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
+
+      - name: Apply Grok apply_patch r17 hardening on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
+
+      - name: Apply Grok apply_patch r17 self-review on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
+
+      - name: Apply Grok apply_patch r17 raw-V4A review on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
+
+      - name: Apply OpenAI official-Codex identity overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_openai_codex_identity.py
+
+      - name: Apply parent/child retry diagnostic overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_subagent_retry_diag.py
+
+      - name: Apply r19 stream retry diagnostic overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_stream_retry_diag.py
+
+      - name: Apply r20 MCP relay diagnostic overlay on pristine upstream
+        run: python3 scripts/apply_sub2api_mcp_relay_diag.py
+
+      - name: Apply visible compat revision on pristine upstream
+        run: python3 scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Verify complete overlay markers after pristine application
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R14-BOOTSTRAP' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-RECOVERY-R16-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-ENVELOPE-REQUIRES-JSON-PROOF' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-TERMINAL-NAME-MATCH' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-PRESERVE-RAW-V4A' crates/adapters/src/responses/grok_tool_shim.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PRIVACY' crates/adapters/src/responses/converter.rs
+          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT' crates/adapters/src/responses/request/tools.rs
+          grep -F -q 'CAS-SUB2API-OPENAI-CODEX-IDENTITY-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-RETRY-RUNTIME-DIAG-R18-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-MCP-RELAY-DIAG-R20-HOOK' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-MCP-RELAY-DIAG-R20-RESOLVE' crates/proxy/src/forward.rs
+          echo "Pristine base SHA: $PRISTINE_BASE_SHA"
+          cat SUB2API_GROK_COMPAT_VERSION.txt
+          git status --short
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: sub2api-overlay-pristine-upstream
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Format and verify complete overlay idempotence
+        shell: bash
+        run: |
+          log="$GITHUB_WORKSPACE/overlay-idempotence.log"
+          rm -f "$GITHUB_WORKSPACE/overlay-idempotence.diff"
+          set +e
+          (
+            set -euo pipefail
+            apply_overlay() {
+              python3 scripts/apply_sub2api_grok_compat.py
+              python3 scripts/apply_sub2api_grok_compat_ui_dispatch.py
+              python3 scripts/apply_sub2api_grok_gateway_auth.py
+              python3 scripts/apply_sub2api_grok_replay_compat.py
+              python3 scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
+              python3 scripts/apply_sub2api_grok_terminal_compat.py
+              python3 scripts/apply_sub2api_grok_apply_patch_recovery.py
+              python3 scripts/apply_sub2api_grok_apply_patch_hardening.py
+              python3 scripts/apply_sub2api_grok_apply_patch_r17_review.py
+              python3 scripts/apply_sub2api_grok_apply_patch_r17_review2.py
+              python3 scripts/apply_sub2api_openai_codex_identity.py
+              python3 scripts/apply_sub2api_subagent_retry_diag.py
+              python3 scripts/apply_sub2api_stream_retry_diag.py
+              python3 scripts/apply_sub2api_mcp_relay_diag.py
+              python3 scripts/apply_sub2api_grok_compat_revision.py
+            }
+
+            echo '=== first application: rustfmt + diff ==='
+            cargo fmt --all
+            git diff --check
+            git diff --binary > /tmp/overlay-first.diff
+
+            echo '=== second complete overlay application ==='
+            apply_overlay
+            cargo fmt --all
+            git diff --check
+            git diff --binary > /tmp/overlay-second.diff
+
+            echo '=== compare ==='
+            if ! cmp -s /tmp/overlay-first.diff /tmp/overlay-second.diff; then
+              echo 'Complete overlay stack is not idempotent.'
+              {
+                echo '=== unified diff: first application vs second application ==='
+                diff -u /tmp/overlay-first.diff /tmp/overlay-second.diff || true
+                echo
+                echo '=== git status after second application ==='
+                git status --short
+                echo
+                echo '=== git diff --stat after second application ==='
+                git diff --stat
+              } > "$GITHUB_WORKSPACE/overlay-idempotence.diff"
+              exit 1
+            fi
+            echo 'Complete overlay stack is idempotent after rustfmt.'
+          ) > "$log" 2>&1
+          rc=$?
+          set -e
+          cat "$log"
+          exit "$rc"
+
+      - name: Upload overlay idempotence diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-idempotence-failure
+          path: |
+            overlay-idempotence.log
+            overlay-idempotence.diff
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Build frontend from pristine upstream + complete overlay
+        shell: bash
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+
+      - name: Test local proxy gateway auth from pristine upstream + complete overlay
+        run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
+
+      - name: Check config integration library from pristine upstream + complete overlay
+        run: cargo check -p codex-app-transfer-codex-integration --lib
+
+      - name: Test all adapter regressions from pristine upstream + complete overlay
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture

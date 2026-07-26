@@ -22,6 +22,8 @@ export interface Provider {
   extraHeaders: Record<string, string>
   modelCapabilities: Record<string, unknown>
   requestOptions: Record<string, unknown>
+  sub2apiGrokCompat?: boolean
+  sub2apiGrokFreeCacheCompat?: boolean
   default: boolean
   isBuiltin: boolean
   reviewModelSlot: string
@@ -61,6 +63,8 @@ export interface ProviderPayload {
   extraHeaders?: Record<string, string>
   modelCapabilities?: Record<string, unknown>
   requestOptions?: Record<string, unknown>
+  sub2apiGrokCompat?: boolean
+  sub2apiGrokFreeCacheCompat?: boolean
   reviewModelSlot?: string | null
   grokWeb?: unknown
 }

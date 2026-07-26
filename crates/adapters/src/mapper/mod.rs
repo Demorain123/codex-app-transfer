@@ -12,6 +12,8 @@ pub(crate) mod grok_build;
 pub(crate) mod grok_web;
 // [MOC-234] responses ↔ responses 1:1 直透 mapper(原生 Responses 上游纳入统一框架)。
 pub(crate) mod responses;
+// CAS-SUB2API-GROK-COMPAT-HOOK
+pub(crate) mod sub2api_grok_compat;
 
 /// Request 侧协议映射器统一接口。
 pub(crate) trait RequestMapper {

@@ -37,6 +37,7 @@ const tabs: Tab[] = [
         <span class="tab__label">{{ t(tab.key) }}</span>
       </RouterLink>
     </nav>
+    <div class="compat-build-badge">{{ t('compat.buildBadge') }}</div>
   </header>
 </template>
 
@@ -48,6 +49,18 @@ const tabs: Tab[] = [
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+.compat-build-badge {
+  width: max-content;
+  margin: 2px auto 0;
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
 }
 .tabbar {
   display: flex;

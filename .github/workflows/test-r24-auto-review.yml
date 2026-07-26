@@ -130,6 +130,21 @@ jobs:
       - name: Check Codex integration crate
         run: cargo check -p codex-app-transfer-codex-integration --lib
 
+      - name: Install Tauri Linux system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: Run Tauri backend compile diagnostic
         id: backend
         shell: bash

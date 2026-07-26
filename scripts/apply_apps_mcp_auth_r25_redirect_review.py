@@ -10,7 +10,7 @@ forward = (ROOT / "crates/proxy/src/forward.rs").read_text(encoding="utf-8")
 # redirect boundary introduced by r25.
 required = [
     "CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER",
-    "CAS-APPS-MCP-AUTH-R25-REDIRECT",
+    "CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD",
     'origin.scheme() == "https"',
     'origin.host_str() == Some("chatgpt.com")',
     'next.scheme() == "https"',

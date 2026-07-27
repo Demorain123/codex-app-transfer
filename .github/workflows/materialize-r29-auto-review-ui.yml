@@ -143,6 +143,7 @@ jobs:
           git diff --check
 
       - name: Prove r29 overlay replay idempotence after rustfmt
+        id: replay-idempotence
         shell: bash
         run: |
           set -euo pipefail
@@ -157,9 +158,30 @@ jobs:
           git diff --binary > "$RUNNER_TEMP/r29-second.diff"
           if ! cmp -s "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff"; then
             echo '::error::r29 complete overlay is not idempotent after rustfmt'
-            diff -u "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff" || true
+            diff -u "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff" > "$RUNNER_TEMP/r29-replay-diff.txt" || true
+            cat "$RUNNER_TEMP/r29-replay-diff.txt"
             exit 1
           fi
+
+      - name: Stage r29 replay-idempotence diagnostic
+        if: failure() && steps.replay-idempotence.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r29-replay-diag"
+          cp "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-replay-diag/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/r29-second.diff" "$RUNNER_TEMP/r29-replay-diag/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/r29-replay-diff.txt" "$RUNNER_TEMP/r29-replay-diag/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/r29-second-replay.log" "$RUNNER_TEMP/r29-replay-diag/" 2>/dev/null || true
+
+      - name: Upload r29 replay-idempotence diagnostic
+        if: failure() && steps.replay-idempotence.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r29-replay-idempotence-diagnostic
+          path: ${{ runner.temp }}/r29-replay-diag
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Commit generated r29 source on push
         if: github.event_name == 'push'

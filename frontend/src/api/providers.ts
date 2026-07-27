@@ -81,6 +81,7 @@ export function mapProvider(provider: Record<string, any>, activeId: string | nu
     default: provider.id === activeId,
     isBuiltin: !!provider.isBuiltin,
     reviewModelSlot: provider.reviewModelSlot || '',
+    autoReviewModelOverrides: provider.autoReviewModelOverrides || {}, // CAS-AUTO-REVIEW-R29-API-WIRE-READ
     mappings: {
       default: models.default || '',
       gpt_5_5: models.gpt_5_5 || '',
@@ -122,6 +123,10 @@ export function providerBody(payload: ProviderPayload, includeModels = true): Re
   if (includeModels) body.models = payload.models || {}
   if (payload.reviewModelSlot !== undefined && payload.reviewModelSlot !== null)
     body.reviewModelSlot = payload.reviewModelSlot
+  // CAS-AUTO-REVIEW-R29-API-WIRE-WRITE: preserve an explicit empty object so update can clear
+  // a previous override instead of confusing ‘clear’ with ‘field omitted’.
+  if (payload.autoReviewModelOverrides !== undefined)
+    body.autoReviewModelOverrides = payload.autoReviewModelOverrides
   if (payload.grokWeb) body.grokWeb = payload.grokWeb
   return body
 }
@@ -145,8 +150,16 @@ export async function getPresets(): Promise<Preset[]> {
 
 export const addProvider = (payload: ProviderPayload) =>
   api('POST', '/api/providers', providerBody(payload))
+export interface ProviderUpdateResp {
+  success?: boolean
+  provider?: Record<string, unknown>
+  autoReviewChanged?: boolean
+  autoReviewActiveProvider?: boolean
+  autoReviewApplied?: boolean
+  autoReviewApply?: { success?: boolean; message?: string; [key: string]: unknown }
+}
 export const updateProvider = (id: string, payload: ProviderPayload) =>
-  api('PUT', `/api/providers/${id}`, providerBody(payload))
+  api<ProviderUpdateResp>('PUT', `/api/providers/${id}`, providerBody(payload))
 export const deleteProvider = (id: string) => api('DELETE', `/api/providers/${id}`)
 export const reorderProviders = (providerIds: string[]) =>
   api('PUT', '/api/providers/reorder', { providerIds })

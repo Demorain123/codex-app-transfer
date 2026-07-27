@@ -70,7 +70,9 @@ fn source_from_meta(paths: &CodexPaths) -> Result<PathBuf, CodexError> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| CodexError::Other("auto-review overlay metadata has no source_path".into()))?;
+        .ok_or_else(|| {
+            CodexError::Other("auto-review overlay metadata has no source_path".into())
+        })?;
     Ok(PathBuf::from(source))
 }
 
@@ -107,14 +109,11 @@ fn normalized_overrides(value: Option<&Value>) -> Result<Vec<(String, String)>, 
     let mut out = Vec::with_capacity(map.len());
     for (main, reviewer) in map {
         let main = main.trim();
-        let reviewer = reviewer
-            .as_str()
-            .map(str::trim)
-            .ok_or_else(|| {
-                CodexError::Other(format!(
-                    "autoReviewModelOverrides[{main:?}] must be a string model slug"
-                ))
-            })?;
+        let reviewer = reviewer.as_str().map(str::trim).ok_or_else(|| {
+            CodexError::Other(format!(
+                "autoReviewModelOverrides[{main:?}] must be a string model slug"
+            ))
+        })?;
         if main.is_empty() || reviewer.is_empty() {
             return Err(CodexError::Other(
                 "autoReviewModelOverrides keys and reviewer slugs must be non-empty".into(),
@@ -251,11 +250,7 @@ mod tests {
         let source = seed_source(&paths);
         let before = std::fs::read(&source).unwrap();
 
-        apply_auto_review_overrides(
-            &paths,
-            Some(&json!({"grok-4.5": "gpt-5.6-luna"})),
-        )
-        .unwrap();
+        apply_auto_review_overrides(&paths, Some(&json!({"grok-4.5": "gpt-5.6-luna"}))).unwrap();
 
         assert_eq!(
             before,
@@ -286,11 +281,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let paths = CodexPaths::from_home_dir(temp.path());
         let source = seed_source(&paths);
-        apply_auto_review_overrides(
-            &paths,
-            Some(&json!({"grok-4.5": "gpt-5.6-luna"})),
-        )
-        .unwrap();
+        apply_auto_review_overrides(&paths, Some(&json!({"grok-4.5": "gpt-5.6-luna"}))).unwrap();
         restore_source_if_overlay_active(&paths).unwrap();
         assert_eq!(configured_catalog_path(&paths).unwrap().unwrap(), source);
     }
@@ -300,11 +291,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let paths = CodexPaths::from_home_dir(temp.path());
         let source = seed_source(&paths);
-        let err = apply_auto_review_overrides(
-            &paths,
-            Some(&json!({"grok-4.5": "does-not-exist"})),
-        )
-        .unwrap_err();
+        let err = apply_auto_review_overrides(&paths, Some(&json!({"grok-4.5": "does-not-exist"})))
+            .unwrap_err();
         assert!(err.to_string().contains("not present"));
         assert_eq!(configured_catalog_path(&paths).unwrap().unwrap(), source);
     }
@@ -326,6 +314,9 @@ mod tests {
         apply_auto_review_overrides(&paths, Some(&overrides)).unwrap();
         let overlay = codex_app_transfer_registry::load_raw_config(overlay_path(&paths)).unwrap();
         assert_eq!(overlay["source_revision"], "v2");
-        assert_eq!(overlay["models"][0]["auto_review_model_override"], "gpt-5.6-luna");
+        assert_eq!(
+            overlay["models"][0]["auto_review_model_override"],
+            "gpt-5.6-luna"
+        );
     }
 }

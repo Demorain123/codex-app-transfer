@@ -70,7 +70,23 @@ jobs:
         run: python3 scripts/apply_auto_review_effective_r29.py
 
       - name: Run deep r29 Auto Review self-review
-        run: python3 scripts/review_auto_review_ui_r29.py
+        id: deep-review
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/review_auto_review_ui_r29.py > "$RUNNER_TEMP/r29-deep-review.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/r29-deep-review.log"
+          exit $status
+
+      - name: Upload exact r29 deep-review diagnostic
+        if: failure() && steps.deep-review.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r29-deep-review-diagnostic
+          path: ${{ runner.temp }}/r29-deep-review.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Check materialized text and version markers
         shell: bash

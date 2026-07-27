@@ -42,6 +42,9 @@ run("scripts/apply_r30_hybrid_auto_review.py")
 # r24 exposes the COW API through the public auto_review_overlay module rather than crate-root
 # re-exports. Keep that API boundary intact and repair the generated import accordingly.
 run("scripts/apply_r30_catalog_import_fix.py")
+# Complete the lifecycle: refresh/rebase the shadow on Hybrid Direct gateway sync and restore only
+# Transfer's own source pointer when r28 intentionally skips the full CC Switch-owned snapshot restore.
+run("scripts/apply_r30_catalog_lifecycle.py")
 
 # r29 review is revision-agnostic and can run after r30 restamp; r30 review owns all cross-feature
 # and final visible-version assertions.
@@ -66,6 +69,9 @@ required = {
         "CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC",
         "CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY",
         "CAS-R30-AUTO-REVIEW-MODULE-IMPORT",
+        "CAS-R30-HYBRID-CATALOG-RESTORE-ONLY",
+        "CAS-R30-HYBRID-CATALOG-REFRESH",
+        "CAS-R30-HYBRID-CATALOG-EXIT-RESTORE",
     ],
     "src-tauri/src/admin/handlers/providers/crud.rs": ["CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH"],
 }
@@ -89,4 +95,4 @@ if lib_text.count(module_line) != 1:
         f"r30 requires exactly one r24 Auto Review module registration, found {lib_text.count(module_line)}"
     )
 
-print("r30 unified composition: COMPLETE (r24+r25+r26+r27+r28+r29+r30 bridge)")
+print("r30 unified composition: COMPLETE (r24+r25+r26+r27+r28+r29+r30 bridge+lifecycle)")

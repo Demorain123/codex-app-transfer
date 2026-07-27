@@ -46,6 +46,9 @@ jobs:
           python -m py_compile \
             scripts/apply_r30_unified.py \
             scripts/apply_r30_hybrid_auto_review.py \
+            scripts/apply_r30_catalog_import_fix.py \
+            scripts/apply_r30_catalog_lifecycle.py \
+            scripts/apply_r30_catalog_mutation_truth.py \
             scripts/review_r30_unified.py \
             scripts/apply_r28_hybrid_direct.py \
             scripts/apply_auto_review_ui_r29_hardening.py \
@@ -59,6 +62,9 @@ jobs:
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
           grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
           grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH' src-tauri/src/admin/handlers/providers/crud.rs
+          grep -F -q 'CAS-R30-HYBRID-CATALOG-REFRESH' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-HYBRID-CATALOG-EXIT-RESTORE' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-CATALOG-MUTATION-TRUTH' src-tauri/src/admin/services/desktop/snapshot.rs
           python scripts/review_r30_unified.py
 
       - name: Resolve r30 package version
@@ -125,14 +131,46 @@ jobs:
       - name: Recheck r26 subagent failure-chain regressions
         run: cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
 
+      - name: Compile complete r30 Windows app
+        id: msvc-check
+        shell: bash
+        run: |
+          set +e
+          cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc > "$RUNNER_TEMP/r30-msvc-check.log" 2>&1
+          status=$?
+          tail -n 250 "$RUNNER_TEMP/r30-msvc-check.log"
+          exit $status
+
+      - name: Upload r30 MSVC compile diagnostic
+        if: failure() && steps.msvc-check.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r30-msvc-compile-diagnostic
+          path: ${{ runner.temp }}/r30-msvc-check.log
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Recheck r27 proxy lifecycle regressions
-        run: cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+        id: r27-regression
+        shell: bash
+        run: |
+          set +e
+          cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture > "$RUNNER_TEMP/r30-r27-regression.log" 2>&1
+          status=$?
+          tail -n 250 "$RUNNER_TEMP/r30-r27-regression.log"
+          exit $status
+
+      - name: Upload r27 regression diagnostic
+        if: failure() && steps.r27-regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r30-r27-regression-diagnostic
+          path: ${{ runner.temp }}/r30-r27-regression.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Recheck r28 Hybrid Direct safety invariants
         run: cargo test -p codex-app-transfer hybrid_direct --target x86_64-pc-windows-msvc -- --nocapture
-
-      - name: Compile complete r30 Windows app
-        run: cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
 
       - name: Test adapter regressions
         run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture

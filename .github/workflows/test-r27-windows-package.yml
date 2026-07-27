@@ -14,6 +14,18 @@ on:
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - 'Cargo.lock'
       - '.github/workflows/test-r27-windows-package.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r25-apps-mcp-auth
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r27-windows-package.yml'
 
 permissions:
   contents: read
@@ -28,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5

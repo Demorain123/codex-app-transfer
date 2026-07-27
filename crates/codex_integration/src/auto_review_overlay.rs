@@ -76,6 +76,16 @@ fn source_from_meta(paths: &CodexPaths) -> Result<PathBuf, CodexError> {
     Ok(PathBuf::from(source))
 }
 
+/// CAS-R30-AUTO-REVIEW-OVERLAY-ACTIVE-PROBE
+/// Read-only state probe used by the r30 Hybrid Direct lifecycle telemetry. This intentionally
+/// reuses r24's private path normalization/ownership rules instead of duplicating Windows path
+/// comparison in the desktop layer.
+pub fn auto_review_overlay_active(paths: &CodexPaths) -> Result<bool, CodexError> {
+    Ok(configured_catalog_path(paths)?
+        .as_deref()
+        .is_some_and(|current| same_path(current, &overlay_path(paths))))
+}
+
 /// If a previous Apply left `model_catalog_json` pointing at our shadow, restore the
 /// user/Transfer source before normal catalog ownership detection runs.
 pub fn restore_source_if_overlay_active(paths: &CodexPaths) -> Result<(), CodexError> {

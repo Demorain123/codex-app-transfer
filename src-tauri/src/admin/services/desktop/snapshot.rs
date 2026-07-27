@@ -5,7 +5,7 @@ use std::sync::Arc;
 // not as crate-root re-exports. Import from the authoritative module so full MSVC compile catches
 // API drift without widening r24's public surface just for r30.
 use codex_app_transfer_codex_integration::auto_review_overlay::{
-    apply_auto_review_overrides, restore_source_if_overlay_active,
+    apply_auto_review_overrides, auto_review_overlay_active, restore_source_if_overlay_active,
 };
 use codex_app_transfer_codex_integration::{
     apply_provider, ensure_file_store_mode, has_snapshot, has_stale_active_snapshot,
@@ -410,11 +410,10 @@ pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) ->
         }
     };
 
-    // CAS-R30-CATALOG-MUTATION-TRUTH: restoring an old Transfer shadow pointer is itself a
-    // Codex config mutation, even when the new override map is empty. Track it separately from
-    // provider/auth ownership so diagnostics never claim zero mutation when model_catalog_json moved.
-    let source_restored = match restore_source_if_overlay_active(&paths) {
-        Ok(restored) => restored,
+    // CAS-R30-CATALOG-MUTATION-TRUTH: restore_source_if_overlay_active returns (), so detect
+    // whether our exact shadow is active *before* restore. The probe reuses r24's path normalization.
+    let source_restored = match auto_review_overlay_active(&paths) {
+        Ok(active) => active,
         Err(e) => {
             return json!({
                 "attempted": true,
@@ -423,10 +422,21 @@ pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) ->
                 "catalogOnly": true,
                 "providerAuthMutated": false,
                 "catalogMutated": false,
-                "message": format!("restore Auto Review source catalog failed: {e}"),
+                "message": format!("inspect Auto Review catalog state failed: {e}"),
             });
         }
     };
+    if let Err(e) = restore_source_if_overlay_active(&paths) {
+        return json!({
+            "attempted": true,
+            "success": false,
+            "mode": "hybrid_direct_catalog_only",
+            "catalogOnly": true,
+            "providerAuthMutated": false,
+            "catalogMutated": false,
+            "message": format!("restore Auto Review source catalog failed: {e}"),
+        });
+    }
     let catalog_applied = match apply_auto_review_overrides(&paths, Some(&overrides)) {
         Ok(applied) => applied,
         Err(e) => {
@@ -480,15 +490,28 @@ pub fn restore_auto_review_source_catalog_only() -> Value {
             })
         }
     };
+    let source_restored = match auto_review_overlay_active(&paths) {
+        Ok(active) => active,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "catalogMutated": false,
+                "message": format!("inspect Auto Review catalog state failed: {e}"),
+            })
+        }
+    };
     match restore_source_if_overlay_active(&paths) {
-        Ok(restored) => json!({
+        Ok(()) => json!({
             "attempted": true,
             "success": true,
             "catalogOnly": true,
-            "sourceRestored": restored,
-            "catalogMutated": restored,
+            "sourceRestored": source_restored,
+            "catalogMutated": source_restored,
             "providerAuthMutated": false,
-            "message": if restored {
+            "message": if source_restored {
                 "Transfer Auto Review source catalog restored"
             } else {
                 "Auto Review source restore not needed"

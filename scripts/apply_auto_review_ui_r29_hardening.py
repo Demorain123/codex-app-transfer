@@ -11,10 +11,12 @@ anchor_marker = "CAS-AUTO-REVIEW-UI-R29-UNIQUE-SUCCESS-ANCHOR"
 # The r27 fetchModels function has the same success toast in its normal and fallback branches.
 # Harden the generator to anchor the normal one together with the following catch boundary.
 if anchor_marker not in text:
+    # Match the generator source as it exists on disk: the original replacement strings do not
+    # themselves include a trailing \n. We replace that generator block with a contextual one.
     old = '''    parent = replace_once(
         parent,
-        "    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))\\n",
-        "    if (!silent) toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))\\n",
+        "    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))",
+        "    if (!silent) toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))",
         "silent fetch success toast",
     )
 '''
@@ -74,12 +76,12 @@ if suggest_marker not in text:
 
 GEN.write_text(text, encoding="utf-8")
 
-# Fail closed: both hardenings must be durable in the generator and the ambiguous old anchor gone.
+# Fail closed: both hardenings must be durable in the generator and the ambiguous old bare block gone.
 text = GEN.read_text(encoding="utf-8")
 for marker in (anchor_marker, suggest_marker):
     if marker not in text:
         raise SystemExit(f"r29 hardening marker missing after generator patch: {marker}")
-if '''        "    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))\\n",
+if '''        "    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))",
         "    if (!silent) toast''' in text:
     raise SystemExit("r29 ambiguous bare success-toast generator anchor still present")
 

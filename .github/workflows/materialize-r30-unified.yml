@@ -41,6 +41,7 @@ jobs:
           python -m py_compile \
             scripts/apply_r30_unified.py \
             scripts/apply_r30_hybrid_auto_review.py \
+            scripts/apply_r30_catalog_import_fix.py \
             scripts/review_r30_unified.py \
             scripts/apply_r28_hybrid_direct.py \
             scripts/apply_auto_review_ui_r29_hardening.py \
@@ -49,6 +50,7 @@ jobs:
             scripts/review_auto_review_ui_r29.py
 
       - name: Compose r24 through r30
+        id: compose
         shell: bash
         run: |
           set -euo pipefail
@@ -63,9 +65,19 @@ jobs:
           grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
           grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-AUTO-REVIEW-MODULE-IMPORT' src-tauri/src/admin/services/desktop/snapshot.rs
           grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH' src-tauri/src/admin/handlers/providers/crud.rs
           python scripts/review_r30_unified.py
           git diff --check
+
+      - name: Upload r30 composition diagnostic
+        if: failure() && steps.compose.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r30-compose-diagnostic
+          path: ${{ runner.temp }}/r30-compose.log
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/setup-node@v4
         with:

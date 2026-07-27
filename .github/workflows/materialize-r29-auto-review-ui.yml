@@ -36,11 +36,25 @@ jobs:
         run: |
           python -m py_compile \
             scripts/apply_r29_unified.py \
+            scripts/apply_auto_review_ui_r29_hardening.py \
             scripts/apply_auto_review_ui_r29.py \
             scripts/review_auto_review_ui_r29.py
 
-      - name: Materialize complete r29 from r27 unified
-        run: python scripts/apply_r29_unified.py
+      - name: Replay validated r27 unified base
+        run: python scripts/apply_r27_unified.py
+
+      - name: Restamp standard compat revision as r29
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '29\n' > SUB2API_GROK_COMPAT_REVISION.txt
+          python scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Harden r29 UI replay generator
+        run: python scripts/apply_auto_review_ui_r29_hardening.py
+
+      - name: Apply r29 provider-model UI overlay
+        run: python scripts/apply_auto_review_ui_r29.py
 
       - name: Run deep r29 UI self-review
         run: python scripts/review_auto_review_ui_r29.py
@@ -53,6 +67,7 @@ jobs:
           grep -F -q 'compat_revision=29' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'app_version=2.4.5+29' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-UI-R29-SILENT-NO-SUGGEST' frontend/src/components/provider/ProviderFormModal.vue
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29' frontend/src/components/provider/AutoReviewModelOverridesEditor.vue
           test "$(grep -F -c 'pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24' crates/codex_integration/src/lib.rs)" = "1"
 

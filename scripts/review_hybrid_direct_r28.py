@@ -83,13 +83,13 @@ settings = require(
 process = require(
     "src-tauri/src/admin/services/desktop/process.rs",
     "CAS-HYBRID-DIRECT-R28-CHAT-ENV-BLOCK",
-    '("CODEX_API_BASE_URL".into(),',
+    '"CODEX_API_BASE_URL".into(),',
 )
 chat_fn = process.index("fn chat_launch_env(")
 assert_before(
     process,
     "CAS-HYBRID-DIRECT-R28-CHAT-ENV-BLOCK",
-    '("CODEX_API_BASE_URL".into(),',
+    '"CODEX_API_BASE_URL".into(),',
     "real launch env injection",
     chat_fn,
 )

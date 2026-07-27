@@ -24,6 +24,11 @@ run("scripts/apply_r27_unified.py")
 # compat revision, then apply the UI overlay last so an r24 replay cannot resurrect the raw JSON UI.
 REVISION.write_text("29\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
+
+# Repair generator anchors before executing the UI overlay. This hardening script edits only the
+# replay generator itself and is idempotent; successful push materialization persists the hardened
+# generator so future fresh checkouts no longer depend on this repair doing work.
+run("scripts/apply_auto_review_ui_r29_hardening.py")
 run("scripts/apply_auto_review_ui_r29.py")
 run("scripts/review_auto_review_ui_r29.py")
 

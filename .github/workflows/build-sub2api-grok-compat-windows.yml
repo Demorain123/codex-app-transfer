@@ -10,27 +10,7 @@ on:
       - 'crates/**'
       - 'src-tauri/**'
       - 'frontend/**'
-      - 'scripts/apply_sub2api_grok_compat.py'
-      - 'scripts/sub2api_grok_compat_overlay.rs'
-      - 'scripts/apply_sub2api_grok_compat_ui.py'
-      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
-      - 'scripts/apply_sub2api_grok_gateway_auth.py'
-      - 'scripts/apply_sub2api_grok_replay_compat.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
-      - 'scripts/apply_sub2api_grok_terminal_compat.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
-      - 'scripts/apply_sub2api_openai_codex_identity.py'
-      - 'scripts/apply_sub2api_subagent_retry_diag.py'
-      - 'scripts/apply_sub2api_stream_retry_diag.py'
-      - 'scripts/apply_sub2api_mcp_relay_diag.py'
-      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
-      - 'scripts/apply_no_micro_r23_restart_review.py'
-      - 'scripts/apply_auto_review_model_overlay_r24.py'
-      - 'scripts/apply_auto_review_model_overlay_r24_hardening.py'
-      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'scripts/**'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
@@ -40,31 +20,12 @@ on:
     branches:
       - main
       - sub2api-grok-compat
+      - 'sub2api-grok-compat-next-*'
     paths:
       - 'crates/**'
       - 'src-tauri/**'
       - 'frontend/**'
-      - 'scripts/apply_sub2api_grok_compat.py'
-      - 'scripts/sub2api_grok_compat_overlay.rs'
-      - 'scripts/apply_sub2api_grok_compat_ui.py'
-      - 'scripts/apply_sub2api_grok_compat_ui_dispatch.py'
-      - 'scripts/apply_sub2api_grok_gateway_auth.py'
-      - 'scripts/apply_sub2api_grok_replay_compat.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py'
-      - 'scripts/apply_sub2api_grok_terminal_compat.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_recovery.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_hardening.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_r17_review.py'
-      - 'scripts/apply_sub2api_grok_apply_patch_r17_review2.py'
-      - 'scripts/apply_sub2api_openai_codex_identity.py'
-      - 'scripts/apply_sub2api_subagent_retry_diag.py'
-      - 'scripts/apply_sub2api_stream_retry_diag.py'
-      - 'scripts/apply_sub2api_mcp_relay_diag.py'
-      - 'scripts/apply_no_micro_r23_restart_pipeline.py'
-      - 'scripts/apply_no_micro_r23_restart_review.py'
-      - 'scripts/apply_auto_review_model_overlay_r24.py'
-      - 'scripts/apply_auto_review_model_overlay_r24_hardening.py'
-      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'scripts/**'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
       - '.github/workflows/build-sub2api-grok-compat-windows.yml'
@@ -80,6 +41,7 @@ env:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
         with:
@@ -94,23 +56,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/apply_sub2api_grok_compat.py
-          python scripts/apply_sub2api_grok_compat_ui_dispatch.py
-          python scripts/apply_sub2api_grok_gateway_auth.py
-          python scripts/apply_sub2api_grok_replay_compat.py
-          python scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
-          python scripts/apply_sub2api_grok_terminal_compat.py
-          python scripts/apply_sub2api_grok_apply_patch_recovery.py
-          python scripts/apply_sub2api_grok_apply_patch_hardening.py
-          python scripts/apply_sub2api_grok_apply_patch_r17_review.py
-          python scripts/apply_sub2api_grok_apply_patch_r17_review2.py
-          python scripts/apply_sub2api_openai_codex_identity.py
-          python scripts/apply_sub2api_subagent_retry_diag.py
-          python scripts/apply_sub2api_stream_retry_diag.py
-          python scripts/apply_sub2api_mcp_relay_diag.py
-          python scripts/apply_no_micro_r23_restart_pipeline.py
-          python scripts/apply_no_micro_r23_restart_review.py
-          python scripts/apply_sub2api_grok_compat_revision.py
+
+          # New revisions are composition layers. Prefer the highest composer present so
+          # production packaging cannot regress to the old r24/r25-only revision pipeline.
+          # Older branches keep the legacy explicit chain as a compatibility fallback.
+          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
+            echo 'Using r28 Hybrid Direct unified composer'
+            python scripts/apply_r28_hybrid_direct.py
+          elif [[ -f scripts/apply_r27_unified.py ]]; then
+            echo 'Using r27 unified composer'
+            python scripts/apply_r27_unified.py
+          else
+            echo 'Using legacy compat composer chain'
+            python scripts/apply_sub2api_grok_compat.py
+            python scripts/apply_sub2api_grok_compat_ui_dispatch.py
+            python scripts/apply_sub2api_grok_gateway_auth.py
+            python scripts/apply_sub2api_grok_replay_compat.py
+            python scripts/apply_sub2api_grok_apply_patch_r14_bootstrap.py
+            python scripts/apply_sub2api_grok_terminal_compat.py
+            python scripts/apply_sub2api_grok_apply_patch_recovery.py
+            python scripts/apply_sub2api_grok_apply_patch_hardening.py
+            python scripts/apply_sub2api_grok_apply_patch_r17_review.py
+            python scripts/apply_sub2api_grok_apply_patch_r17_review2.py
+            python scripts/apply_sub2api_openai_codex_identity.py
+            python scripts/apply_sub2api_subagent_retry_diag.py
+            python scripts/apply_sub2api_stream_retry_diag.py
+            python scripts/apply_sub2api_mcp_relay_diag.py
+            python scripts/apply_no_micro_r23_restart_pipeline.py
+            python scripts/apply_no_micro_r23_restart_review.py
+            python scripts/apply_sub2api_grok_compat_revision.py
+          fi
 
           grep -F "v-if=\"form.apiFormat === 'responses'\"" \
             frontend/src/components/provider/ProviderFormModal.vue
@@ -146,6 +121,25 @@ jobs:
           grep -F -q 'CAS-NO-MICRO-R23-AB-SHARED-PIPELINE' src-tauri/src/admin/handlers/no_micro.rs
           grep -F -q 'process::prepare_codex_alternate_launch_args()' src-tauri/src/admin/handlers/no_micro.rs
 
+          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
+            test "$(tr -d '\r\n' < SUB2API_GROK_COMPAT_REVISION.txt)" = "28"
+            grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+            grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
+            grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
+            grep -F -q 'CAS-PROXY-LIFECYCLE-R27' src-tauri/src/admin/handlers/proxy.rs
+            grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
+            grep -F -q 'CAS-HYBRID-DIRECT-R28-PROVIDER-REFRESH' src-tauri/src/admin/handlers/proxy.rs
+            grep -F -q 'compat_revision=28' SUB2API_GROK_COMPAT_VERSION.txt
+            python scripts/review_hybrid_direct_r28.py
+          elif [[ -f scripts/apply_r27_unified.py ]]; then
+            test "$(tr -d '\r\n' < SUB2API_GROK_COMPAT_REVISION.txt)" = "27"
+            grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+            grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
+            grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
+            grep -F -q 'CAS-PROXY-LIFECYCLE-R27' src-tauri/src/admin/handlers/proxy.rs
+            grep -F -q 'compat_revision=27' SUB2API_GROK_COMPAT_VERSION.txt
+          fi
+
       - name: Resolve visible compat version
         id: compat-version
         shell: bash
@@ -163,6 +157,11 @@ jobs:
             REVISION="0"
           fi
           SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
+          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
+            test "$REVISION" = "28"
+          elif [[ -f scripts/apply_r27_unified.py ]]; then
+            test "$REVISION" = "27"
+          fi
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
@@ -183,6 +182,19 @@ jobs:
 
       - name: Check r24 Codex integration crate
         run: cargo check -p codex-app-transfer-codex-integration --lib
+
+      - name: Test unified r27/r28 Windows runtime gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
+            cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+            cargo test -p codex-app-transfer hybrid_direct --target x86_64-pc-windows-msvc -- --nocapture
+            cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+          elif [[ -f scripts/apply_r27_unified.py ]]; then
+            cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+            cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+          fi
 
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli
@@ -220,7 +232,14 @@ jobs:
           grep -R -F -q "Sub2API Grok Compat r${REVISION}" frontend/dist
           grep -R -F -q "v${APP_VERSION}" frontend/dist
           grep -R -F -q 'No Micro' frontend/dist
-          echo "Verified bundle contains Grok controls + No Micro + r${REVISION} + v${APP_VERSION}"
+          if (( REVISION >= 24 )); then
+            grep -R -F -q 'Auto Review' frontend/dist
+          fi
+          if [[ "$REVISION" == "28" ]]; then
+            grep -R -F -q 'Hybrid Direct' frontend/dist
+            grep -R -F -q 'CC Switch' frontend/dist
+          fi
+          echo "Verified bundle contains expected compat controls + r${REVISION} + v${APP_VERSION}"
 
       - name: Test local proxy gateway auth
         run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture

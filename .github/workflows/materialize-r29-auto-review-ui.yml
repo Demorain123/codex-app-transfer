@@ -28,14 +28,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+          show-progress: false
 
       - name: Check r29 overlay Python syntax
         run: |
-          python -m py_compile \
+          python3 -m py_compile \
             scripts/apply_r29_unified.py \
             scripts/apply_auto_review_ui_r29_hardening.py \
             scripts/apply_auto_review_ui_r29.py \
@@ -46,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! python scripts/apply_r27_unified.py > "$RUNNER_TEMP/r27-replay.log" 2>&1; then
+          if ! python3 scripts/apply_r27_unified.py > "$RUNNER_TEMP/r27-replay.log" 2>&1; then
             tail -n 100 "$RUNNER_TEMP/r27-replay.log"
             exit 1
           fi
@@ -57,23 +54,23 @@ jobs:
         run: |
           set -euo pipefail
           printf '29\n' > SUB2API_GROK_COMPAT_REVISION.txt
-          if ! python scripts/apply_sub2api_grok_compat_revision.py > "$RUNNER_TEMP/r29-restamp.log" 2>&1; then
+          if ! python3 scripts/apply_sub2api_grok_compat_revision.py > "$RUNNER_TEMP/r29-restamp.log" 2>&1; then
             tail -n 100 "$RUNNER_TEMP/r29-restamp.log"
             exit 1
           fi
           echo 'r29 standard revision restamp: PASS'
 
       - name: Harden r29 UI replay generator
-        run: python scripts/apply_auto_review_ui_r29_hardening.py
+        run: python3 scripts/apply_auto_review_ui_r29_hardening.py
 
       - name: Apply r29 provider-model UI overlay
-        run: python scripts/apply_auto_review_ui_r29.py
+        run: python3 scripts/apply_auto_review_ui_r29.py
 
       - name: Apply r29 effective override wiring and live-sync companion
-        run: python scripts/apply_auto_review_effective_r29.py
+        run: python3 scripts/apply_auto_review_effective_r29.py
 
       - name: Run deep r29 Auto Review self-review
-        run: python scripts/review_auto_review_ui_r29.py
+        run: python3 scripts/review_auto_review_ui_r29.py
 
       - name: Check materialized text and version markers
         shell: bash
@@ -119,11 +116,11 @@ jobs:
         run: |
           set -euo pipefail
           git diff --binary > "$RUNNER_TEMP/r29-first.diff"
-          if ! python scripts/apply_r29_unified.py > "$RUNNER_TEMP/r29-second-replay.log" 2>&1; then
+          if ! python3 scripts/apply_r29_unified.py > "$RUNNER_TEMP/r29-second-replay.log" 2>&1; then
             tail -n 100 "$RUNNER_TEMP/r29-second-replay.log"
             exit 1
           fi
-          python scripts/review_auto_review_ui_r29.py
+          python3 scripts/review_auto_review_ui_r29.py
           git diff --check
           git diff --binary > "$RUNNER_TEMP/r29-second.diff"
           if ! cmp -s "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff"; then

@@ -41,10 +41,13 @@ for marker in (
 if 'placeholder=\'{"grok-4.5":"gpt-5.6-luna"}\'' in parent:
     raise SystemExit("r29 review: raw Auto Review JSON textarea resurfaced")
 
-# 3) Scope the ordering check to the actual existing-provider onMounted branch. There are also
-# cache/seed calls in applyPreset; using the first global occurrence would make this gate a false
-# positive even if the edit flow regressed.
-edit_anchor = parent.find("  if (!props.editId) return")
+# 3) Scope the ordering check to the actual existing-provider onMounted branch. The file has other
+# `if (!props.editId) return` and seedModelsFromDeclared callsites (for preset/draft flows), so a
+# global first-match can silently inspect the wrong function and generate a false failure.
+mounted_anchor = parent.find("onMounted(async () => {")
+if mounted_anchor < 0:
+    raise SystemExit("r29 review: onMounted provider-edit hook missing")
+edit_anchor = parent.find("  if (!props.editId) return", mounted_anchor)
 edit_end = parent.find("})\n\nfunction parseJsonObj", edit_anchor)
 if edit_anchor < 0 or edit_end <= edit_anchor:
     raise SystemExit("r29 review: could not isolate existing-provider onMounted branch")

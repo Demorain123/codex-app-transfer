@@ -52,7 +52,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/apply_r30_unified.py
+          if ! python scripts/apply_r30_unified.py > "$RUNNER_TEMP/r30-compose.log" 2>&1; then
+            echo '--- r30 compose failure tail ---'
+            tail -n 150 "$RUNNER_TEMP/r30-compose.log"
+            exit 1
+          fi
+          tail -n 40 "$RUNNER_TEMP/r30-compose.log"
           grep -F -q 'compat_revision=30' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'app_version=2.4.5+30' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs

@@ -1,6 +1,6 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r29 · v2.4.5+29",
+  "compat.buildBadge": "Sub2API Grok Compat r30 · v2.4.5+30",
   "providerForm.grokCompatSection": "Sub2API · Grok 兼容",
   "providerForm.grokCompat": "Grok MCP / Tools 兼容",
   "providerForm.grokCompatHint": "仅对 grok-* 的 Responses 请求启用 Codex custom / namespace / tool_search 兼容；Luna / GPT 保持原生直透。",
@@ -1099,4 +1099,8 @@ export default {
   "about.likeDesc": "给项目点个 Star 支持开发",
   "about.feedback": "反馈",
   "about.feedbackDesc": "提交问题或建议",
+  "settings.hybridDirect": "Hybrid Direct（CC Switch）",
+  "settings.hybridDirectHint": "安全模式：Transfer 只作为 Grok/第三方本地网关，不改 Codex provider、openai/chatgpt base URL 或 auth.json。启用前必须先还原 Transfer 管理的 Codex 快照；官方 OAuth 请在 CC Switch 选择 OpenAI Official，并保持 Codex 本地路由关闭。",
+  "settings.hybridDirectAutoApplyHint": "Hybrid Direct 下仅自动启动 Transfer 的 Grok/第三方网关，不会把 provider 或 OAuth 路由写入 Codex。",
+  "proxy.hybridDirectGateway": "Hybrid Direct · 仅第三方网关",
 } as Record<string, string>;

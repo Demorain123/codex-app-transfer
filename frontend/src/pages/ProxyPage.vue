@@ -108,7 +108,7 @@ async function onClearLogs() {
         <span class="status-text" :class="{ 'status-text--on': store.running }">
           {{ store.running ? t('status.running') : t('status.stopped') }}
         </span>
-        <span class="status-sub">{{ t('proxy.localhost') }}</span>
+        <span class="status-sub">{{ store.hybridDirectMode ? t('proxy.hybridDirectGateway') : t('proxy.localhost') }}</span>
       </div>
       <div class="status-card__right">
         <label class="port-field">

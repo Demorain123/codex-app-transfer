@@ -1,6 +1,6 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r29 · v2.4.5+29",
+  "compat.buildBadge": "Sub2API Grok Compat r30 · v2.4.5+30",
   "providerForm.grokCompatSection": "Sub2API · Grok Compatibility",
   "providerForm.grokCompat": "Grok MCP / Tools compatibility",
   "providerForm.grokCompatHint": "Enable Codex custom / namespace / tool_search compatibility only for grok-* Responses requests; Luna / GPT remain native passthrough.",
@@ -968,5 +968,9 @@ export default {
   "about.like": "Star on GitHub",
   "about.likeDesc": "Star the repo to support development",
   "about.feedback": "Feedback",
-  "about.feedbackDesc": "Report an issue or suggestion"
+  "about.feedbackDesc": "Report an issue or suggestion",
+  "settings.hybridDirect": "Hybrid Direct (CC Switch)",
+  "settings.hybridDirectHint": "Safety mode: Transfer is only the local gateway for Grok/third-party traffic and will not rewrite Codex provider, openai/chatgpt base URLs, or auth.json. Restore any Transfer-managed Codex snapshot before enabling. For official OAuth, select OpenAI Official in CC Switch and keep Codex Local Routing off.",
+  "settings.hybridDirectAutoApplyHint": "In Hybrid Direct, auto-apply only starts the Transfer Grok/third-party gateway; it never writes provider or OAuth routing into Codex.",
+  "proxy.hybridDirectGateway": "Hybrid Direct · third-party gateway only",
 } as Record<string, string>

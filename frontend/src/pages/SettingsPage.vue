@@ -242,6 +242,7 @@ function toggle(key: string, def: boolean) {
     set: (v) => void persist({ [key]: v }),
   })
 }
+const hybridDirectMode = toggle('hybridDirectMode', false)
 const autoApplyOnStart = toggle('autoApplyOnStart', true)
 const restoreCodexOnExit = toggle('restoreCodexOnExit', true)
 const autoWakeCodexPet = toggle('autoWakeCodexPet', true)
@@ -627,13 +628,23 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
     </SettingsGroup>
 
     <SettingsGroup :title="t('settings.groupStartup')">
-      <SettingsRow :title="t('settings.autoApplyOnStart')" :description="t('settings.autoApplyOnStartHint')">
+      <SettingsRow :title="t('settings.hybridDirect')" :description="t('settings.hybridDirectHint')">
+        <AppSwitch v-model="hybridDirectMode" />
+      </SettingsRow>
+      <SettingsRow
+        :title="t('settings.autoApplyOnStart')"
+        :description="hybridDirectMode ? t('settings.hybridDirectAutoApplyHint') : t('settings.autoApplyOnStartHint')"
+      >
         <AppSwitch v-model="autoApplyOnStart" />
       </SettingsRow>
-      <SettingsRow :title="t('settings.restoreCodexOnExit')" :description="t('settings.restoreCodexOnExitHint')">
+      <SettingsRow
+        v-if="!hybridDirectMode"
+        :title="t('settings.restoreCodexOnExit')"
+        :description="t('settings.restoreCodexOnExitHint')"
+      >
         <AppSwitch v-model="restoreCodexOnExit" />
       </SettingsRow>
-      <SettingsRow :title="t('settings.pluginUnlock')" :description="t('settings.pluginUnlockHint')">
+      <SettingsRow v-if="!hybridDirectMode" :title="t('settings.pluginUnlock')" :description="t('settings.pluginUnlockHint')">
         <SegmentedControl
           :model-value="pluginUnlockMode ?? undefined"
           :options="pluginUnlockOptions"
@@ -643,7 +654,7 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
       <SettingsRow :title="t('settings.autoWakeCodexPet')" :description="t('settings.autoWakeCodexPetHint')">
         <AppSwitch v-model="autoWakeCodexPet" />
       </SettingsRow>
-      <SettingsRow :title="t('settings.codexNetworkAccess')" :description="t('settings.codexNetworkAccessHint')">
+      <SettingsRow v-if="!hybridDirectMode" :title="t('settings.codexNetworkAccess')" :description="t('settings.codexNetworkAccessHint')">
         <AppSwitch v-model="codexNetworkAccess" />
       </SettingsRow>
     </SettingsGroup>
@@ -734,6 +745,7 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
         :description="t('settings.sessionHistoryDesc')"
       >
         <AppButton
+          v-if="!hybridDirectMode"
           size="sm"
           variant="secondary"
           :label="t('settings.sessionRestoreBtn')"
@@ -741,6 +753,7 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
           @click="onRestoreSessions"
         />
         <AppButton
+          v-if="!hybridDirectMode"
           size="sm"
           variant="secondary"
           :label="t('settings.sessionImportBtn')"

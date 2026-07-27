@@ -65,24 +65,29 @@ fn proxy_bind_address_in_use(message: &str) -> bool {
         || lower.contains("only one usage of each socket address")
 }
 
-pub(crate) async fn start_proxy_if_needed(
+// CAS-HYBRID-DIRECT-R28-PROVIDER-REFRESH
+async fn start_proxy_r28_inner(
     manager: &ProxyManager,
     port: u16,
+    expected_provider: Option<&str>,
 ) -> Result<bool, String> {
     let _lifecycle = PROXY_LIFECYCLE_R27.lock().await;
     let status = manager.status();
     let current_port = proxy_status_port(status.addr.as_deref());
+    let provider_matches = expected_provider
+        .map(|expected| status.active_provider.as_deref() == Some(expected))
+        .unwrap_or(true);
 
     if status.running {
-        // Requested port 0 means "any OS-assigned port"; an existing healthy listener
-        // already satisfies that request. Most importantly, an exact same-port request
-        // must be a no-op instead of stop -> immediate rebind.
-        if port == 0 || current_port == Some(port) {
+        // r27 same-port reuse remains valid only when the resolver snapshot also
+        // belongs to the requested provider. Port 0 still means any bound port.
+        if (port == 0 || current_port == Some(port)) && provider_matches {
             proxy_telemetry().logs.add(
                 "INFO",
                 format!(
-                    "[proxy-lifecycle-r27] reuse running listener requested_port={port} actual_port={}",
-                    current_port.map(|p| p.to_string()).unwrap_or_else(|| "unknown".to_owned())
+                    "[proxy-lifecycle-r28] reuse listener requested_port={port} actual_port={} provider={}",
+                    current_port.map(|p| p.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+                    status.active_provider.as_deref().unwrap_or("none")
                 ),
             );
             return Ok(false);
@@ -90,10 +95,10 @@ pub(crate) async fn start_proxy_if_needed(
         proxy_telemetry().logs.add(
             "INFO",
             format!(
-                "[proxy-lifecycle-r27] switch listener old_port={} new_port={port}",
-                current_port
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "unknown".to_owned())
+                "[proxy-lifecycle-r28] reload listener old_port={} new_port={port} old_provider={} new_provider={}",
+                current_port.map(|p| p.to_string()).unwrap_or_else(|| "unknown".to_owned()),
+                status.active_provider.as_deref().unwrap_or("none"),
+                expected_provider.unwrap_or("unchanged")
             ),
         );
         manager.stop_silent();
@@ -108,7 +113,7 @@ pub(crate) async fn start_proxy_if_needed(
                 proxy_telemetry().logs.add(
                     "WARN",
                     format!(
-                        "[proxy-lifecycle-r27] bind busy requested_port={port} retry={} delay_ms={delay}",
+                        "[proxy-lifecycle-r28] bind busy requested_port={port} retry={} delay_ms={delay}",
                         attempt + 1
                     ),
                 );
@@ -117,7 +122,7 @@ pub(crate) async fn start_proxy_if_needed(
             Err(message) => {
                 return Err(if proxy_bind_address_in_use(&message) {
                     format!(
-                        "{message}; r27 已避免同端口自重启并重试端口 {port}，若仍失败说明该端口此刻确实仍有 listener/Windows socket 占用"
+                        "{message}; r28 已避免同端口自重启并按 provider 刷新 resolver，若端口 {port} 仍失败说明此刻确有 listener/Windows socket 占用"
                     )
                 } else {
                     message
@@ -126,6 +131,21 @@ pub(crate) async fn start_proxy_if_needed(
         }
     }
     unreachable!("bounded proxy start retry loop always returns")
+}
+
+pub(crate) async fn start_proxy_if_needed(
+    manager: &ProxyManager,
+    port: u16,
+) -> Result<bool, String> {
+    start_proxy_r28_inner(manager, port, None).await
+}
+
+pub(crate) async fn start_proxy_for_provider_if_needed(
+    manager: &ProxyManager,
+    port: u16,
+    expected_provider: &str,
+) -> Result<bool, String> {
+    start_proxy_r28_inner(manager, port, Some(expected_provider)).await
 }
 
 #[cfg(test)]
@@ -210,6 +230,7 @@ pub async fn proxy_status(State(state): State<AdminState>) -> impl IntoResponse 
         "running": s.running,
         "port": port,
         "stats": proxy_telemetry().stats.snapshot(),
+        "hybridDirectMode": crate::admin::services::desktop::hybrid_direct::enabled_from_config(&cfg),
     }))
     .into_response()
 }

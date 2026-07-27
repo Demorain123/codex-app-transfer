@@ -17,8 +17,11 @@ use super::super::super::registry_io::{
 };
 use super::super::super::state::AdminState;
 use super::super::common::err;
-use super::super::desktop::{switch_provider_and_sync, sync_desktop_for_active_provider};
+use super::super::desktop::switch_provider_and_sync;
 use super::{fresh_provider_id, provider_index};
+use crate::admin::services::desktop::snapshot::{
+    sync_auto_review_catalog_only_for_provider, sync_desktop_for_active_provider,
+};
 
 /// 提交时校验 `extraHeaders` 字段的合法性,非法返回 400 + 详细错误。
 /// `Value::Null` / 缺字段 / 空对象 → 视为无 extras,通过校验。
@@ -560,7 +563,13 @@ pub async fn update_provider(
         "autoReviewActiveProvider": edited_active_provider,
     });
     if auto_review_changed && edited_active_provider {
-        let desktop_sync = sync_desktop_for_active_provider(&state).await;
+        // CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH: Hybrid Direct must not call the normal
+        // provider/auth apply path. It gets one explicit catalog-only exception.
+        let desktop_sync = if crate::admin::services::desktop::hybrid_direct::enabled() {
+            sync_auto_review_catalog_only_for_provider(&id)
+        } else {
+            sync_desktop_for_active_provider(&state).await
+        };
         let applied = desktop_sync
             .get("success")
             .and_then(|v| v.as_bool())

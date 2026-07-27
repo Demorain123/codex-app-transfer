@@ -68,12 +68,12 @@ if lib_text.count(module_line) != 1:
         f"r29 requires exactly one r24 module registration, found {lib_text.count(module_line)}"
     )
 
-# Scope freeze: r29 must not add provider-identity routing logic. The r27 built-in openai fallback
-# remains unchanged until a later, separately testable provider-identity option is implemented.
-for rel in ("scripts/apply_auto_review_ui_r29.py", "scripts/review_auto_review_ui_r29.py"):
-    text = (ROOT / rel).read_text(encoding="utf-8")
-    for forbidden in ("openai_base_url", "chatgpt_base_url", "model_providers.OpenAi"):
-        if forbidden in text:
-            raise SystemExit(f"r29 scope leak in {rel}: {forbidden}")
+# Scope freeze: only inspect the implementation overlay here. The separate review script contains
+# these forbidden words as assertions by design, so scanning the review source itself would be a
+# false positive. review_auto_review_ui_r29.py independently checks the generated component too.
+overlay_text = (ROOT / "scripts/apply_auto_review_ui_r29.py").read_text(encoding="utf-8")
+for forbidden in ("openai_base_url", "chatgpt_base_url", "model_providers.OpenAi"):
+    if forbidden in overlay_text:
+        raise SystemExit(f"r29 scope leak in UI overlay: {forbidden}")
 
 print("r29 unified materialization gate: PASS (r27 unified + provider-model Auto Review UI)")

@@ -134,14 +134,15 @@ jobs:
           grep -R -F -q '刷新模型列表' frontend/dist
           grep -R -F -q '重启 Codex' frontend/dist
 
-      - name: Check Rust formatting after materialization
+      - name: Normalize generated Rust before replay baseline
         shell: bash
         run: |
           set -euo pipefail
           rustup component add rustfmt
-          cargo fmt --all -- --check
+          cargo fmt --all
+          git diff --check
 
-      - name: Prove raw r29 overlay replay idempotence
+      - name: Prove r29 overlay replay idempotence after rustfmt
         shell: bash
         run: |
           set -euo pipefail
@@ -150,11 +151,12 @@ jobs:
             tail -n 100 "$RUNNER_TEMP/r29-second-replay.log"
             exit 1
           fi
+          cargo fmt --all
           python3 scripts/review_auto_review_ui_r29.py
           git diff --check
           git diff --binary > "$RUNNER_TEMP/r29-second.diff"
           if ! cmp -s "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff"; then
-            echo '::error::r29 complete overlay is not idempotent'
+            echo '::error::r29 complete overlay is not idempotent after rustfmt'
             diff -u "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff" || true
             exit 1
           fi

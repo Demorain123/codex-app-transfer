@@ -38,13 +38,15 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Compose r27 unified plus r29 provider-model Auto Review UI
+      - name: Compose r27 unified plus r29 provider-model Auto Review UI/effective override
         shell: bash
         run: |
           set -euo pipefail
           python -m py_compile \
             scripts/apply_r29_unified.py \
+            scripts/apply_auto_review_ui_r29_hardening.py \
             scripts/apply_auto_review_ui_r29.py \
+            scripts/apply_auto_review_effective_r29.py \
             scripts/review_auto_review_ui_r29.py \
             scripts/apply_r27_unified.py \
             scripts/apply_proxy_lifecycle_r27.py \
@@ -53,6 +55,9 @@ jobs:
           python scripts/apply_r29_unified.py
           python scripts/review_auto_review_ui_r29.py
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-R29-SAVE-FEEDBACK' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-R29-API-WIRE-WRITE' frontend/src/api/providers.ts
+          grep -F -q 'CAS-AUTO-REVIEW-R29-LIVE-APPLY' src-tauri/src/admin/handlers/providers/crud.rs
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29' frontend/src/components/provider/AutoReviewModelOverridesEditor.vue
           grep -F -q ':models="availableModels"' frontend/src/components/provider/ProviderFormModal.vue
           grep -F -q 'void fetchModels(true)' frontend/src/components/provider/ProviderFormModal.vue
@@ -144,6 +149,7 @@ jobs:
           grep -R -F -q '添加映射' frontend/dist
           grep -R -F -q '刷新模型列表' frontend/dist
           grep -R -F -q 'Main model' frontend/dist
+          grep -R -F -q '重启 Codex' frontend/dist
 
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli

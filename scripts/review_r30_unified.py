@@ -13,6 +13,7 @@ def read(rel: str) -> str:
 
 
 snapshot = read("src-tauri/src/admin/services/desktop/snapshot.rs")
+overlay = read("crates/codex_integration/src/auto_review_overlay.rs")
 crud = read("src-tauri/src/admin/handlers/providers/crud.rs")
 hybrid = read("src-tauri/src/admin/services/desktop/hybrid_direct.rs")
 provider_form = read("frontend/src/components/provider/ProviderFormModal.vue")
@@ -21,7 +22,10 @@ version = read("SUB2API_GROK_COMPAT_VERSION.txt")
 
 # 1) All parent layers must survive composition.
 required = {
-    "crates/codex_integration/src/auto_review_overlay.rs": ["CAS-AUTO-REVIEW-R24"],
+    "crates/codex_integration/src/auto_review_overlay.rs": [
+        "CAS-AUTO-REVIEW-R24",
+        "CAS-R30-AUTO-REVIEW-OVERLAY-ACTIVE-PROBE",
+    ],
     "crates/proxy/src/forward.rs": [
         "CAS-APPS-MCP-AUTH-R25-REHYDRATE",
         "CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK",
@@ -46,6 +50,23 @@ for rel, markers in required.items():
     for marker in markers:
         if marker not in text:
             raise SystemExit(f"r30 review parent marker missing in {rel}: {marker}")
+
+# The read-only probe must reuse r24's private ownership/path comparison and perform no writes.
+probe_start = overlay.find("/// CAS-R30-AUTO-REVIEW-OVERLAY-ACTIVE-PROBE")
+probe_end = overlay.find("/// If a previous Apply left `model_catalog_json`", probe_start)
+if probe_start < 0 or probe_end <= probe_start:
+    raise SystemExit("r30 review could not isolate overlay-active probe")
+probe = overlay[probe_start:probe_end]
+for marker in (
+    "pub fn auto_review_overlay_active",
+    "configured_catalog_path(paths)?",
+    "same_path(current, &overlay_path(paths))",
+):
+    if marker not in probe:
+        raise SystemExit(f"r30 review overlay-active probe invariant missing: {marker}")
+for forbidden in ("sync_root_value(", "save_raw_config(", "std::fs::write", "remove_file("):
+    if forbidden in probe:
+        raise SystemExit(f"r30 review overlay-active probe is not read-only: {forbidden}")
 
 # 2) r28 zero-proxy ownership must remain intact. Hybrid Direct may now mutate only the model catalog
 # pointer through the r30 exception; provider/auth/network ownership is still CC Switch's.
@@ -75,10 +96,11 @@ for marker in (
     "sync_auto_review_catalog_only_for_provider",
     "expected_provider_id",
     "active provider changed during Auto Review save",
+    "auto_review_overlay_active(&paths)",
+    "Ok(active) => active",
     "restore_source_if_overlay_active(&paths)",
     "apply_auto_review_overrides(&paths, Some(&overrides))",
     "CAS-R30-CATALOG-MUTATION-TRUTH",
-    "let source_restored = match restore_source_if_overlay_active(&paths)",
     '"catalogMutated": source_restored || catalog_applied',
     '"providerAuthMutated": false',
     '"codexConfigScope": "model_catalog_json_only"',
@@ -98,23 +120,27 @@ for forbidden in (
 ):
     if forbidden in catalog_only:
         raise SystemExit(f"r30 review catalog-only scope leak: {forbidden}")
+probe_pos = catalog_only.find("auto_review_overlay_active(&paths)")
 restore_pos = catalog_only.find("restore_source_if_overlay_active(&paths)")
 apply_pos = catalog_only.find("apply_auto_review_overrides(&paths, Some(&overrides))")
-if not (0 <= restore_pos < apply_pos):
-    raise SystemExit("r30 review requires source restore before shadow rebuild")
+if not (0 <= probe_pos < restore_pos < apply_pos):
+    raise SystemExit("r30 review requires read-only probe before source restore before shadow rebuild")
+if "Ok(restored) => restored" in catalog_only:
+    raise SystemExit("r30 review: Result<()> restore is still being treated as bool")
 
 # r24 intentionally exposes these helpers through its public module, not crate-root re-exports.
 for marker in (
     "CAS-R30-AUTO-REVIEW-MODULE-IMPORT",
     "codex_app_transfer_codex_integration::auto_review_overlay::{",
-    "apply_auto_review_overrides, restore_source_if_overlay_active",
+    "auto_review_overlay_active",
+    "restore_source_if_overlay_active",
 ):
     if marker not in snapshot:
         raise SystemExit(f"r30 review authoritative COW import missing: {marker}")
 if "use codex_app_transfer_codex_integration::{\n    apply_auto_review_overrides," in snapshot:
     raise SystemExit("r30 review: stale invalid crate-root Auto Review import remains")
 
-# 4) Restore-only helper must be even narrower than apply: exact shadow-pointer restore only.
+# 4) Restore-only helper must be even narrower than apply: probe exact shadow state, then restore only.
 restore_start = snapshot.find("/// CAS-R30-HYBRID-CATALOG-RESTORE-ONLY")
 restore_end = snapshot.find("\n/// [MOC-257 三态]", restore_start)
 if restore_start < 0 or restore_end <= restore_start:
@@ -122,8 +148,12 @@ if restore_start < 0 or restore_end <= restore_start:
 restore_only = snapshot[restore_start:restore_end]
 for marker in (
     "restore_auto_review_source_catalog_only",
+    "auto_review_overlay_active(&paths)",
+    "Ok(active) => active",
     "restore_source_if_overlay_active(&paths)",
-    '"catalogMutated": restored',
+    "Ok(()) => json!({",
+    '"sourceRestored": source_restored',
+    '"catalogMutated": source_restored',
     '"providerAuthMutated": false',
 ):
     if marker not in restore_only:
@@ -138,6 +168,8 @@ for forbidden in (
 ):
     if forbidden in restore_only:
         raise SystemExit(f"r30 review restore-only scope leak: {forbidden}")
+if '"message": if restored {' in restore_only or "Ok(restored)" in restore_only:
+    raise SystemExit("r30 review: restore-only helper still treats Result<()> payload as bool")
 
 # 5) Hybrid Direct gateway sync must refresh/rebase the Auto Review shadow on every active-provider
 # sync, while truthfully reporting that catalog mutation is different from provider/auth mutation.
@@ -156,7 +188,6 @@ for marker in (
 ):
     if marker not in gateway_sync:
         raise SystemExit(f"r30 review gateway catalog lifecycle missing: {marker}")
-# The provider/auth mutation sites must remain outside the Hybrid Direct early-return branch.
 for forbidden in ("apply_provider(", "ensure_gateway_key(", "write_auth("):
     if forbidden in gateway_sync:
         raise SystemExit(f"r30 review Hybrid Direct gateway gained forbidden mutation: {forbidden}")
@@ -207,4 +238,4 @@ if "restartCodexApp(" in provider_form:
 if "compat_revision=30" not in version or "app_version=2.4.5+30" not in version:
     raise SystemExit("r30 review visible/package version is not v2.4.5+30")
 
-print("r30 deep unified review: PASS (r28 Hybrid Direct + r29 Auto Review + safe catalog lifecycle)")
+print("r30 deep unified review: PASS (r28 Hybrid Direct + r29 Auto Review + probed catalog lifecycle)")

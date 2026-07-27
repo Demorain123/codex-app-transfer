@@ -11,6 +11,15 @@ on:
       - 'scripts/apply_hybrid_direct_r28*.py'
       - 'scripts/review_hybrid_direct_r28.py'
       - '.github/workflows/test-r28-frontend-diagnostic.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r27-unified
+    paths:
+      - 'frontend/**'
+      - 'scripts/apply_r28_hybrid_direct.py'
+      - 'scripts/apply_hybrid_direct_r28*.py'
+      - 'scripts/review_hybrid_direct_r28.py'
+      - '.github/workflows/test-r28-frontend-diagnostic.yml'
 
 permissions:
   contents: read
@@ -21,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:

@@ -12,6 +12,7 @@ import AppCombobox from '@/components/ui/AppCombobox.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import Sub2ApiGrokCompatControls from '@/components/provider/Sub2ApiGrokCompatControls.vue'
+import AutoReviewModelOverridesEditor from '@/components/provider/AutoReviewModelOverridesEditor.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import IconEye from '~icons/lucide/eye'
 import IconEyeOff from '~icons/lucide/eye-off'
@@ -373,7 +374,7 @@ function onPickName(picked: string) {
 }
 
 // 获取上游可用模型(草稿走 form 当前值 → 用已输入/已回填的 key)
-async function fetchModels() {
+async function fetchModels(silent = false) { // CAS-AUTO-REVIEW-UI-R29-SILENT-FETCH
   if (!form.baseUrl.trim()) {
     error.value = t('providerForm.errRequired')
     return
@@ -405,13 +406,15 @@ async function fetchModels() {
     saveMsgFiltered(form.baseUrl, messagesFiltered.value)
     // [MOC-261 一-7] 自动填充:用后端 suggested(槽位→模型 id 自动建议,目前主要给 default 槽)
     // 预填**空**槽位,不覆盖用户已选;只接受确在可用列表里的 id。
-    const suggested = res.suggested || {}
-    const valid = new Set(availableModels.value.map((o) => o.value))
-    for (const slot of Object.keys(form.models)) {
-      const sv = suggested[slot]
-      if (sv && !form.models[slot] && valid.has(sv)) form.models[slot] = sv
+    if (!silent) { // CAS-AUTO-REVIEW-UI-R29-SILENT-NO-SUGGEST
+      const suggested = res.suggested || {}
+      const valid = new Set(availableModels.value.map((o) => o.value))
+      for (const slot of Object.keys(form.models)) {
+        const sv = suggested[slot]
+        if (sv && !form.models[slot] && valid.has(sv)) form.models[slot] = sv
+      }
     }
-    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))
+    if (!silent) toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))
   } catch (e) {
     // 上游无 /models 端点(如 WorkBuddy 网关 copilot.tencent.com 仅有 chat/completions)→
     // 回落到 preset / 已存 provider 声明的 modelCapabilities,不刷红错、仍可在下拉选模型。
@@ -424,8 +427,8 @@ async function fetchModels() {
     }
     seedModelsFromDeclared(caps, form.models)
     if (availableModels.value.length > 0) {
-      toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))
-    } else {
+      if (!silent) toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))
+    } else if (!silent) {
       error.value = (e as Error).message || t('providerForm.modelsFetchFailed')
     }
   } finally {
@@ -491,6 +494,10 @@ onMounted(async () => {
   )
   const secret = await providersApi.getProviderSecret(props.editId).catch(() => ({ apiKey: '' }))
   form.apiKey = secret.apiKey || ''
+  // CAS-AUTO-REVIEW-UI-R29-AUTO-FETCH: cache/declared models are already visible;
+  // now refresh the exact provider /models list only after its stored secret is available.
+  // Failure stays silent so opening Edit never destroys an existing mapping.
+  void fetchModels(true)
 })
 
 function parseJsonObj(label: string, raw: string): Record<string, unknown> | undefined {
@@ -554,8 +561,9 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
+    let updateResult: Awaited<ReturnType<typeof providersApi.updateProvider>> | null = null
     if (props.editId) {
-      await providersApi.updateProvider(props.editId, payload)
+      updateResult = await providersApi.updateProvider(props.editId, payload)
     } else {
       const res = (await providersApi.addProvider(payload)) as { provider?: { id?: string } }
       // trae login-first:登录写的是 pending 凭证,保存拿到新 id 后绑定过去(claim)。
@@ -565,6 +573,17 @@ async function save() {
       }
     }
     await store.load().catch(() => {})
+    // CAS-AUTO-REVIEW-R29-SAVE-FEEDBACK: save != live apply != process reload.
+    if (updateResult?.autoReviewChanged) {
+      if (updateResult.autoReviewActiveProvider && updateResult.autoReviewApplied === false) {
+        const detail = updateResult.autoReviewApply?.message || t('providerForm.autoReviewUi.applyFailed')
+        toast(tFmt('providerForm.autoReviewUi.savedButApplyFailed', { detail }), 'error')
+      } else if (updateResult.autoReviewActiveProvider && updateResult.autoReviewApplied) {
+        toast(t('providerForm.autoReviewUi.appliedRestart'))
+      } else {
+        toast(t('providerForm.autoReviewUi.savedInactive'))
+      }
+    }
     emit('saved')
     emit('close')
   } catch (e) {
@@ -675,15 +694,13 @@ async function save() {
         <AppInput v-model="form.reviewModelSlot" placeholder="default" />
       </SettingsRow>
       <SettingsRow :title="t('providerForm.autoReviewModelOverrides')">
-        <div class="pf__auto-review">
-          <textarea
-            v-model="form.autoReviewModelOverrides"
-            class="pf__json"
-            spellcheck="false"
-            placeholder='{"grok-4.5":"gpt-5.6-luna"}'
-          ></textarea>
-          <small>{{ t('providerForm.autoReviewModelOverridesHint') }}</small>
-        </div>
+        <!-- CAS-AUTO-REVIEW-UI-R29-EDITOR -->
+        <AutoReviewModelOverridesEditor
+          v-model="form.autoReviewModelOverrides"
+          :models="availableModels"
+          :loading="fetching"
+          @refresh="fetchModels()"
+        />
       </SettingsRow>
 
       <template v-if="isCustomProvider">

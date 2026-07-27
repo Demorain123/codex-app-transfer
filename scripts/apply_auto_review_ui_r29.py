@@ -336,10 +336,15 @@ if "CAS-AUTO-REVIEW-UI-R29-SILENT-FETCH" not in parent:
         "async function fetchModels(silent = false) { // CAS-AUTO-REVIEW-UI-R29-SILENT-FETCH",
         "silent fetch signature",
     )
+    # CAS-AUTO-REVIEW-UI-R29-UNIQUE-SUCCESS-ANCHOR: the r27 function contains the
+    # same toast in both the normal-success and fallback-success branches. Anchor the normal one
+    # together with the following catch boundary instead of pretending the toast text is unique.
     parent = replace_once(
         parent,
-        "    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))",
-        "    if (!silent) toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))",
+        "    toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))\n"
+        "  } catch (e) {",
+        "    if (!silent) toast(tFmt('providerForm.modelsFetched', { count: availableModels.value.length }))\n"
+        "  } catch (e) {",
         "silent fetch success toast",
     )
     parent = replace_once(
@@ -355,6 +360,24 @@ if "CAS-AUTO-REVIEW-UI-R29-SILENT-FETCH" not in parent:
         "      error.value = (e as Error).message || t('providerForm.modelsFetchFailed')\n"
         "    }",
         "silent fetch fallback",
+    )
+    parent = replace_once(
+        parent,
+        "    const suggested = res.suggested || {}\n"
+        "    const valid = new Set(availableModels.value.map((o) => o.value))\n"
+        "    for (const slot of Object.keys(form.models)) {\n"
+        "      const sv = suggested[slot]\n"
+        "      if (sv && !form.models[slot] && valid.has(sv)) form.models[slot] = sv\n"
+        "    }",
+        "    if (!silent) { // CAS-AUTO-REVIEW-UI-R29-SILENT-NO-SUGGEST\n"
+        "      const suggested = res.suggested || {}\n"
+        "      const valid = new Set(availableModels.value.map((o) => o.value))\n"
+        "      for (const slot of Object.keys(form.models)) {\n"
+        "        const sv = suggested[slot]\n"
+        "        if (sv && !form.models[slot] && valid.has(sv)) form.models[slot] = sv\n"
+        "      }\n"
+        "    }",
+        "silent refresh must not mutate model slots",
     )
     parent = replace_once(
         parent,

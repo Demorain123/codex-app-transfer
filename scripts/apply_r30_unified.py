@@ -16,38 +16,22 @@ def run(rel: str) -> None:
     runpy.run_path(str(path), run_name="__main__")
 
 
-# r30 starts from the validated r28 line, which already materializes the complete r27 stack first.
 run("scripts/apply_r28_hybrid_direct.py")
-
-# Parent reviews own their own visible revision assertions, so run them while the tree is still
-# exactly r28. After this point r30 may safely restamp version identity without weakening r28's
-# semantic/privacy/manual-mutation checks.
 run("scripts/review_hybrid_direct_r28.py")
 run("scripts/review_hybrid_direct_r28_manual_guard.py")
 
-# Restamp the standard visible/package identity before applying r29 UI/effectiveness on top.
 REVISION.write_text("30\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 
-# Bring the r29 Auto Review UX + real transport/live-apply fixes without invoking the r29 composer
-# itself (that composer intentionally starts again from r27 and would omit r28).
 run("scripts/apply_auto_review_ui_r29_hardening.py")
 run("scripts/apply_auto_review_ui_r29.py")
 run("scripts/apply_auto_review_effective_r29.py")
 
-# Resolve the one semantic collision between the sibling lines: r28 makes general desktop sync
-# gateway-only while r29 expects that sync to rebuild the COW Auto Review catalog. The r30 bridge
-# permits only an explicit model_catalog_json-only operation in Hybrid Direct.
 run("scripts/apply_r30_hybrid_auto_review.py")
-# r24 exposes the COW API through the public auto_review_overlay module rather than crate-root
-# re-exports. Keep that API boundary intact and repair the generated import accordingly.
 run("scripts/apply_r30_catalog_import_fix.py")
-# Complete the lifecycle: refresh/rebase the shadow on Hybrid Direct gateway sync and restore only
-# Transfer's own source pointer when r28 intentionally skips the full CC Switch-owned snapshot restore.
 run("scripts/apply_r30_catalog_lifecycle.py")
+run("scripts/apply_r30_catalog_mutation_truth.py")
 
-# r29 review is revision-agnostic and can run after r30 restamp; r30 review owns all cross-feature
-# and final visible-version assertions.
 run("scripts/review_auto_review_ui_r29.py")
 run("scripts/review_r30_unified.py")
 
@@ -72,6 +56,7 @@ required = {
         "CAS-R30-HYBRID-CATALOG-RESTORE-ONLY",
         "CAS-R30-HYBRID-CATALOG-REFRESH",
         "CAS-R30-HYBRID-CATALOG-EXIT-RESTORE",
+        "CAS-R30-CATALOG-MUTATION-TRUTH",
     ],
     "src-tauri/src/admin/handlers/providers/crud.rs": ["CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH"],
 }
@@ -95,4 +80,4 @@ if lib_text.count(module_line) != 1:
         f"r30 requires exactly one r24 Auto Review module registration, found {lib_text.count(module_line)}"
     )
 
-print("r30 unified composition: COMPLETE (r24+r25+r26+r27+r28+r29+r30 bridge+lifecycle)")
+print("r30 unified composition: COMPLETE (r24+r25+r26+r27+r28+r29+r30 bridge+lifecycle+truth)")

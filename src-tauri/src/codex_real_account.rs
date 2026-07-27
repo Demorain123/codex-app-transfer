@@ -187,6 +187,106 @@ pub fn active_is_real_chatgpt_now() -> bool {
         .unwrap_or(false)
 }
 
+// CAS-APPS-MCP-AUTH-R25-SNAPSHOT
+/// Return a credential snapshot for the hosted Apps MCP relay only when the
+/// *currently active* auth.json is a real, non-synthetic, unexpired ChatGPT login.
+/// Imported/pinned mirrors are intentionally not consulted: a dormant mirror must
+/// never be injected while the user deliberately runs an API-key/synthetic account.
+/// This function is read-only and never refreshes tokens (refresh ownership remains
+/// with Codex, avoiding single-use refresh_token races).
+pub fn active_chatgpt_mcp_relay_auth() -> Option<(String, Option<String>)> {
+    let paths = CodexPaths::from_home_env().ok()?;
+    let value = read_auth(&paths.auth_json).ok()?;
+    // CAS-APPS-MCP-AUTH-R25-REVOCATION
+    // Reuse the existing revocation fingerprint semantics without mutating/clearing
+    // the state here. Unknown revocation fingerprint (0) also fails closed.
+    if !apps_mcp_auth_r25_revocation_allows(
+        access_token_fingerprint(&value),
+        REVOKED_TOKEN_FP.load(Ordering::SeqCst),
+        HAS_REVOCATION.load(Ordering::SeqCst),
+    ) {
+        return None;
+    }
+    chatgpt_mcp_relay_auth_from_value(&value, chrono::Utc::now().timestamp())
+}
+
+fn apps_mcp_auth_r25_revocation_allows(
+    active_token_fp: u64,
+    revoked_fp: u64,
+    has_revocation: bool,
+) -> bool {
+    should_clear_relogin(active_token_fp, revoked_fp, has_revocation)
+}
+
+fn chatgpt_mcp_relay_auth_from_value(
+    value: &Value,
+    now_unix: i64,
+) -> Option<(String, Option<String>)> {
+    if value.get("cas_synthetic").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let parsed = parse_chatgpt_auth(value)?;
+    let access_token = value
+        .get("tokens")
+        .and_then(|tokens| tokens.get("access_token"))
+        .and_then(Value::as_str)?;
+    if access_token.trim().is_empty() || access_token_expired(access_token, now_unix) {
+        return None;
+    }
+    Some((access_token.to_owned(), parsed.account_id))
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_account_tests {
+    use super::*;
+    use base64::Engine as _;
+
+    fn jwt_with_exp(exp: i64) -> String {
+        let payload = serde_json::json!({ "exp": exp }).to_string();
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+        format!("x.{encoded}.y")
+    }
+
+    fn auth(access_token: String) -> Value {
+        serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": access_token,
+                "refresh_token": "refresh",
+                "account_id": "acct-123"
+            }
+        })
+    }
+
+    // CAS-APPS-MCP-AUTH-R25-REVOCATION-TEST
+    #[test]
+    fn apps_mcp_auth_r25_known_revoked_bearer_fails_closed() {
+        assert!(apps_mcp_auth_r25_revocation_allows(0x1111, 0, false));
+        assert!(!apps_mcp_auth_r25_revocation_allows(0x1111, 0, true));
+        assert!(!apps_mcp_auth_r25_revocation_allows(0x1111, 0x1111, true));
+        assert!(apps_mcp_auth_r25_revocation_allows(0x2222, 0x1111, true));
+    }
+
+    #[test]
+    fn snapshot_accepts_only_active_real_unexpired_chatgpt_auth() {
+        let now = 1_800_000_000i64;
+        let valid = auth(jwt_with_exp(now + 3600));
+        let snapshot = chatgpt_mcp_relay_auth_from_value(&valid, now).expect("valid auth");
+        assert_eq!(snapshot.1.as_deref(), Some("acct-123"));
+
+        let mut synthetic = valid.clone();
+        synthetic["cas_synthetic"] = Value::Bool(true);
+        assert!(chatgpt_mcp_relay_auth_from_value(&synthetic, now).is_none());
+
+        let expired = auth(jwt_with_exp(now + EXPIRY_SKEW_SECONDS - 1));
+        assert!(chatgpt_mcp_relay_auth_from_value(&expired, now).is_none());
+
+        let mut api_key_mode = valid;
+        api_key_mode["auth_mode"] = Value::String("apikey".to_string());
+        assert!(chatgpt_mcp_relay_auth_from_value(&api_key_mode, now).is_none());
+    }
+}
+
 /// 从一个 `auth.json` Value 判断是否是**可用**的 chatgpt 登录态。
 /// 可用 = `auth_mode=="chatgpt"` 且 `tokens.{access_token,refresh_token}` 均非空。
 /// 返回 `account_id`(可能为 None)。

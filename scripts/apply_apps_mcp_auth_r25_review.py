@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import runpy
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,6 +10,30 @@ ROOT = Path(__file__).resolve().parents[1]
 def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
+
+# CAS-APPS-MCP-AUTH-R25-R24-REPLAY-PREREQUISITE
+# A complete r25 replay necessarily composes r24 first. r25's deep idempotence check
+# exposed that r24's `lib module` insertion could replay after rustfmt reordered module
+# declarations. Install the narrowly-scoped r24 generator fix during the first r25
+# materialization, then verify its explicit 0/1/>1 state machine below. This makes the
+# standard compat composer replay-safe after its first r25 pass without weakening the
+# second-pass diff comparison.
+r24_replay_fix = ROOT / "scripts/apply_apps_mcp_auth_r25_r24_replay_fix.py"
+if not r24_replay_fix.is_file():
+    raise SystemExit("r25 review: r24 replay prerequisite script missing")
+print("applying scripts/apply_apps_mcp_auth_r25_r24_replay_fix.py")
+runpy.run_path(str(r24_replay_fix), run_name="__main__")
+
+r24_generator = read("scripts/apply_auto_review_model_overlay_r24.py")
+for required in (
+    'marker = "pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24"',
+    "marker_count = text.count(marker)",
+    "if marker_count == 0:",
+    "elif marker_count == 1:",
+    "r24 auto_review_overlay module registration duplicated",
+):
+    if required not in r24_generator:
+        raise SystemExit(f"r25 review: r24 replay prerequisite missing: {required}")
 
 forward = read("crates/proxy/src/forward.rs")
 account = read("src-tauri/src/codex_real_account.rs")

@@ -30,7 +30,10 @@ print("r28 revision selected: 28")
 # artifact' class of version drift when packaging.
 run("scripts/apply_sub2api_grok_compat_revision.py")
 
-# Install the new gateway-only boundary last, then audit it independently.
+# Install the new gateway-only boundary last. The scoped preflight resolves known
+# repeated anchors (production default + test fixtures) without weakening fail-closed
+# checks in the main overlay.
+run("scripts/apply_hybrid_direct_r28_preflight.py")
 run("scripts/apply_hybrid_direct_r28.py")
 run("scripts/review_hybrid_direct_r28.py")
 

@@ -35,25 +35,39 @@ for marker in (
 if 'placeholder=\'{"grok-4.5":"gpt-5.6-luna"}\'' in parent:
     raise SystemExit("r29 review: raw Auto Review JSON textarea resurfaced")
 
-# 3) Editing an existing provider must show cache/declared models first, then refresh only after
-# its stored secret is loaded. The silent refresh may never turn opening the modal into an error.
-cache_pos = parent.find("loadCachedModels(form.baseUrl)")
-seed_pos = parent.find("seedModelsFromDeclared(", cache_pos)
-secret_pos = parent.find("form.apiKey = secret.apiKey || ''")
-auto_fetch_pos = parent.find("void fetchModels(true)")
+# 3) Scope the ordering check to the actual existing-provider onMounted branch. There are also
+# cache/seed calls in applyPreset; using the first global occurrence would make this gate a false
+# positive even if the edit flow regressed.
+edit_anchor = parent.find("  if (!props.editId) return")
+edit_end = parent.find("})\n\nfunction parseJsonObj", edit_anchor)
+if edit_anchor < 0 or edit_end <= edit_anchor:
+    raise SystemExit("r29 review: could not isolate existing-provider onMounted branch")
+edit_flow = parent[edit_anchor:edit_end]
+cache_pos = edit_flow.find("loadCachedModels(form.baseUrl)")
+seed_pos = edit_flow.find("seedModelsFromDeclared(")
+secret_pos = edit_flow.find("form.apiKey = secret.apiKey || ''")
+auto_fetch_pos = edit_flow.find("void fetchModels(true)")
 if min(cache_pos, seed_pos, secret_pos, auto_fetch_pos) < 0:
     raise SystemExit("r29 review: existing-provider model hydration/refresh sequence is incomplete")
 if not (cache_pos < seed_pos < secret_pos < auto_fetch_pos):
-    raise SystemExit("r29 review: provider model refresh order regressed; secret must precede network refresh")
+    raise SystemExit("r29 review: edit flow must show cache/declared models, load secret, then refresh")
 if parent.count("void fetchModels(true)") != 1:
     raise SystemExit("r29 review: existing-provider automatic model refresh must run exactly once")
 for marker in (
     "async function fetchModels(silent = false)",
     "if (!silent) toast(tFmt('providerForm.modelsFetched'",
     "} else if (!silent) {",
+    "CAS-AUTO-REVIEW-UI-R29-SILENT-NO-SUGGEST",
 ):
     if marker not in parent:
         raise SystemExit(f"r29 review: silent model refresh invariant missing: {marker}")
+
+# Automatic edit-time refresh is observational: it may update availableModels/cache/filter status,
+# but must not populate `suggested` model slots. Suggested-slot mutation is manual fetch only.
+suggest_guard = parent.find("if (!silent) { // CAS-AUTO-REVIEW-UI-R29-SILENT-NO-SUGGEST")
+suggested = parent.find("const suggested = res.suggested || {}")
+if suggest_guard < 0 or suggested <= suggest_guard:
+    raise SystemExit("r29 review: suggested model auto-fill is not guarded by !silent")
 
 # 4) The editor itself must stay pure UI: no provider API, network, credential, Tauri invoke or
 # model-catalog storage access. All such behavior stays in ProviderForm/r24.
@@ -118,7 +132,7 @@ for required in (
         raise SystemExit(f"r29 review: invalid legacy-map preservation missing: {required}")
 
 # 9) Explicit scope freeze requested after the provider-identity investigation: r29 must not change
-# r27's built-in openai fallback/model_provider behavior. That remains a later independent option.
+# r27's built-in openai fallback/model-provider behavior. That remains a later independent option.
 for text, label in ((component, "editor"), (apply_script, "overlay")):
     for forbidden in ("model_provider", "openai_base_url", "chatgpt_base_url", "model_providers.OpenAi"):
         if forbidden in text:

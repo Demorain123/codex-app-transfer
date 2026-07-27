@@ -1,0 +1,176 @@
+name: Materialize r25 Apps MCP Auth
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r25-apps-mcp-auth
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r24-auto-review-overlay
+    paths:
+      - 'scripts/apply_apps_mcp_auth_r25*.py'
+      - 'scripts/apply_sub2api_grok_compat_revision.py'
+      - 'crates/proxy/**'
+      - 'src-tauri/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - '.github/workflows/materialize-r25-apps-mcp-auth.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: r25-apps-mcp-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  materialize-and-test:
+    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[r25-generated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check every r25 Python overlay and review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_apps_mcp_auth_r25*.py scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: 01 Materialize base r25 Apps MCP auth
+        run: python scripts/apply_apps_mcp_auth_r25.py
+
+      - name: 02 Apply redirect and sensitive-header hardening
+        run: python scripts/apply_apps_mcp_auth_r25_redirect_hardening.py
+
+      - name: 03 Apply diagnostic account-id privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_privacy.py
+
+      - name: 04 Apply relay telemetry and reqwest-error URL privacy
+        run: python scripts/apply_apps_mcp_auth_r25_log_privacy.py
+
+      - name: 05 Apply hosted Apps MCP OAuth trace-query privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_query_privacy.py
+
+      - name: 06 Apply known-revoked bearer hardening
+        run: python scripts/apply_apps_mcp_auth_r25_revocation_hardening.py
+
+      - name: 07 Review base auth scope and identity source
+        run: python scripts/apply_apps_mcp_auth_r25_review.py
+
+      - name: 08 Review redirect and header sensitivity
+        run: python scripts/apply_apps_mcp_auth_r25_redirect_review.py
+
+      - name: 09 Review diagnostic account-id privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_privacy_review.py
+
+      - name: 10 Review relay telemetry and reqwest-error privacy
+        run: python scripts/apply_apps_mcp_auth_r25_log_privacy_review.py
+
+      - name: 11 Review hosted Apps MCP OAuth trace-query privacy
+        run: python scripts/apply_apps_mcp_auth_r25_trace_query_privacy_review.py
+
+      - name: 12 Review revoked-bearer fail-closed behavior
+        run: python scripts/apply_apps_mcp_auth_r25_revocation_review.py
+
+      - name: 13 Compose complete compat revision from already-materialized tree
+        run: python scripts/apply_sub2api_grok_compat_revision.py
+
+      - name: Verify complete r25 materialization and privacy markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-STATE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
+          grep -F -q 'authorization_token_fingerprint(&outbound_headers_snapshot)' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-ROUTER' crates/proxy/src/server.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-GENERIC' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-TRACE-QUERY-PRIVACY' crates/proxy/src/diagnostics.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-SNAPSHOT' src-tauri/src/codex_real_account.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-REVOCATION' src-tauri/src/codex_real_account.rs
+          grep -F -q 'CAS-APPS-MCP-AUTH-R25-WIRE' src-tauri/src/proxy_runner.rs
+          grep -F -q 'compat_revision=25' SUB2API_GROK_COMPAT_VERSION.txt
+          ! grep -E '\[apps-mcp-auth\].*(access_token|Bearer |refresh_token|account_id=)' crates/proxy/src/forward.rs
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Normalize and diff-check generated Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+
+      - name: Run all filtered r25 proxy behavior regressions
+        run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
+
+      - name: Prove complete r25 replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary > /tmp/r25-first.diff
+          python scripts/apply_sub2api_grok_compat_revision.py
+          cargo fmt --all
+          git diff --check
+          git diff --binary > /tmp/r25-second.diff
+          if ! cmp -s /tmp/r25-first.diff /tmp/r25-second.diff; then
+            echo '::error::r25 complete overlay is not idempotent after rustfmt'
+            diff -u /tmp/r25-first.diff /tmp/r25-second.diff || true
+            exit 1
+          fi
+
+      - name: Upload r25 idempotence diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r25-idempotence-diff
+          path: |
+            /tmp/r25-first.diff
+            /tmp/r25-second.diff
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Commit generated r25 source
+        if: ${{ github.event_name == 'push' && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            scripts/apply_auto_review_model_overlay_r24.py \
+            crates/proxy/src/forward.rs \
+            crates/proxy/src/server.rs \
+            crates/proxy/src/lib.rs \
+            crates/proxy/src/diagnostics.rs \
+            src-tauri/src/codex_real_account.rs \
+            src-tauri/src/proxy_runner.rs \
+            src-tauri/Cargo.toml \
+            src-tauri/tauri.conf.json \
+            Cargo.lock \
+            frontend/src/i18n/zh.ts \
+            frontend/src/i18n/en.ts \
+            frontend/src/layout/AppLayout.vue \
+            SUB2API_GROK_COMPAT_VERSION.txt
+          if git diff --cached --quiet; then
+            echo 'No generated r25 source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'fix(apps-mcp): materialize r25 auth compatibility [r25-generated]'
+          git push origin "HEAD:${GITHUB_REF_NAME}"

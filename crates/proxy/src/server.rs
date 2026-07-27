@@ -14,7 +14,7 @@ use axum::{
 use futures_util::StreamExt;
 use serde_json::json;
 
-use crate::forward::{forward_handler, ProxyState};
+use crate::forward::{forward_handler, ChatgptMcpRelayAuth, ProxyState};
 use crate::resolver::SharedResolver;
 
 /// 把所有方法 / 所有路径都路由到 `forward_handler`(裸代理 + B1 路由 + B2 鉴权改写)。
@@ -32,6 +32,25 @@ pub fn build_router_with_relogin(
     on_chatgpt_unauthorized: std::sync::Arc<dyn Fn(u64) + Send + Sync>,
 ) -> Router {
     build_router_with_state(ProxyState::new(resolver).with_relogin_notify(on_chatgpt_unauthorized))
+}
+
+/// CAS-APPS-MCP-AUTH-R25-ROUTER
+/// Same router as `build_router_with_relogin`, plus a lazy, read-only credential
+/// provider used exclusively by the ChatGPT hosted Apps MCP allowlist. Keeping
+/// this as a separate constructor preserves proxy crate/test callers that do not
+/// have access to desktop auth state.
+pub fn build_router_with_relogin_and_mcp_auth(
+    resolver: SharedResolver,
+    on_chatgpt_unauthorized: std::sync::Arc<dyn Fn(u64) + Send + Sync>,
+    chatgpt_mcp_auth_provider: std::sync::Arc<
+        dyn Fn() -> Option<ChatgptMcpRelayAuth> + Send + Sync,
+    >,
+) -> Router {
+    build_router_with_state(
+        ProxyState::new(resolver)
+            .with_relogin_notify(on_chatgpt_unauthorized)
+            .with_chatgpt_mcp_auth_provider(chatgpt_mcp_auth_provider),
+    )
 }
 
 /// 注册 apply_patch 埋点 sink(进程级一次)。adapter(`codex_app_transfer_adapters`)不能反向

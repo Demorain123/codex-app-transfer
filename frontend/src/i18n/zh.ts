@@ -1,6 +1,6 @@
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r24 · v2.4.5+24",
+  "compat.buildBadge": "Sub2API Grok Compat r25 · v2.4.5+25",
   "providerForm.grokCompatSection": "Sub2API · Grok 兼容",
   "providerForm.grokCompat": "Grok MCP / Tools 兼容",
   "providerForm.grokCompatHint": "仅对 grok-* 的 Responses 请求启用 Codex custom / namespace / tool_search 兼容；Luna / GPT 保持原生直透。",

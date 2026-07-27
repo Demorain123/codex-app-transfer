@@ -37,6 +37,40 @@ def write(path: str, text: str) -> None:
 def replace_once(text: str, old: str, new: str, label: str) -> str:
     if new in text:
         return text
+    # rustfmt can change wrapping/order around already-materialized patches.
+    # Each rule names the final semantic marker and the minimum expected count.
+    semantic_markers = {
+        "ApplyConfig field": ("pub auto_review_model_overrides: Option<&'a serde_json::Value>", 1),
+        "restore before apply": ("restore_source_if_overlay_active(paths)?", 1),
+        "overlay after catalog": ("apply_auto_review_overrides(", 1),
+        "provider helper": ("fn provider_auto_review_model_overrides", 1),
+        "snapshot imports": ("provider_auto_review_model_overrides", 1),
+        "target field": ("pub auto_review_model_overrides: Value", 1),
+        "target init": ("auto_review_model_overrides: provider_auto_review_model_overrides(provider)", 1),
+        "ApplyConfig init": ("auto_review_model_overrides: Some(&target.auto_review_model_overrides)", 1),
+        "CRUD validator": ("fn validate_auto_review_model_overrides_input", 1),
+        "CRUD input field": ("pub auto_review_model_overrides: Option<Value>", 1),
+        "add validation": ("input.auto_review_model_overrides.as_ref()", 2),
+        "update validation": ("input.auto_review_model_overrides.as_ref()", 2),
+        "add persistence": ("new_provider.insert(\"autoReviewModelOverrides\"", 1),
+        "update persistence": ("updated.insert(\"autoReviewModelOverrides\"", 1),
+        "Provider type": ("autoReviewModelOverrides?: Record<string, string>", 2),
+        "ProviderPayload type": ("autoReviewModelOverrides?: Record<string, string>", 2),
+        "form field": ("autoReviewModelOverrides: '', // CAS-AUTO-REVIEW-R24", 1),
+        "edit load": ("form.autoReviewModelOverrides = stringifyIfAny", 1),
+        "save local": ("let autoReviewModelOverrides: Record<string, unknown> | undefined", 1),
+        "parse overrides": ("autoReviewModelOverrides = parseJsonObj(", 1),
+        "payload field": ("autoReviewModelOverrides: (autoReviewModelOverrides || {})", 1),
+        "UI row": ("providerForm.autoReviewModelOverrides", 1),
+    }
+    rule = semantic_markers.get(label)
+    if rule is not None:
+        marker, minimum = rule
+        if text.count(marker) >= minimum:
+            return text
+    # Whitespace-only layout changes are also safe to treat as already applied.
+    if re.sub(r"\s+", "", new) in re.sub(r"\s+", "", text):
+        return text
     if old not in text:
         raise SystemExit(f"r24 anchor not found: {label}")
     return text.replace(old, new, 1)
@@ -79,7 +113,7 @@ fn normalized_path(path: &Path) -> String {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        raw.into_owned()
+        raw
     }
 }
 
@@ -242,7 +276,7 @@ pub fn apply_auto_review_overrides(
         &meta_path(paths),
         &json!({
             "source_path": source.to_string_lossy().replace('\\', "/"),
-            "overrides": overrides.iter().cloned().collect::<serde_json::Map<String, Value>>()
+            "overrides": overrides.iter().map(|(main, reviewer)| (main.clone(), Value::String(reviewer.clone()))).collect::<serde_json::Map<String, Value>>()
         }),
     )?;
 
@@ -344,7 +378,23 @@ mod tests {
 def patch_lib() -> None:
     path = "crates/codex_integration/src/lib.rs"
     text = read(path)
-    text = replace_once(text, "pub mod apply;\n", "pub mod apply;\npub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24\n", "lib module")
+    marker = "pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24"
+    marker_count = text.count(marker)
+    if marker_count == 0:
+        anchor = "pub mod apply;\n"
+        if text.count(anchor) != 1:
+            raise SystemExit(
+                f"r24 lib module anchor count unexpected: {text.count(anchor)}"
+            )
+        text = text.replace(anchor, anchor + marker + "\n", 1)
+    elif marker_count == 1:
+        # Already materialized. Module ordering may have changed after rustfmt; the
+        # exact semantic marker is authoritative and replay must remain a no-op.
+        pass
+    else:
+        raise SystemExit(
+            f"r24 auto_review_overlay module registration duplicated: {marker_count}"
+        )
     write(path, text)
 
 
@@ -511,7 +561,7 @@ fn validate_auto_review_model_overrides_input(value: &Value) -> Result<(), Strin
         }
     }
 
-    // silent-failure-hunter H2 + chatgpt-codex P2:grokWeb 结构在 save 时校验,
+    // [MOC-257 review] 标记本次是否新建了「首个 provider」(自动成 active)——闭包内置位,闭包外据此补
 '''
     add_repl = '''    if let Some(gw) = input.grok_web.as_ref() {
         if let Err(errs) = validate_grok_web_input(gw) {
@@ -524,7 +574,7 @@ fn validate_auto_review_model_overrides_input(value: &Value) -> Result<(), Strin
         }
     }
 
-    // silent-failure-hunter H2 + chatgpt-codex P2:grokWeb 结构在 save 时校验,
+    // [MOC-257 review] 标记本次是否新建了「首个 provider」(自动成 active)——闭包内置位,闭包外据此补
 '''
     text = replace_once(text, add_anchor, add_repl, "add validation")
     # persist on add after reviewModelSlot
@@ -615,8 +665,11 @@ def patch_provider_form() -> None:
         "  reviewModelSlot: '',\n  autoReviewModelOverrides: '', // CAS-AUTO-REVIEW-R24 JSON map: main slug -> reviewer slug\n",
         "form field",
     )
-    # reset and preset: the same literal appears twice; replace all remaining exact anchors intentionally.
-    text = text.replace("  form.reviewModelSlot = ''\n", "  form.reviewModelSlot = ''\n  form.autoReviewModelOverrides = ''\n")
+    # reset and preset: insert only when the r24 assignment is not already adjacent.
+    reset_anchor = "  form.reviewModelSlot = ''\n"
+    reset_repl = "  form.reviewModelSlot = ''\n  form.autoReviewModelOverrides = ''\n"
+    if reset_repl not in text:
+        text = text.replace(reset_anchor, reset_repl)
     text = replace_once(
         text,
         "  form.reviewModelSlot = p.reviewModelSlot || ''\n",

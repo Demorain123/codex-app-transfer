@@ -428,6 +428,7 @@ pub fn headers_to_json_redacted(h: &reqwest::header::HeaderMap) -> Value {
                 | "x-goog-api-key"
                 | "cookie"
                 | "set-cookie"
+                | "chatgpt-account-id" // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-GENERIC
         ) || lower.starts_with("cookie-")
             || lower.starts_with("x-auth-")
             || lower.starts_with("x-csrf-")
@@ -753,7 +754,10 @@ fn is_wide_extra_credential_header(name: &str) -> bool {
         .filter(|c| *c != '_' && *c != '-')
         .flat_map(|c| c.to_lowercase())
         .collect();
-    norm.contains("cookie") || norm.contains("session") || norm == "proxyauthorization"
+    norm.contains("cookie")
+        || norm.contains("session")
+        || norm == "proxyauthorization"
+        || norm == "chatgptaccountid" // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-MCP
 }
 
 /// 脱敏一个 body 字符串:① 完整 JSON → 键级清洗;② form-urlencoded(`k=v&k=v`)→ credential
@@ -975,6 +979,7 @@ pub fn headers_to_json_passthrough(h: &reqwest::header::HeaderMap) -> Value {
                         | "openai-api-key"
                         | "anthropic-api-key"
                         | "x-goog-api-key"
+                        | "chatgpt-account-id" // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-PASSTHROUGH
                 ) || lower.starts_with("x-auth-")
                     || lower.starts_with("x-csrf-")
                     || lower.starts_with("x-session-")
@@ -1033,6 +1038,28 @@ fn redact_passthrough_req_body(bytes: &[u8], content_type: Option<&str>) -> Valu
     redact_body(bytes, content_type)
 }
 
+// CAS-APPS-MCP-AUTH-R25-TRACE-QUERY-PRIVACY
+fn apps_mcp_safe_trace_route(raw: &str) -> String {
+    let relative_path = raw.split(['?', '#']).next().unwrap_or(raw);
+    if relative_path == "/backend-api/ps/mcp" || relative_path.starts_with("/backend-api/ps/mcp/") {
+        return relative_path.to_string();
+    }
+
+    if let Ok(mut url) = reqwest::Url::parse(raw) {
+        if url.scheme() == "https"
+            && url.host_str() == Some("chatgpt.com")
+            && (url.path() == "/backend-api/ps/mcp"
+                || url.path().starts_with("/backend-api/ps/mcp/"))
+        {
+            url.set_query(None);
+            url.set_fragment(None);
+            return url.to_string();
+        }
+    }
+
+    redact_credential_params(raw).0
+}
+
 /// 一条 chatgpt-backend passthrough trace → 诊断 JSON(MOC-125)。结构同 forward
 /// (inbound/outbound/response),但 header 用 [`headers_to_json_passthrough`](cookie 友好脱敏)。
 pub(crate) fn build_chatgpt_backend_trace_value(input: &ForwardTraceInput, seq: u64) -> Value {
@@ -1045,13 +1072,13 @@ pub(crate) fn build_chatgpt_backend_trace_value(input: &ForwardTraceInput, seq: 
             "method": input.method,
             // [codex P2] query 里的 credential(?code= / ?access_token= / ?key= / ?sid= 等)脱敏 ——
             // backend-api(OAuth callback / wham 等)的 query 可能带 token,原样落 jsonl/viewer 会泄漏。
-            "client_path": redact_credential_params(input.client_path).0,
+            "client_path": apps_mcp_safe_trace_route(input.client_path),
             "client_query": input.client_query.map(|q| redact_credential_params(q).0),
             "headers": headers_to_json_passthrough(input.inbound_headers),
             "body": redact_passthrough_req_body(input.inbound_body, header_content_type(input.inbound_headers)),
         },
         "outbound": {
-            "url": redact_credential_params(input.upstream_url).0,
+            "url": apps_mcp_safe_trace_route(input.upstream_url),
             "headers": headers_to_json_passthrough(input.outbound_headers),
             "body": redact_passthrough_req_body(input.outbound_body, header_content_type(input.outbound_headers)),
         },
@@ -1173,6 +1200,81 @@ mod tests {
         let s = serde_json::to_string(&headers_to_json_passthrough(&h)).unwrap();
         assert!(!s.contains("eyJTOKEN_SECRET"), "token 泄漏: {s}");
         assert!(s.contains("Bearer ***"), "scheme 应保留: {s}");
+    }
+
+    // CAS-APPS-MCP-AUTH-R25-TRACE-QUERY-PRIVACY-TEST
+    #[test]
+    fn apps_mcp_auth_r25_trace_omits_mcp_oauth_query_state_without_changing_other_paths() {
+        let relative = apps_mcp_safe_trace_route(
+            "/backend-api/ps/mcp/.well-known?state=private-state&code=secret-code#fragment",
+        );
+        assert_eq!(relative, "/backend-api/ps/mcp/.well-known");
+        assert!(!relative.contains("private-state"));
+        assert!(!relative.contains("secret-code"));
+
+        let absolute = apps_mcp_safe_trace_route(
+            "https://chatgpt.com/backend-api/ps/mcp/callback?state=private-state&code=secret-code#fragment",
+        );
+        assert!(absolute.starts_with("https://chatgpt.com/backend-api/ps/mcp/callback"));
+        assert!(!absolute.contains('?'));
+        assert!(!absolute.contains('#'));
+        assert!(!absolute.contains("private-state"));
+
+        // Preserve existing non-MCP semantics: generic `state` remains visible, while
+        // the pre-existing credential redactor still masks an OAuth authorization code.
+        let other = apps_mcp_safe_trace_route(
+            "/backend-api/ps/plugins/installed?state=diagnostic-state&code=secret-code",
+        );
+        assert!(other.contains("state=diagnostic-state"));
+        assert!(other.contains("code=***"));
+        assert!(!other.contains("secret-code"));
+    }
+
+    // CAS-APPS-MCP-AUTH-R25-TRACE-PRIVACY-TEST
+    #[test]
+    fn apps_mcp_auth_r25_chatgpt_account_id_is_redacted_in_all_diagnostic_header_paths() {
+        let mut h = reqwest::header::HeaderMap::new();
+        h.insert(
+            "chatgpt-account-id",
+            "acct-r25-private-123".parse().unwrap(),
+        );
+        h.insert("content-type", "application/json".parse().unwrap());
+
+        let generic = headers_to_json_redacted(&h);
+        let generic_s = serde_json::to_string(&generic).unwrap();
+        assert!(
+            !generic_s.contains("acct-r25-private-123"),
+            "generic trace leaked account id: {generic_s}"
+        );
+        assert!(generic["chatgpt-account-id"]
+            .as_str()
+            .unwrap()
+            .starts_with("***"));
+
+        let passthrough = headers_to_json_passthrough(&h);
+        let passthrough_s = serde_json::to_string(&passthrough).unwrap();
+        assert!(
+            !passthrough_s.contains("acct-r25-private-123"),
+            "passthrough trace leaked account id: {passthrough_s}"
+        );
+        assert!(passthrough["chatgpt-account-id"]
+            .as_str()
+            .unwrap()
+            .starts_with("***"));
+
+        let mut mcp = json!({
+            "kind": "fetch",
+            "req_headers": {
+                "ChatGPT-Account-ID": "acct-r25-private-123",
+                "content-type": "application/json"
+            }
+        });
+        redact_mcp_value(&mut mcp);
+        assert_eq!(mcp["req_headers"]["ChatGPT-Account-ID"], "***");
+        assert_eq!(mcp["req_headers"]["content-type"], "application/json");
+        assert!(!serde_json::to_string(&mcp)
+            .unwrap()
+            .contains("acct-r25-private-123"));
     }
 
     #[test]

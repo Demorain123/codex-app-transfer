@@ -39,6 +39,16 @@ use crate::diagnostics::{
 use crate::resolver::{AuthScheme, ResolveError, ResolvedProvider, SharedResolver};
 use crate::telemetry::proxy_telemetry;
 
+// CAS-APPS-MCP-AUTH-R25-STATE
+// A deliberately tiny in-memory credential snapshot. It is created per request by
+// src-tauri from the currently-active *real* ChatGPT auth.json. The proxy never
+// persists or logs these values.
+#[derive(Clone)]
+pub struct ChatgptMcpRelayAuth {
+    pub access_token: String,
+    pub account_id: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct ProxyState {
     pub http: reqwest::Client,
@@ -62,12 +72,58 @@ pub struct ProxyState {
     /// 有效但瞬时 401」**(CF edge 对已认证返 403/503、backend 瞬时故障返 5xx,都不是 401),故
     /// 无需 2xx 自愈;401 一律标记需重登(误报方向安全,清零由 detect 换 token / 重登入口做)。
     on_chatgpt_unauthorized: Option<std::sync::Arc<dyn Fn(u64) + Send + Sync>>,
+    /// CAS-APPS-MCP-AUTH-R25-STATE: lazy provider for the currently-active real
+    /// ChatGPT bearer. A callback (rather than a cached token) avoids stale-token
+    /// reuse when Codex refreshes/replaces auth.json while Transfer stays running.
+    chatgpt_mcp_auth_provider:
+        Option<std::sync::Arc<dyn Fn() -> Option<ChatgptMcpRelayAuth> + Send + Sync>>,
 }
 
 /// 出站 reqwest 默认 User-Agent — 在 provider.extra_headers 没配 UA、客户端
 /// UA 又被 `is_strip_on_forward` 剔除后兜底用,**绝不能含 codex/openai/codex_cli
 /// 等关键字**(否则等于把 strip 的 UA 又自己写回来)。
 const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("CARGO_PKG_VERSION"));
+
+// CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER
+fn apps_mcp_redirect_target_allowed(origin: &reqwest::Url, next: &reqwest::Url) -> bool {
+    let origin_is_apps_mcp = origin.scheme() == "https"
+        && origin.host_str() == Some("chatgpt.com")
+        && (origin.path() == "/backend-api/ps/mcp"
+            || origin.path().starts_with("/backend-api/ps/mcp/"));
+    if !origin_is_apps_mcp {
+        return true;
+    }
+    next.scheme() == "https"
+        && next.host_str() == Some("chatgpt.com")
+        && next.port_or_known_default() == origin.port_or_known_default()
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_redirect_tests {
+    use super::*;
+
+    #[test]
+    fn synthesized_identity_never_crosses_origin_but_other_paths_keep_old_policy() {
+        let origin = reqwest::Url::parse(
+            "https://chatgpt.com/backend-api/ps/mcp/.well-known/oauth-protected-resource",
+        )
+        .unwrap();
+        let same = reqwest::Url::parse("https://chatgpt.com/backend-api/ps/mcp/next").unwrap();
+        let other_host = reqwest::Url::parse("https://example.com/next").unwrap();
+        let other_scheme =
+            reqwest::Url::parse("http://chatgpt.com/backend-api/ps/mcp/next").unwrap();
+        let other_port =
+            reqwest::Url::parse("https://chatgpt.com:444/backend-api/ps/mcp/next").unwrap();
+        assert!(apps_mcp_redirect_target_allowed(&origin, &same));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_host));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_scheme));
+        assert!(!apps_mcp_redirect_target_allowed(&origin, &other_port));
+
+        let non_mcp =
+            reqwest::Url::parse("https://chatgpt.com/backend-api/ps/plugins/installed").unwrap();
+        assert!(apps_mcp_redirect_target_allowed(&non_mcp, &other_host));
+    }
+}
 
 impl ProxyState {
     pub fn new(resolver: SharedResolver) -> Self {
@@ -92,6 +148,13 @@ impl ProxyState {
                     if attempt.previous().len() >= 5 {
                         return attempt.error("too many redirects".to_string());
                     }
+                    // CAS-APPS-MCP-AUTH-R25-REDIRECT-GUARD
+                    if let Some(origin) = attempt.previous().first() {
+                        if !apps_mcp_redirect_target_allowed(origin, attempt.url()) {
+                            return attempt
+                                .error("Apps MCP cross-origin redirect blocked".to_string());
+                        }
+                    }
                     let host = attempt.url().host_str().unwrap_or("").to_string();
                     match redirect_host_is_safe(&host) {
                         Ok(()) => attempt.follow(),
@@ -108,6 +171,7 @@ impl ProxyState {
             resolver,
             adapters: AdapterRegistry::with_builtins(),
             on_chatgpt_unauthorized: None,
+            chatgpt_mcp_auth_provider: None,
         }
     }
 
@@ -117,6 +181,7 @@ impl ProxyState {
             resolver,
             adapters: AdapterRegistry::with_builtins(),
             on_chatgpt_unauthorized: None,
+            chatgpt_mcp_auth_provider: None,
         }
     }
 
@@ -133,6 +198,17 @@ impl ProxyState {
         notify: std::sync::Arc<dyn Fn(u64) + Send + Sync>,
     ) -> Self {
         self.on_chatgpt_unauthorized = Some(notify);
+        self
+    }
+
+    /// CAS-APPS-MCP-AUTH-R25-STATE: inject a read-only callback that returns the
+    /// *current* real ChatGPT credential snapshot. The callback is evaluated only
+    /// for the strict hosted Apps MCP allowlist and only when Codex omitted auth.
+    pub fn with_chatgpt_mcp_auth_provider(
+        mut self,
+        provider: std::sync::Arc<dyn Fn() -> Option<ChatgptMcpRelayAuth> + Send + Sync>,
+    ) -> Self {
+        self.chatgpt_mcp_auth_provider = Some(provider);
         self
     }
 }
@@ -1593,6 +1669,178 @@ fn is_chatgpt_mcp_backend_path(path: &str) -> bool {
     p == "/backend-api/ps/mcp" || p.starts_with("/backend-api/ps/mcp/")
 }
 
+// CAS-APPS-MCP-AUTH-R25-LOG-QUERY-PRIVACY
+fn apps_mcp_safe_relay_log_path(path: &str) -> &str {
+    if is_chatgpt_mcp_backend_path(path) {
+        diagnostic_path_only(path)
+    } else {
+        path
+    }
+}
+
+fn apps_mcp_safe_reqwest_error(path: &str, error: reqwest::Error) -> reqwest::Error {
+    if is_chatgpt_mcp_backend_path(path) {
+        error.without_url()
+    } else {
+        error
+    }
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_log_privacy_tests {
+    use super::*;
+
+    #[test]
+    fn apps_mcp_auth_r25_relay_logs_strip_mcp_query_but_preserve_other_backend_paths() {
+        assert_eq!(
+            apps_mcp_safe_relay_log_path(
+                "/backend-api/ps/mcp/.well-known?code=secret-code&state=private-state"
+            ),
+            "/backend-api/ps/mcp/.well-known"
+        );
+        assert_eq!(
+            apps_mcp_safe_relay_log_path("/backend-api/ps/plugins/installed?view=all"),
+            "/backend-api/ps/plugins/installed?view=all"
+        );
+    }
+}
+
+// CAS-APPS-MCP-AUTH-R25-HELPERS
+// Rehydrate only the ChatGPT-hosted Apps MCP namespace and never overwrite an
+// Authorization header supplied by Codex. The allowlist is checked on the canonical
+// outbound ChatGPT URL so dot-segment normalization cannot escape the MCP namespace.
+fn should_rehydrate_chatgpt_mcp_auth(path: &str, headers: &HeaderMap) -> bool {
+    if headers.contains_key(http::header::AUTHORIZATION) {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(&format!("https://chatgpt.com{path}")) else {
+        return false;
+    };
+    if url.scheme() != "https" || url.host_str() != Some("chatgpt.com") {
+        return false;
+    }
+    let canonical = url.path();
+    canonical == "/backend-api/ps/mcp" || canonical.starts_with("/backend-api/ps/mcp/")
+}
+
+struct PreparedChatgptMcpRelayAuth {
+    authorization: reqwest::header::HeaderValue,
+    account_id: Option<reqwest::header::HeaderValue>,
+}
+
+fn prepare_chatgpt_mcp_relay_auth(
+    auth: ChatgptMcpRelayAuth,
+    inbound_headers: &HeaderMap,
+) -> Option<PreparedChatgptMcpRelayAuth> {
+    if auth.access_token.trim().is_empty() {
+        return None;
+    }
+    let mut authorization = reqwest::header::HeaderValue::from_bytes(
+        format!("Bearer {}", auth.access_token).as_bytes(),
+    )
+    .ok()?;
+    authorization.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-BEARER-SENSITIVE
+    let account_id = if inbound_headers.contains_key("chatgpt-account-id") {
+        None
+    } else {
+        auth.account_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .and_then(|value| reqwest::header::HeaderValue::from_bytes(value.as_bytes()).ok())
+            .map(|mut value| {
+                value.set_sensitive(true); // CAS-APPS-MCP-AUTH-R25-ACCOUNT-SENSITIVE
+                value
+            })
+    };
+    Some(PreparedChatgptMcpRelayAuth {
+        authorization,
+        account_id,
+    })
+}
+
+#[cfg(test)]
+mod apps_mcp_auth_r25_proxy_tests {
+    use super::*;
+
+    #[test]
+    fn allowlist_is_exact_canonical_and_never_overwrites_inbound_authorization() {
+        let headers = HeaderMap::new();
+        assert!(should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/mcp",
+            &headers
+        ));
+        assert!(should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/mcp/.well-known/oauth-protected-resource?state=secret",
+            &headers
+        ));
+        assert!(!should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/mcpish",
+            &headers
+        ));
+        assert!(!should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/mcp/../plugins/installed",
+            &headers
+        ));
+        assert!(!should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/mcp/%2e%2e/plugins/installed",
+            &headers
+        ));
+        assert!(!should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/plugins/installed",
+            &headers
+        ));
+        assert!(!should_rehydrate_chatgpt_mcp_auth("/responses", &headers));
+
+        let mut supplied = HeaderMap::new();
+        supplied.insert(
+            http::header::AUTHORIZATION,
+            "Bearer inbound".parse().unwrap(),
+        );
+        assert!(!should_rehydrate_chatgpt_mcp_auth(
+            "/backend-api/ps/mcp",
+            &supplied
+        ));
+    }
+
+    #[test]
+    fn prepared_auth_preserves_inbound_account_and_rejects_malformed_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert("chatgpt-account-id", "account-from-codex".parse().unwrap());
+        let prepared = prepare_chatgpt_mcp_relay_auth(
+            ChatgptMcpRelayAuth {
+                access_token: "token-from-auth-json".to_string(),
+                account_id: Some("account-local".to_string()),
+            },
+            &headers,
+        )
+        .expect("valid bearer");
+        assert_eq!(prepared.authorization, "Bearer token-from-auth-json");
+        assert!(prepared.authorization.is_sensitive());
+        assert!(prepared.account_id.is_none());
+
+        // CAS-APPS-MCP-AUTH-R25-SENSITIVITY-TEST
+        let with_account = prepare_chatgpt_mcp_relay_auth(
+            ChatgptMcpRelayAuth {
+                access_token: "token-from-auth-json".to_string(),
+                account_id: Some("account-local".to_string()),
+            },
+            &HeaderMap::new(),
+        )
+        .expect("valid bearer/account");
+        assert!(with_account.authorization.is_sensitive());
+        assert!(with_account.account_id.as_ref().unwrap().is_sensitive());
+
+        let malformed = prepare_chatgpt_mcp_relay_auth(
+            ChatgptMcpRelayAuth {
+                access_token: "bad\ntoken".to_string(),
+                account_id: None,
+            },
+            &HeaderMap::new(),
+        );
+        assert!(malformed.is_none());
+    }
+}
+
 fn diagnostic_header_names(headers: &HeaderMap) -> String {
     let mut names: Vec<String> = headers
         .keys()
@@ -1625,10 +1873,15 @@ async fn passthrough_chatgpt_backend(
     body: Bytes,
 ) -> Result<Response, ForwardError> {
     let upstream = format!("https://chatgpt.com{client_path}");
+    // CAS-APPS-MCP-AUTH-R25-LOG-SAFE-PATH-WIRE
+    // The real upstream keeps its full query; only human-readable local telemetry
+    // drops Apps MCP query values. Other ChatGPT backend log paths are unchanged.
+    let relay_log_path = apps_mcp_safe_relay_log_path(client_path);
+    let relay_log_upstream = format!("https://chatgpt.com{relay_log_path}");
     let telemetry = proxy_telemetry();
     telemetry.logs.add(
         "INFO",
-        format!("[chatgpt-relay] {method} {client_path} → {upstream}"),
+        format!("[chatgpt-relay] {method} {relay_log_path} → {relay_log_upstream}"),
     );
     // [MOC-125] gate 开时先 clone Codex 原始请求体(下面会 move 进 rb),供 passthrough 诊断 trace。
     let trace_inbound = forward_trace_enabled().then(|| body.clone());
@@ -1664,6 +1917,50 @@ async fn passthrough_chatgpt_backend(
         }
         rb = rb.header(name, v.as_bytes());
     }
+
+    // CAS-APPS-MCP-AUTH-R25-REHYDRATE
+    // Codex Desktop can omit Authorization on the hosted Apps MCP relay even while
+    // the active ~/.codex/auth.json is a valid real ChatGPT login. Rehydrate only
+    // this allowlisted namespace, never overwrite inbound auth, and never consult
+    // provider/Sub2API credentials. Synthetic account mode is an explicit hard stop.
+    if is_chatgpt_mcp_backend_path(client_path) {
+        if headers.contains_key(http::header::AUTHORIZATION) {
+            telemetry.logs.add(
+                "INFO",
+                "[apps-mcp-auth] action=passthrough reason=inbound_auth_present".to_string(),
+            );
+        } else if crate::fake_account::fake_account_mode_enabled() {
+            telemetry.logs.add(
+                "INFO",
+                "[apps-mcp-auth] action=skip reason=synthetic_account".to_string(),
+            );
+        } else if should_rehydrate_chatgpt_mcp_auth(client_path, headers) {
+            let current_auth = state
+                .chatgpt_mcp_auth_provider
+                .as_ref()
+                .and_then(|provider| provider());
+            match current_auth.and_then(|auth| prepare_chatgpt_mcp_relay_auth(auth, headers)) {
+                Some(prepared) => {
+                    rb = rb.header(reqwest::header::AUTHORIZATION, prepared.authorization);
+                    let account_added = prepared.account_id.is_some();
+                    if let Some(account_id) = prepared.account_id {
+                        rb = rb.header("chatgpt-account-id", account_id);
+                    }
+                    telemetry.logs.add(
+                        "INFO",
+                        format!(
+                            "[apps-mcp-auth] action=rehydrate source=official_chatgpt_auth account_id_added={account_added}"
+                        ),
+                    );
+                }
+                None => telemetry.logs.add(
+                    "INFO",
+                    "[apps-mcp-auth] action=skip reason=no_real_chatgpt_auth".to_string(),
+                ),
+            }
+        }
+    }
+
     if !body.is_empty() {
         rb = rb.body(body);
     }
@@ -1671,7 +1968,9 @@ async fn passthrough_chatgpt_backend(
     // Build explicitly before execute so diagnostics can snapshot the request headers after all
     // passthrough copy/strip decisions. This is behavior-equivalent to RequestBuilder::send();
     // it does not add/remove any application header or alter the target URL/body.
-    let req = rb.build()?;
+    let req = rb
+        .build()
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?; // CAS-APPS-MCP-AUTH-R25-ERROR-URL-PRIVACY
     let outbound_headers_snapshot = req.headers().clone();
     if let Some(diag_id) = mcp_diag_id {
         telemetry.logs.add(
@@ -1685,13 +1984,20 @@ async fn passthrough_chatgpt_backend(
             ),
         );
     }
-    let resp = state.http.execute(req).await?;
+    let resp = state
+        .http
+        .execute(req)
+        .await
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;
     let status = resp.status().as_u16();
     let resp_headers = resp.headers().clone();
     // [review H-1] body 读失败**冒泡、不吞** —— `unwrap_or_default()` 会把上游连接 reset /
     // TLS 截断 / 读超时伪装成"成功读到空 200",抹掉根因 + 让诊断日志说假话(本模块存在的
     // 意义就是把 TLS 黑盒变可见)。透传场景上游断连本就该回 502 让 Codex 重试。
-    let resp_body = resp.bytes().await.map_err(ForwardError::Upstream)?;
+    let resp_body = resp
+        .bytes()
+        .await
+        .map_err(|e| ForwardError::Upstream(apps_mcp_safe_reqwest_error(client_path, e)))?;
     if let Some(diag_id) = mcp_diag_id {
         telemetry.logs.add(
             if (200..300).contains(&status) { "INFO" } else { "WARN" },
@@ -1717,7 +2023,7 @@ async fn passthrough_chatgpt_backend(
             "WARN"
         },
         format!(
-            "[chatgpt-relay] resp {status} {client_path} ({} bytes)",
+            "[chatgpt-relay] resp {status} {relay_log_path} ({} bytes)",
             resp_body.len()
         ),
     );
@@ -1731,13 +2037,14 @@ async fn passthrough_chatgpt_backend(
     // 日志只首次 401 记(去重 —— token 失效后 Codex 密集重试,避免刷屏)。
     if is_chatgpt_token_invalidated(status) {
         if let Some(notify) = &state.on_chatgpt_unauthorized {
-            notify(authorization_token_fingerprint(headers));
+            notify(authorization_token_fingerprint(&outbound_headers_snapshot));
+            // CAS-APPS-MCP-AUTH-R25-401-FP
         }
         if !RELOGIN_NOTIFIED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             telemetry.logs.add(
                 "ERROR",
                 format!(
-                    "[chatgpt-relay] 上游 401 → chatgpt 账号 token 服务端失效,已回灌 relogin_required(后续 401 静默): {client_path}"
+                    "[chatgpt-relay] 上游 401 → chatgpt 账号 token 服务端失效,已回灌 relogin_required(后续 401 静默): {relay_log_path}"
                 ),
             );
         }

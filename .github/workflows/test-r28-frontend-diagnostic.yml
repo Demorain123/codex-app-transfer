@@ -1,0 +1,117 @@
+name: Diagnose r28 Hybrid Direct Frontend
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r28-hybrid-direct
+    paths:
+      - 'frontend/**'
+      - 'scripts/apply_r28_hybrid_direct.py'
+      - 'scripts/apply_hybrid_direct_r28*.py'
+      - 'scripts/review_hybrid_direct_r28.py'
+      - '.github/workflows/test-r28-frontend-diagnostic.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r27-unified
+    paths:
+      - 'frontend/**'
+      - 'scripts/apply_r28_hybrid_direct.py'
+      - 'scripts/apply_hybrid_direct_r28*.py'
+      - 'scripts/review_hybrid_direct_r28.py'
+      - '.github/workflows/test-r28-frontend-diagnostic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-r28-frontend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compose r28
+        shell: bash
+        run: python scripts/apply_r28_hybrid_direct.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Build frontend and capture log
+        id: build
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          npm --prefix frontend run build > "$RUNNER_TEMP/r28-frontend-build.log" 2>&1
+          code=$?
+          cat "$RUNNER_TEMP/r28-frontend-build.log"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - name: Verify each r28 bundle marker
+        id: markers
+        if: steps.build.outputs.exit_code == '0'
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          code=0
+          for marker in \
+            'Sub2API Grok Compat r28' \
+            'Hybrid Direct' \
+            'CC Switch' \
+            'No Micro' \
+            'Auto Review' \
+            'Grok MCP / Tools'; do
+            if grep -R -F -q "$marker" frontend/dist; then
+              echo "PASS marker: $marker"
+            else
+              echo "FAIL marker: $marker"
+              code=1
+            fi
+          done
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - name: Save marker inventory
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '=== generated dist files ==='
+            find frontend/dist -maxdepth 3 -type f -print 2>/dev/null || true
+            echo '=== Hybrid/CC/Safety snippets ==='
+            grep -R -n -E 'Hybrid Direct|CC Switch|Sub2API Grok Compat r28|No Micro|Auto Review|Grok MCP / Tools' frontend/dist 2>/dev/null | head -200 || true
+          } > "$RUNNER_TEMP/r28-frontend-markers.log"
+      - name: Upload focused frontend diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r28-frontend-diagnostic
+          path: |
+            ${{ runner.temp }}/r28-frontend-build.log
+            ${{ runner.temp }}/r28-frontend-markers.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Preserve frontend result
+        if: always()
+        shell: bash
+        env:
+          BUILD_CODE: ${{ steps.build.outputs.exit_code }}
+          MARKER_CODE: ${{ steps.markers.outputs.exit_code }}
+        run: |
+          if [[ "${BUILD_CODE:-1}" != "0" ]]; then
+            echo "::error::frontend build failed: ${BUILD_CODE:-unknown}"
+            exit 1
+          fi
+          if [[ "${MARKER_CODE:-1}" != "0" ]]; then
+            echo "::error::frontend marker verification failed: ${MARKER_CODE:-unknown}"
+            exit 1
+          fi

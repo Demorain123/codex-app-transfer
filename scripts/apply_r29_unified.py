@@ -30,6 +30,12 @@ run("scripts/apply_sub2api_grok_compat_revision.py")
 # generator so future fresh checkouts no longer depend on this repair doing work.
 run("scripts/apply_auto_review_ui_r29_hardening.py")
 run("scripts/apply_auto_review_ui_r29.py")
+
+# CAS-AUTO-REVIEW-R29-EFFECTIVE: r24's original feature added the form/types/backend catalog layer but
+# accidentally omitted the frontend API serialization path. It also only saved registry state on
+# provider edit, so the active live catalog was not rebuilt until a later apply. Keep this as a
+# separate replayable companion so it can be backported to r24 after r29 validation.
+run("scripts/apply_auto_review_effective_r29.py")
 run("scripts/review_auto_review_ui_r29.py")
 
 checks = {
@@ -37,12 +43,21 @@ checks = {
         "CAS-AUTO-REVIEW-UI-R29-EDITOR",
         "CAS-AUTO-REVIEW-UI-R29-SILENT-FETCH",
         "CAS-AUTO-REVIEW-UI-R29-AUTO-FETCH",
+        "CAS-AUTO-REVIEW-R29-SAVE-FEEDBACK",
         "AutoReviewModelOverridesEditor",
     ],
     "frontend/src/components/provider/AutoReviewModelOverridesEditor.vue": [
         "CAS-AUTO-REVIEW-UI-R29",
         "mergedOptions",
         "usedByOthers",
+    ],
+    "frontend/src/api/providers.ts": [
+        "CAS-AUTO-REVIEW-R29-API-WIRE-READ",
+        "CAS-AUTO-REVIEW-R29-API-WIRE-WRITE",
+    ],
+    "src-tauri/src/admin/handlers/providers/crud.rs": [
+        "CAS-AUTO-REVIEW-R29-LIVE-APPLY",
+        "sync_desktop_for_active_provider(&state).await",
     ],
     "crates/codex_integration/src/auto_review_overlay.rs": ["CAS-AUTO-REVIEW-R24"],
     "crates/proxy/src/forward.rs": [
@@ -73,12 +88,16 @@ if lib_text.count(module_line) != 1:
         f"r29 requires exactly one r24 module registration, found {lib_text.count(module_line)}"
     )
 
-# Scope freeze: only inspect the implementation overlay here. The separate review script contains
-# these forbidden words as assertions by design, so scanning the review source itself would be a
-# false positive. review_auto_review_ui_r29.py independently checks the generated component too.
-overlay_text = (ROOT / "scripts/apply_auto_review_ui_r29.py").read_text(encoding="utf-8")
-for forbidden in ("openai_base_url", "chatgpt_base_url", "model_providers.OpenAi"):
-    if forbidden in overlay_text:
-        raise SystemExit(f"r29 scope leak in UI overlay: {forbidden}")
+# Scope freeze: scan implementation overlays, not the review script (which contains forbidden words as
+# assertions by design). r29 may improve Auto Review UI/effectiveness, but it must not change r27's
+# provider-identity routing decision while another future revision owns that experiment.
+for rel in (
+    "scripts/apply_auto_review_ui_r29.py",
+    "scripts/apply_auto_review_effective_r29.py",
+):
+    overlay_text = (ROOT / rel).read_text(encoding="utf-8")
+    for forbidden in ("openai_base_url", "chatgpt_base_url", "model_providers.OpenAi"):
+        if forbidden in overlay_text:
+            raise SystemExit(f"r29 scope leak in {rel}: {forbidden}")
 
-print("r29 unified materialization gate: PASS (r27 unified + provider-model Auto Review UI)")
+print("r29 unified materialization gate: PASS (r27 unified + provider-model Auto Review UI/effective override)")

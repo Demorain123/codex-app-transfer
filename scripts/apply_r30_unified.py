@@ -19,6 +19,12 @@ def run(rel: str) -> None:
 # r30 starts from the validated r28 line, which already materializes the complete r27 stack first.
 run("scripts/apply_r28_hybrid_direct.py")
 
+# Parent reviews own their own visible revision assertions, so run them while the tree is still
+# exactly r28. After this point r30 may safely restamp version identity without weakening r28's
+# semantic/privacy/manual-mutation checks.
+run("scripts/review_hybrid_direct_r28.py")
+run("scripts/review_hybrid_direct_r28_manual_guard.py")
+
 # Restamp the standard visible/package identity before applying r29 UI/effectiveness on top.
 REVISION.write_text("30\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -34,10 +40,8 @@ run("scripts/apply_auto_review_effective_r29.py")
 # permits only an explicit model_catalog_json-only operation in Hybrid Direct.
 run("scripts/apply_r30_hybrid_auto_review.py")
 
-# Run both parent reviews plus the new cross-feature review. Parent reviews remain authoritative for
-# their own invariants; r30 review checks the interaction and compile/import boundary.
-run("scripts/review_hybrid_direct_r28.py")
-run("scripts/review_hybrid_direct_r28_manual_guard.py")
+# r29 review is revision-agnostic and can run after r30 restamp; r30 review owns all cross-feature
+# and final visible-version assertions.
 run("scripts/review_auto_review_ui_r29.py")
 run("scripts/review_r30_unified.py")
 

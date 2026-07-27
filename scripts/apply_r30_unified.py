@@ -39,6 +39,9 @@ run("scripts/apply_auto_review_effective_r29.py")
 # gateway-only while r29 expects that sync to rebuild the COW Auto Review catalog. The r30 bridge
 # permits only an explicit model_catalog_json-only operation in Hybrid Direct.
 run("scripts/apply_r30_hybrid_auto_review.py")
+# r24 exposes the COW API through the public auto_review_overlay module rather than crate-root
+# re-exports. Keep that API boundary intact and repair the generated import accordingly.
+run("scripts/apply_r30_catalog_import_fix.py")
 
 # r29 review is revision-agnostic and can run after r30 restamp; r30 review owns all cross-feature
 # and final visible-version assertions.
@@ -62,6 +65,7 @@ required = {
     "src-tauri/src/admin/services/desktop/snapshot.rs": [
         "CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC",
         "CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY",
+        "CAS-R30-AUTO-REVIEW-MODULE-IMPORT",
     ],
     "src-tauri/src/admin/handlers/providers/crud.rs": ["CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH"],
 }

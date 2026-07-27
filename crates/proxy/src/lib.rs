@@ -27,10 +27,10 @@ pub use diagnostics::{
     feedback_bundle_dir, is_credential_key, recent_feedback_bundles, rescrub_persisted_bundle,
 };
 pub use fake_account::{fake_account_mode_enabled, set_fake_account_mode};
-pub use forward::{forward_handler, ProxyState};
+pub use forward::{forward_handler, ChatgptMcpRelayAuth, ProxyState}; // CAS-APPS-MCP-AUTH-R25-EXPORT
 pub use resolver::{
     AuthScheme, ProviderResolver, ResolveError, ResolvedProvider, SharedResolver, StaticResolver,
 };
-pub use server::{build_router, build_router_with_relogin};
+pub use server::{build_router, build_router_with_relogin, build_router_with_relogin_and_mcp_auth};
 pub use telemetry::{proxy_log_dir, proxy_telemetry, ProxyLogEntry, ProxyStatsSnapshot};
 pub use trace_store::{trace_store, TraceEntry, TraceKind, TraceStore};

@@ -15,7 +15,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use codex_app_transfer_proxy::{build_router_with_relogin, StaticResolver};
+use codex_app_transfer_proxy::{
+    build_router_with_relogin_and_mcp_auth, ChatgptMcpRelayAuth, StaticResolver,
+};
 use codex_app_transfer_registry::{config_file, Config};
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -106,9 +108,21 @@ impl ProxyManager {
                     // [MOC-124 H-2] 注入「chatgpt backend 透传遇上游 401 → 账号需重登」回调:proxy
                     // 探测到服务端 token 失效(本地 JWT exp 看不到的撤销)时回灌 relogin,让前端轮询
                     // status 时及时提示重登。
-                    let router = build_router_with_relogin(
+                    // CAS-APPS-MCP-AUTH-R25-WIRE
+                    // Resolve active ChatGPT auth lazily on every eligible MCP request so a
+                    // Codex-side token replacement is picked up without restarting Transfer.
+                    // The account helper itself rejects synthetic, API-key and expired states.
+                    let router = build_router_with_relogin_and_mcp_auth(
                         resolver,
                         Arc::new(crate::codex_real_account::mark_relogin_required_from_proxy),
+                        Arc::new(|| {
+                            crate::codex_real_account::active_chatgpt_mcp_relay_auth().map(
+                                |(access_token, account_id)| ChatgptMcpRelayAuth {
+                                    access_token,
+                                    account_id,
+                                },
+                            )
+                        }),
                     );
                     // 在 runtime 上 spawn server —— 当 runtime shutdown_background
                     // 时此 task 同步被 abort,listener + 所有 connection sub-task

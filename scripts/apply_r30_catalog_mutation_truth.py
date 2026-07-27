@@ -77,7 +77,8 @@ if "CAS-R30-CATALOG-MUTATION-TRUTH" not in text:
         "catalog success mutation report",
     )
 
-    # Restore-only helper also needs truthful mutation telemetry.
+    # Restore-only success explicitly reports whether the pointer changed. Error paths omit the field;
+    # all consumers use `unwrap_or(false)`, so an error can never be mistaken for a successful mutation.
     replace_once(
         '''            "catalogOnly": true,
             "sourceRestored": restored,
@@ -90,28 +91,7 @@ if "CAS-R30-CATALOG-MUTATION-TRUTH" not in text:
             "message": if restored {''',
         "restore-only success mutation report",
     )
-    replace_once(
-        '''                "catalogOnly": true,
-                "providerAuthMutated": false,
-                "message": e.to_string(),''',
-        '''                "catalogOnly": true,
-                "catalogMutated": false,
-                "providerAuthMutated": false,
-                "message": e.to_string(),''',
-        "restore-only path error mutation report",
-    )
-    replace_once(
-        '''            "catalogOnly": true,
-            "providerAuthMutated": false,
-            "message": format!("restore Auto Review source catalog failed: {e}"),''',
-        '''            "catalogOnly": true,
-            "catalogMutated": false,
-            "providerAuthMutated": false,
-            "message": format!("restore Auto Review source catalog failed: {e}"),''',
-        "restore-only operation error mutation report",
-    )
 
-    # Gateway-level `codexMutated` must reflect only the catalog exception, never provider/auth.
     replace_once(
         '''        let catalog_sync = sync_auto_review_catalog_only_for_provider(provider_id);
         let port = read_proxy_port(&cfg);''',
@@ -123,14 +103,17 @@ if "CAS-R30-CATALOG-MUTATION-TRUTH" not in text:
         let port = read_proxy_port(&cfg);''',
         "gateway mutation extraction",
     )
-    # Exactly two JSON branches (proxy start success/failure) follow the r30 refresh marker.
+
+    # Restrict the telemetry replacement to the Hybrid Direct early-return branch, rather than
+    # replacing unrelated `codexMutated=false` fields later in the file.
     marker_pos = text.index("CAS-R30-HYBRID-CATALOG-REFRESH")
-    tail = text[marker_pos:]
-    count = tail.count('"codexMutated": false,')
-    if count < 2:
-        raise SystemExit(f"r30 catalog mutation truth expected two gateway codexMutated=false fields, found {count}")
-    tail = tail.replace('"codexMutated": false,', '"codexMutated": catalog_mutated,', 2)
-    text = text[:marker_pos] + tail
+    branch_end = text.index("    let target_result = with_config_write", marker_pos)
+    gateway = text[marker_pos:branch_end]
+    count = gateway.count('"codexMutated": false,')
+    if count != 2:
+        raise SystemExit(f"r30 catalog mutation truth expected exactly two gateway codexMutated=false fields, found {count}")
+    gateway = gateway.replace('"codexMutated": false,', '"codexMutated": catalog_mutated,')
+    text = text[:marker_pos] + gateway + text[branch_end:]
 
 PATH.write_text(text, encoding="utf-8")
 
@@ -139,6 +122,7 @@ for required in (
     "CAS-R30-CATALOG-MUTATION-TRUTH",
     "let source_restored = match restore_source_if_overlay_active(&paths)",
     '"catalogMutated": source_restored || catalog_applied',
+    '"catalogMutated": restored',
     "let catalog_mutated = catalog_sync",
     '"codexMutated": catalog_mutated',
 ):

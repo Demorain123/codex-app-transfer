@@ -33,7 +33,19 @@ for rel, entries in ENTRIES.items():
         raise SystemExit(f"r28 i18n preflight: cannot identify unique dictionary tail for {rel}: {matches}")
     tail = matches[0]
     idx = text.rfind(tail)
-    text = text[:idx] + entries + text[idx:]
+
+    # The pre-existing last property is allowed to omit its trailing comma (en.ts does).
+    # When appending more properties, add exactly one comma while preserving the original
+    # whitespace/newline before the root dictionary terminator. If a comma already exists
+    # (zh.ts), leave it untouched. This keeps replay idempotent and valid under vue-tsc.
+    prefix = text[:idx]
+    trimmed = prefix.rstrip()
+    trailing_ws = prefix[len(trimmed):]
+    if not trimmed.endswith(","):
+        trimmed += ","
+    prefix = trimmed + trailing_ws
+
+    text = prefix + entries + text[idx:]
     path.write_text(text, encoding="utf-8")
     print(f"r28 i18n preflight: materialized {rel}")
 

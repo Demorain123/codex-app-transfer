@@ -410,18 +410,23 @@ pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) ->
         }
     };
 
-    // Always restore first. If the last mapping was removed, this is the operation that returns
-    // Codex to the user's original/external catalog; apply_auto_review_overrides({}) then no-ops.
-    if let Err(e) = restore_source_if_overlay_active(&paths) {
-        return json!({
-            "attempted": true,
-            "success": false,
-            "mode": "hybrid_direct_catalog_only",
-            "catalogOnly": true,
-            "providerAuthMutated": false,
-            "message": format!("restore Auto Review source catalog failed: {e}"),
-        });
-    }
+    // CAS-R30-CATALOG-MUTATION-TRUTH: restoring an old Transfer shadow pointer is itself a
+    // Codex config mutation, even when the new override map is empty. Track it separately from
+    // provider/auth ownership so diagnostics never claim zero mutation when model_catalog_json moved.
+    let source_restored = match restore_source_if_overlay_active(&paths) {
+        Ok(restored) => restored,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "mode": "hybrid_direct_catalog_only",
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "catalogMutated": false,
+                "message": format!("restore Auto Review source catalog failed: {e}"),
+            });
+        }
+    };
     let catalog_applied = match apply_auto_review_overrides(&paths, Some(&overrides)) {
         Ok(applied) => applied,
         Err(e) => {
@@ -431,6 +436,8 @@ pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) ->
                 "mode": "hybrid_direct_catalog_only",
                 "catalogOnly": true,
                 "providerAuthMutated": false,
+                "sourceRestored": source_restored,
+                "catalogMutated": source_restored,
                 "overrideCount": override_count,
                 "message": format!("apply Auto Review catalog overlay failed: {e}"),
             })
@@ -443,6 +450,8 @@ pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) ->
         "mode": "hybrid_direct_catalog_only",
         "catalogOnly": true,
         "catalogApplied": catalog_applied,
+        "sourceRestored": source_restored,
+        "catalogMutated": source_restored || catalog_applied,
         "overrideCount": override_count,
         "providerAuthMutated": false,
         "codexConfigScope": "model_catalog_json_only",
@@ -452,6 +461,47 @@ pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) ->
             "Hybrid Direct: Auto Review override cleared/defaulted; source catalog restored when needed"
         },
     })
+}
+
+/// CAS-R30-HYBRID-CATALOG-RESTORE-ONLY
+/// Restore only Transfer's r24 Auto Review source pointer. This is safe under Hybrid Direct because
+/// `restore_source_if_overlay_active` is a no-op unless config currently points to Transfer's exact
+/// shadow path; it never replays provider/auth/base-URL snapshots.
+pub fn restore_auto_review_source_catalog_only() -> Value {
+    let paths = match CodexPaths::from_home_env() {
+        Ok(paths) => paths,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "message": e.to_string(),
+            })
+        }
+    };
+    match restore_source_if_overlay_active(&paths) {
+        Ok(restored) => json!({
+            "attempted": true,
+            "success": true,
+            "catalogOnly": true,
+            "sourceRestored": restored,
+            "catalogMutated": restored,
+            "providerAuthMutated": false,
+            "message": if restored {
+                "Transfer Auto Review source catalog restored"
+            } else {
+                "Auto Review source restore not needed"
+            },
+        }),
+        Err(e) => json!({
+            "attempted": true,
+            "success": false,
+            "catalogOnly": true,
+            "providerAuthMutated": false,
+            "message": format!("restore Auto Review source catalog failed: {e}"),
+        }),
+    }
 }
 
 /// [MOC-257 三态] 应用插件解锁三态:设活动 auth.json + 驱动 proxy 伪造 atomic + apply(relay/非relay)。
@@ -740,6 +790,14 @@ async fn sync_desktop_for_active_provider_impl(state: &AdminState, force_apikey:
                 "message": "active provider has no id",
             });
         };
+        // CAS-R30-HYBRID-CATALOG-REFRESH: catalog is the only permitted Codex config
+        // surface in Hybrid Direct. Restore/rebase the r24 shadow on every gateway sync so a
+        // previous-session shadow never hides a newer external model catalog.
+        let catalog_sync = sync_auto_review_catalog_only_for_provider(provider_id);
+        let catalog_mutated = catalog_sync
+            .get("catalogMutated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let port = read_proxy_port(&cfg);
         crate::codex_real_account::reset_applied_mode();
         codex_app_transfer_proxy::set_fake_account_mode(false);
@@ -752,7 +810,9 @@ async fn sync_desktop_for_active_provider_impl(state: &AdminState, force_apikey:
                 "mode": "hybrid_direct_gateway",
                 "requiresProxy": true,
                 "proxyStarted": started,
-                "codexMutated": false,
+                "codexMutated": catalog_mutated,
+                "providerAuthMutated": false,
+                "catalogSync": catalog_sync,
                 "provider": provider_id,
                 "message": "Hybrid Direct gateway ready; CC Switch owns Codex provider/auth and official OAuth stays outside Transfer",
             }),
@@ -762,7 +822,9 @@ async fn sync_desktop_for_active_provider_impl(state: &AdminState, force_apikey:
                 "mode": "hybrid_direct_gateway",
                 "requiresProxy": true,
                 "proxyStarted": false,
-                "codexMutated": false,
+                "codexMutated": catalog_mutated,
+                "providerAuthMutated": false,
+                "catalogSync": catalog_sync,
                 "provider": provider_id,
                 "message": e,
             }),
@@ -972,7 +1034,18 @@ pub fn restore_codex_if_enabled(reason: &str) -> Value {
     // CAS-HYBRID-DIRECT-R28-RESTORE-BLOCK: CC Switch may have changed config/auth
     // after Transfer started. Replaying an old Transfer snapshot would overwrite that owner.
     if super::hybrid_direct::enabled_from_config(&cfg) {
-        return json!({"attempted": false, "restored": false, "success": true, "reason": reason, "message": "Hybrid Direct: restore skipped; CC Switch owns Codex provider/auth"});
+        // CAS-R30-HYBRID-CATALOG-EXIT-RESTORE: full snapshot restore stays blocked, but remove our
+        // own Auto Review shadow pointer when it is still active. The helper is exact-path gated.
+        let catalog_restore = restore_auto_review_source_catalog_only();
+        return json!({
+            "attempted": false,
+            "restored": false,
+            "success": true,
+            "reason": reason,
+            "providerAuthMutated": false,
+            "catalogRestore": catalog_restore,
+            "message": "Hybrid Direct: provider/auth restore skipped; CC Switch owns them; Transfer Auto Review catalog pointer restored when applicable",
+        });
     }
     if !read_setting_bool(&cfg, "restoreCodexOnExit", true) {
         return json!({"attempted": false, "restored": false, "success": true, "reason": reason, "message": "disabled by settings"});

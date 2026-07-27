@@ -58,91 +58,107 @@ write(path, text)
 # a later provider apply/restart. Re-sync only when the effective map actually changed and the edited
 # provider is active. Registry persistence remains authoritative even if the live sync fails; the
 # response exposes that failure so the UI can tell the user rather than silently claiming success.
+#
+# IMPORTANT: use a semantic marker around the *whole Rust patch*. cargo fmt legitimately rewrites
+# the generated Rust, so exact `new in text` replay checks are not stable after formatting. Once the
+# marker exists we validate the behavior and skip textual reinsertion entirely.
 path = "src-tauri/src/admin/handlers/providers/crud.rs"
 text = read(path)
-text = replace_once(
-    text,
-    "use super::super::desktop::switch_provider_and_sync;\n",
-    "use super::super::desktop::{sync_desktop_for_active_provider, switch_provider_and_sync};\n",
-    "desktop sync import",
-)
-text = replace_once(
-    text,
-    "pub async fn update_provider(\n    Path(id): Path<String>,\n    Json(input): Json<AddProviderInput>,\n) -> impl IntoResponse {\n",
-    "pub async fn update_provider(\n    State(state): State<AdminState>,\n    Path(id): Path<String>,\n    Json(input): Json<AddProviderInput>,\n) -> impl IntoResponse {\n",
-    "update provider state extractor",
-)
-text = replace_once(
-    text,
-    "    let result = with_config_write(|cfg| {\n        let Some(idx) = provider_index(cfg, &id) else {\n",
-    "    let result = with_config_write(|cfg| {\n"
-    "        // CAS-AUTO-REVIEW-R29-LIVE-APPLY: capture active identity before borrowing providers mutably.\n"
-    "        let active_id = cfg\n"
-    "            .get(\"activeProvider\")\n"
-    "            .and_then(|v| v.as_str())\n"
-    "            .map(str::to_owned);\n"
-    "        let Some(idx) = provider_index(cfg, &id) else {\n",
-    "capture active provider",
-)
-text = replace_once(
-    text,
-    "        let existing = providers[idx].as_object().unwrap().clone();\n        let mut updated = existing.clone();\n",
-    "        let existing = providers[idx].as_object().unwrap().clone();\n"
-    "        let previous_auto_review = existing\n"
-    "            .get(\"autoReviewModelOverrides\")\n"
-    "            .cloned()\n"
-    "            .unwrap_or_else(|| json!({}));\n"
-    "        let mut updated = existing.clone();\n",
-    "capture previous override",
-)
-text = replace_once(
-    text,
-    "        let updated_value = Value::Object(updated);\n        providers[idx] = updated_value.clone();\n        Ok(ConfigMutation::Modified(updated_value))\n",
-    "        let next_auto_review = updated\n"
-    "            .get(\"autoReviewModelOverrides\")\n"
-    "            .cloned()\n"
-    "            .unwrap_or_else(|| json!({}));\n"
-    "        let auto_review_changed = input.auto_review_model_overrides.is_some()\n"
-    "            && previous_auto_review != next_auto_review;\n"
-    "        let edited_active_provider = active_id.as_deref() == Some(id.as_str());\n"
-    "        let updated_value = Value::Object(updated);\n"
-    "        providers[idx] = updated_value.clone();\n"
-    "        Ok(ConfigMutation::Modified((\n"
-    "            updated_value,\n"
-    "            auto_review_changed,\n"
-    "            edited_active_provider,\n"
-    "        )))\n",
-    "return live apply metadata",
-)
-text = replace_once(
-    text,
-    "    let updated_value = match result {\n        Ok(v) => v,\n",
-    "    let (updated_value, auto_review_changed, edited_active_provider) = match result {\n        Ok(v) => v,\n",
-    "destructure update result",
-)
-text = replace_once(
-    text,
-    "    Json(json!({\"success\": true, \"provider\": public_provider(&updated_value)})).into_response()\n}\n",
-    "    let mut response = json!({\n"
-    "        \"success\": true,\n"
-    "        \"provider\": public_provider(&updated_value),\n"
-    "        \"autoReviewChanged\": auto_review_changed,\n"
-    "        \"autoReviewActiveProvider\": edited_active_provider,\n"
-    "    });\n"
-    "    if auto_review_changed && edited_active_provider {\n"
-    "        let desktop_sync = sync_desktop_for_active_provider(&state).await;\n"
-    "        let applied = desktop_sync\n"
-    "            .get(\"success\")\n"
-    "            .and_then(|v| v.as_bool())\n"
-    "            .unwrap_or(false);\n"
-    "        response[\"autoReviewApplied\"] = Value::Bool(applied);\n"
-    "        response[\"autoReviewApply\"] = desktop_sync;\n"
-    "    }\n"
-    "    Json(response).into_response()\n"
-    "}\n",
-    "sync changed active override",
-)
-write(path, text)
+if "CAS-AUTO-REVIEW-R29-LIVE-APPLY" not in text:
+    text = replace_once(
+        text,
+        "use super::super::desktop::switch_provider_and_sync;\n",
+        "use super::super::desktop::{sync_desktop_for_active_provider, switch_provider_and_sync};\n",
+        "desktop sync import",
+    )
+    text = replace_once(
+        text,
+        "pub async fn update_provider(\n    Path(id): Path<String>,\n    Json(input): Json<AddProviderInput>,\n) -> impl IntoResponse {\n",
+        "pub async fn update_provider(\n    State(state): State<AdminState>,\n    Path(id): Path<String>,\n    Json(input): Json<AddProviderInput>,\n) -> impl IntoResponse {\n",
+        "update provider state extractor",
+    )
+    text = replace_once(
+        text,
+        "    let result = with_config_write(|cfg| {\n        let Some(idx) = provider_index(cfg, &id) else {\n",
+        "    let result = with_config_write(|cfg| {\n"
+        "        // CAS-AUTO-REVIEW-R29-LIVE-APPLY: capture active identity before borrowing providers mutably.\n"
+        "        let active_id = cfg\n"
+        "            .get(\"activeProvider\")\n"
+        "            .and_then(|v| v.as_str())\n"
+        "            .map(str::to_owned);\n"
+        "        let Some(idx) = provider_index(cfg, &id) else {\n",
+        "capture active provider",
+    )
+    text = replace_once(
+        text,
+        "        let existing = providers[idx].as_object().unwrap().clone();\n        let mut updated = existing.clone();\n",
+        "        let existing = providers[idx].as_object().unwrap().clone();\n"
+        "        let previous_auto_review = existing\n"
+        "            .get(\"autoReviewModelOverrides\")\n"
+        "            .cloned()\n"
+        "            .unwrap_or_else(|| json!({}));\n"
+        "        let mut updated = existing.clone();\n",
+        "capture previous override",
+    )
+    text = replace_once(
+        text,
+        "        let updated_value = Value::Object(updated);\n        providers[idx] = updated_value.clone();\n        Ok(ConfigMutation::Modified(updated_value))\n",
+        "        let next_auto_review = updated\n"
+        "            .get(\"autoReviewModelOverrides\")\n"
+        "            .cloned()\n"
+        "            .unwrap_or_else(|| json!({}));\n"
+        "        let auto_review_changed = input.auto_review_model_overrides.is_some()\n"
+        "            && previous_auto_review != next_auto_review;\n"
+        "        let edited_active_provider = active_id.as_deref() == Some(id.as_str());\n"
+        "        let updated_value = Value::Object(updated);\n"
+        "        providers[idx] = updated_value.clone();\n"
+        "        Ok(ConfigMutation::Modified((\n"
+        "            updated_value,\n"
+        "            auto_review_changed,\n"
+        "            edited_active_provider,\n"
+        "        )))\n",
+        "return live apply metadata",
+    )
+    text = replace_once(
+        text,
+        "    let updated_value = match result {\n        Ok(v) => v,\n",
+        "    let (updated_value, auto_review_changed, edited_active_provider) = match result {\n        Ok(v) => v,\n",
+        "destructure update result",
+    )
+    text = replace_once(
+        text,
+        "    Json(json!({\"success\": true, \"provider\": public_provider(&updated_value)})).into_response()\n}\n",
+        "    let mut response = json!({\n"
+        "        \"success\": true,\n"
+        "        \"provider\": public_provider(&updated_value),\n"
+        "        \"autoReviewChanged\": auto_review_changed,\n"
+        "        \"autoReviewActiveProvider\": edited_active_provider,\n"
+        "    });\n"
+        "    if auto_review_changed && edited_active_provider {\n"
+        "        let desktop_sync = sync_desktop_for_active_provider(&state).await;\n"
+        "        let applied = desktop_sync\n"
+        "            .get(\"success\")\n"
+        "            .and_then(|v| v.as_bool())\n"
+        "            .unwrap_or(false);\n"
+        "        response[\"autoReviewApplied\"] = Value::Bool(applied);\n"
+        "        response[\"autoReviewApply\"] = desktop_sync;\n"
+        "    }\n"
+        "    Json(response).into_response()\n"
+        "}\n",
+        "sync changed active override",
+    )
+    write(path, text)
+else:
+    for required in (
+        "sync_desktop_for_active_provider",
+        "previous_auto_review",
+        "auto_review_changed",
+        "edited_active_provider",
+        'response["autoReviewApplied"]',
+    ):
+        if required not in text:
+            raise SystemExit(f"r29 effective rustfmt replay marker exists but behavior is incomplete: {required}")
+    print("r29 live-apply Rust patch already materialized; semantic replay validation PASS")
 
 
 # 3) CAS-AUTO-REVIEW-R29-SAVE-FEEDBACK

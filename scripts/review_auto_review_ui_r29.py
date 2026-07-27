@@ -154,13 +154,15 @@ if providers_api.count("body.autoReviewModelOverrides = payload.autoReviewModelO
     raise SystemExit("r29 review: Auto Review write transport must exist exactly once")
 
 # 10) Active-provider apply semantics: registry persistence happens first, then only a real mapping
-# change on the currently-active provider may rebuild the live catalog. Non-active providers and
-# unrelated provider edits must not mutate ~/.codex just because the form was saved.
+# change on the currently-active provider may rebuild the live catalog. These checks are deliberately
+# rustfmt-tolerant: test semantic fragments rather than requiring an entire formatted expression on
+# one physical line.
 for required in (
     "CAS-AUTO-REVIEW-R29-LIVE-APPLY",
     "let previous_auto_review = existing",
-    "let auto_review_changed = input.auto_review_model_overrides.is_some()",
-    "&& previous_auto_review != next_auto_review",
+    "let auto_review_changed",
+    "input.auto_review_model_overrides.is_some()",
+    "previous_auto_review != next_auto_review",
     "let edited_active_provider = active_id.as_deref() == Some(id.as_str())",
     "if auto_review_changed && edited_active_provider",
     "sync_desktop_for_active_provider(&state).await",

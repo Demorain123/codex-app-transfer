@@ -47,12 +47,11 @@ for rel, markers in required.items():
         if marker not in text:
             raise SystemExit(f"r30 review parent marker missing in {rel}: {marker}")
 
-# 2) r28 zero-proxy invariant must stay intact. Startup/general provider sync in Hybrid Direct is
-# gateway-only and must still report that it did not mutate Codex provider/auth state.
+# 2) r28 zero-proxy ownership must remain intact. Hybrid Direct may now mutate only the model catalog
+# pointer through the r30 exception; provider/auth/network ownership is still CC Switch's.
 for marker in (
     "CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC",
     '"mode": "hybrid_direct_gateway"',
-    '"codexMutated": false',
     "start_proxy_for_provider_if_needed",
 ):
     if marker not in snapshot:
@@ -65,12 +64,12 @@ for marker in (
     if marker not in hybrid:
         raise SystemExit(f"r30 review Hybrid Direct safety helper missing: {marker}")
 
-# 3) Isolate the r30 catalog-only function and prove its scope is narrow. It may touch the COW
-# catalog + model_catalog_json pointer only; provider/auth/network/proxy operations are forbidden.
+# 3) Isolate the provider-specific r30 catalog-only function. It may touch only r24 COW state and
+# model_catalog_json; provider/auth/network/proxy operations are forbidden.
 start = snapshot.find("/// CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY")
-end = snapshot.find("\n/// [MOC-257 三态]", start)
+end = snapshot.find("\n/// CAS-R30-HYBRID-CATALOG-RESTORE-ONLY", start)
 if start < 0 or end <= start:
-    raise SystemExit("r30 review could not isolate catalog-only function")
+    raise SystemExit("r30 review could not isolate provider catalog-only function")
 catalog_only = snapshot[start:end]
 for marker in (
     "sync_auto_review_catalog_only_for_provider",
@@ -78,6 +77,9 @@ for marker in (
     "active provider changed during Auto Review save",
     "restore_source_if_overlay_active(&paths)",
     "apply_auto_review_overrides(&paths, Some(&overrides))",
+    "CAS-R30-CATALOG-MUTATION-TRUTH",
+    "let source_restored = match restore_source_if_overlay_active(&paths)",
+    '"catalogMutated": source_restored || catalog_applied',
     '"providerAuthMutated": false',
     '"codexConfigScope": "model_catalog_json_only"',
 ):
@@ -102,8 +104,6 @@ if not (0 <= restore_pos < apply_pos):
     raise SystemExit("r30 review requires source restore before shadow rebuild")
 
 # r24 intentionally exposes these helpers through its public module, not crate-root re-exports.
-# Validate the generated Rust uses that authoritative API boundary so a full compile cannot be
-# accidentally bypassed by static markers alone.
 for marker in (
     "CAS-R30-AUTO-REVIEW-MODULE-IMPORT",
     "codex_app_transfer_codex_integration::auto_review_overlay::{",
@@ -111,12 +111,72 @@ for marker in (
 ):
     if marker not in snapshot:
         raise SystemExit(f"r30 review authoritative COW import missing: {marker}")
-if '''use codex_app_transfer_codex_integration::{\n    apply_auto_review_overrides,'''.replace("\\n", "\n") in snapshot:
+if "use codex_app_transfer_codex_integration::{\n    apply_auto_review_overrides," in snapshot:
     raise SystemExit("r30 review: stale invalid crate-root Auto Review import remains")
 
-# 4) Hybrid Direct gets the catalog-only exception only when an explicit active-provider mapping
-# changed. Normal mode keeps r29's full desktop sync. This also fixes r29's missing handler re-export
-# assumption by importing both functions from the real service module.
+# 4) Restore-only helper must be even narrower than apply: exact shadow-pointer restore only.
+restore_start = snapshot.find("/// CAS-R30-HYBRID-CATALOG-RESTORE-ONLY")
+restore_end = snapshot.find("\n/// [MOC-257 三态]", restore_start)
+if restore_start < 0 or restore_end <= restore_start:
+    raise SystemExit("r30 review could not isolate restore-only catalog helper")
+restore_only = snapshot[restore_start:restore_end]
+for marker in (
+    "restore_auto_review_source_catalog_only",
+    "restore_source_if_overlay_active(&paths)",
+    '"catalogMutated": restored',
+    '"providerAuthMutated": false',
+):
+    if marker not in restore_only:
+        raise SystemExit(f"r30 review restore-only invariant missing: {marker}")
+for forbidden in (
+    "apply_auto_review_overrides(",
+    "apply_provider(",
+    "start_proxy",
+    "activate_real_account",
+    "activate_fake_account",
+    "clear_active_auth_file",
+):
+    if forbidden in restore_only:
+        raise SystemExit(f"r30 review restore-only scope leak: {forbidden}")
+
+# 5) Hybrid Direct gateway sync must refresh/rebase the Auto Review shadow on every active-provider
+# sync, while truthfully reporting that catalog mutation is different from provider/auth mutation.
+sync_start = snapshot.find("async fn sync_desktop_for_active_provider_impl")
+sync_end = snapshot.find("    let target_result = with_config_write", sync_start)
+if sync_start < 0 or sync_end <= sync_start:
+    raise SystemExit("r30 review could not isolate Hybrid Direct gateway sync")
+gateway_sync = snapshot[sync_start:sync_end]
+for marker in (
+    "CAS-R30-HYBRID-CATALOG-REFRESH",
+    "sync_auto_review_catalog_only_for_provider(provider_id)",
+    "let catalog_mutated = catalog_sync",
+    '"catalogSync": catalog_sync',
+    '"codexMutated": catalog_mutated',
+    '"providerAuthMutated": false',
+):
+    if marker not in gateway_sync:
+        raise SystemExit(f"r30 review gateway catalog lifecycle missing: {marker}")
+# The provider/auth mutation sites must remain outside the Hybrid Direct early-return branch.
+for forbidden in ("apply_provider(", "ensure_gateway_key(", "write_auth("):
+    if forbidden in gateway_sync:
+        raise SystemExit(f"r30 review Hybrid Direct gateway gained forbidden mutation: {forbidden}")
+
+# 6) r28 full snapshot restore remains blocked, but r30 restores only Transfer's shadow pointer first.
+exit_marker = snapshot.find("CAS-R30-HYBRID-CATALOG-EXIT-RESTORE")
+full_restore = snapshot.find("restore_codex_state(", exit_marker)
+if exit_marker < 0 or full_restore < 0 or exit_marker >= full_restore:
+    raise SystemExit("r30 review catalog-only exit restore is not before full restore path")
+exit_window = snapshot[exit_marker:full_restore]
+for marker in (
+    "restore_auto_review_source_catalog_only()",
+    '"providerAuthMutated": false',
+    '"catalogRestore": catalog_restore',
+):
+    if marker not in exit_window:
+        raise SystemExit(f"r30 review exit catalog restore invariant missing: {marker}")
+
+# 7) Hybrid Direct gets the catalog-only exception only when an explicit active-provider mapping
+# changed. Normal mode keeps r29's full desktop sync. Also reject r29's stale handler re-export import.
 for marker in (
     "CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH",
     "if auto_review_changed && edited_active_provider",
@@ -130,7 +190,7 @@ for marker in (
 if "use super::super::desktop::{switch_provider_and_sync, sync_desktop_for_active_provider};" in crud:
     raise SystemExit("r30 review: r29 stale/non-reexported desktop sync import resurfaced")
 
-# 5) Explicit empty mappings still travel through the provider API, because clearing the last row
+# 8) Explicit empty mappings still travel through the provider API, because clearing the last row
 # must restore the original source catalog rather than leave a stale shadow override.
 for marker in (
     "if (payload.autoReviewModelOverrides !== undefined)",
@@ -143,8 +203,8 @@ if "updateResult?.autoReviewChanged" not in provider_form:
 if "restartCodexApp(" in provider_form:
     raise SystemExit("r30 review provider save must not auto-restart Codex")
 
-# 6) r30 is the first package that intentionally combines the two sibling lines.
+# 9) Final identity.
 if "compat_revision=30" not in version or "app_version=2.4.5+30" not in version:
     raise SystemExit("r30 review visible/package version is not v2.4.5+30")
 
-print("r30 deep unified review: PASS (r28 Hybrid Direct + r29 Auto Review with catalog-only bridge)")
+print("r30 deep unified review: PASS (r28 Hybrid Direct + r29 Auto Review + safe catalog lifecycle)")

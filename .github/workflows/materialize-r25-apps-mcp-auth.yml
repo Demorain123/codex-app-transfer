@@ -124,8 +124,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Match the already-green r26 pattern: take the baseline only after cargo
-          # tests, because Cargo is allowed to reconcile tracked workspace metadata.
           git diff --binary > /tmp/r25-first.diff
           python scripts/apply_sub2api_grok_compat_revision.py
           cargo fmt --all
@@ -137,8 +135,19 @@ jobs:
             exit 1
           fi
 
+      - name: Upload r25 idempotence diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r25-idempotence-diff
+          path: |
+            /tmp/r25-first.diff
+            /tmp/r25-second.diff
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Commit generated r25 source
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' && success() }}
         shell: bash
         run: |
           set -euo pipefail

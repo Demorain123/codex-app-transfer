@@ -7,6 +7,7 @@ on:
       - sub2api-grok-compat-next-r29-auto-review-ui
     paths:
       - 'frontend/**'
+      - 'src-tauri/**'
       - 'scripts/**'
       - 'SUB2API_GROK_COMPAT_REVISION.txt'
       - 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -38,6 +39,7 @@ jobs:
             scripts/apply_r29_unified.py \
             scripts/apply_auto_review_ui_r29_hardening.py \
             scripts/apply_auto_review_ui_r29.py \
+            scripts/apply_auto_review_effective_r29.py \
             scripts/review_auto_review_ui_r29.py
 
       - name: Replay validated r27 unified base
@@ -56,7 +58,10 @@ jobs:
       - name: Apply r29 provider-model UI overlay
         run: python scripts/apply_auto_review_ui_r29.py
 
-      - name: Run deep r29 UI self-review
+      - name: Apply r29 effective override wiring and live-sync companion
+        run: python scripts/apply_auto_review_effective_r29.py
+
+      - name: Run deep r29 Auto Review self-review
         run: python scripts/review_auto_review_ui_r29.py
 
       - name: Check materialized text and version markers
@@ -68,6 +73,9 @@ jobs:
           grep -F -q 'app_version=2.4.5+29' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-SILENT-NO-SUGGEST' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-R29-SAVE-FEEDBACK' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-R29-API-WIRE-WRITE' frontend/src/api/providers.ts
+          grep -F -q 'CAS-AUTO-REVIEW-R29-LIVE-APPLY' src-tauri/src/admin/handlers/providers/crud.rs
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29' frontend/src/components/provider/AutoReviewModelOverridesEditor.vue
           test "$(grep -F -c 'pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24' crates/codex_integration/src/lib.rs)" = "1"
 
@@ -86,6 +94,14 @@ jobs:
           grep -R -F -q 'Sub2API Grok Compat r29' frontend/dist
           grep -R -F -q '添加映射' frontend/dist
           grep -R -F -q '刷新模型列表' frontend/dist
+          grep -R -F -q '重启 Codex' frontend/dist
+
+      - name: Check Rust formatting after materialization
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          cargo fmt --all -- --check
 
       - name: Prove raw r29 overlay replay idempotence
         shell: bash
@@ -114,5 +130,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m '[r29-generated] materialize provider-model Auto Review UI'
+          git commit -m '[r29-generated] materialize provider-model Auto Review UI/effective override'
           git push origin HEAD:sub2api-grok-compat-next-r29-auto-review-ui

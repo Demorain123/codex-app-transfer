@@ -60,15 +60,6 @@ jobs:
             exit 1
           fi
           tail -n 40 "$RUNNER_TEMP/r30-compose.log"
-          grep -F -q 'compat_revision=30' SUB2API_GROK_COMPAT_VERSION.txt
-          grep -F -q 'app_version=2.4.5+30' SUB2API_GROK_COMPAT_VERSION.txt
-          grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
-          grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
-          grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
-          grep -F -q 'CAS-R30-AUTO-REVIEW-MODULE-IMPORT' src-tauri/src/admin/services/desktop/snapshot.rs
-          grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH' src-tauri/src/admin/handlers/providers/crud.rs
-          python scripts/review_r30_unified.py
-          git diff --check
 
       - name: Upload r30 composition diagnostic
         if: failure() && steps.compose.outcome == 'failure'
@@ -78,6 +69,24 @@ jobs:
           path: ${{ runner.temp }}/r30-compose.log
           if-no-files-found: error
           retention-days: 7
+
+      - name: Check r30 version and materialization markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'compat_revision=30' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+30' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-AUTO-REVIEW-MODULE-IMPORT' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH' src-tauri/src/admin/handlers/providers/crud.rs
+
+      - name: Re-run deep r30 review on materialized source
+        run: python scripts/review_r30_unified.py
+
+      - name: Check materialized patch whitespace
+        run: git diff --check
 
       - uses: actions/setup-node@v4
         with:

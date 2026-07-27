@@ -79,12 +79,26 @@ jobs:
           cat "$RUNNER_TEMP/r29-deep-review.log"
           exit $status
 
+      - name: Stage exact r29 deep-review diagnostic
+        if: failure() && steps.deep-review.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r29-review-diag/frontend/src/components/provider"
+          mkdir -p "$RUNNER_TEMP/r29-review-diag/frontend/src/api"
+          mkdir -p "$RUNNER_TEMP/r29-review-diag/src-tauri/src/admin/handlers/providers"
+          cp "$RUNNER_TEMP/r29-deep-review.log" "$RUNNER_TEMP/r29-review-diag/"
+          cp frontend/src/components/provider/ProviderFormModal.vue "$RUNNER_TEMP/r29-review-diag/frontend/src/components/provider/"
+          cp frontend/src/components/provider/AutoReviewModelOverridesEditor.vue "$RUNNER_TEMP/r29-review-diag/frontend/src/components/provider/"
+          cp frontend/src/api/providers.ts "$RUNNER_TEMP/r29-review-diag/frontend/src/api/"
+          cp src-tauri/src/admin/handlers/providers/crud.rs "$RUNNER_TEMP/r29-review-diag/src-tauri/src/admin/handlers/providers/"
+
       - name: Upload exact r29 deep-review diagnostic
         if: failure() && steps.deep-review.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: r29-deep-review-diagnostic
-          path: ${{ runner.temp }}/r29-deep-review.log
+          path: ${{ runner.temp }}/r29-review-diag
           if-no-files-found: error
           retention-days: 7
 

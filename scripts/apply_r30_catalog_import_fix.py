@@ -25,18 +25,23 @@ use codex_app_transfer_codex_integration::{
 };'''
     count = text.count(old)
     if count != 1:
-        raise SystemExit(f"r30 catalog import fix expected exactly one generated root import, found {count}")
+        raise SystemExit(
+            f"r30 catalog import fix expected exactly one generated root import, found {count}"
+        )
     text = text.replace(old, new, 1)
     PATH.write_text(text, encoding="utf-8")
     print("r30 fixed Auto Review COW imports to authoritative module")
 else:
     print("r30 Auto Review COW module import already materialized")
 
+# Semantic, order-tolerant validation. r30's later read-only state probe legitimately inserts
+# `auto_review_overlay_active` between these names, and rustfmt may reflow the list as well.
 text = PATH.read_text(encoding="utf-8")
 for required in (
     marker,
     "codex_app_transfer_codex_integration::auto_review_overlay::{",
-    "apply_auto_review_overrides, restore_source_if_overlay_active",
+    "apply_auto_review_overrides",
+    "restore_source_if_overlay_active",
 ):
     if required not in text:
         raise SystemExit(f"r30 catalog import fix missing: {required}")

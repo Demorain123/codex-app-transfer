@@ -116,7 +116,6 @@ jobs:
           set -euo pipefail
           cargo fmt --all
           git diff --check
-          git diff --binary > /tmp/r25-first.diff
 
       - name: Run all filtered r25 proxy behavior regressions
         run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
@@ -125,6 +124,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Match the already-green r26 pattern: take the baseline only after cargo
+          # tests, because Cargo is allowed to reconcile tracked workspace metadata.
+          git diff --binary > /tmp/r25-first.diff
           python scripts/apply_sub2api_grok_compat_revision.py
           cargo fmt --all
           git diff --check

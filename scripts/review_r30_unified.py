@@ -101,6 +101,19 @@ apply_pos = catalog_only.find("apply_auto_review_overrides(&paths, Some(&overrid
 if not (0 <= restore_pos < apply_pos):
     raise SystemExit("r30 review requires source restore before shadow rebuild")
 
+# r24 intentionally exposes these helpers through its public module, not crate-root re-exports.
+# Validate the generated Rust uses that authoritative API boundary so a full compile cannot be
+# accidentally bypassed by static markers alone.
+for marker in (
+    "CAS-R30-AUTO-REVIEW-MODULE-IMPORT",
+    "codex_app_transfer_codex_integration::auto_review_overlay::{",
+    "apply_auto_review_overrides, restore_source_if_overlay_active",
+):
+    if marker not in snapshot:
+        raise SystemExit(f"r30 review authoritative COW import missing: {marker}")
+if '''use codex_app_transfer_codex_integration::{\n    apply_auto_review_overrides,'''.replace("\\n", "\n") in snapshot:
+    raise SystemExit("r30 review: stale invalid crate-root Auto Review import remains")
+
 # 4) Hybrid Direct gets the catalog-only exception only when an explicit active-provider mapping
 # changed. Normal mode keeps r29's full desktop sync. This also fixes r29's missing handler re-export
 # assumption by importing both functions from the real service module.

@@ -29,6 +29,8 @@ run("scripts/apply_auto_review_effective_r29.py")
 
 run("scripts/apply_r30_hybrid_auto_review.py")
 run("scripts/apply_r30_catalog_import_fix.py")
+# Add the read-only r24-path-aware probe before lifecycle telemetry uses restore mutation truth.
+run("scripts/apply_r30_catalog_state_probe.py")
 run("scripts/apply_r30_catalog_lifecycle.py")
 run("scripts/apply_r30_catalog_mutation_truth.py")
 
@@ -36,7 +38,10 @@ run("scripts/review_auto_review_ui_r29.py")
 run("scripts/review_r30_unified.py")
 
 required = {
-    "crates/codex_integration/src/auto_review_overlay.rs": ["CAS-AUTO-REVIEW-R24"],
+    "crates/codex_integration/src/auto_review_overlay.rs": [
+        "CAS-AUTO-REVIEW-R24",
+        "CAS-R30-AUTO-REVIEW-OVERLAY-ACTIVE-PROBE",
+    ],
     "crates/proxy/src/forward.rs": [
         "CAS-APPS-MCP-AUTH-R25-REHYDRATE",
         "CAS-SUBAGENT-FAILURE-CHAIN-R26-HOOK",
@@ -53,6 +58,7 @@ required = {
         "CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC",
         "CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY",
         "CAS-R30-AUTO-REVIEW-MODULE-IMPORT",
+        "auto_review_overlay_active",
         "CAS-R30-HYBRID-CATALOG-RESTORE-ONLY",
         "CAS-R30-HYBRID-CATALOG-REFRESH",
         "CAS-R30-HYBRID-CATALOG-EXIT-RESTORE",
@@ -80,4 +86,4 @@ if lib_text.count(module_line) != 1:
         f"r30 requires exactly one r24 Auto Review module registration, found {lib_text.count(module_line)}"
     )
 
-print("r30 unified composition: COMPLETE (r24+r25+r26+r27+r28+r29+r30 bridge+lifecycle+truth)")
+print("r30 unified composition: COMPLETE (r24+r25+r26+r27+r28+r29+r30 bridge+lifecycle+probe+truth)")

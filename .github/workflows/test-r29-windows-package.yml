@@ -1,0 +1,193 @@
+name: Test r29 Auto Review UI Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r29-auto-review-ui
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r29-windows-package.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r27-unified
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-r29-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compose r27 unified plus r29 provider-model Auto Review UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/apply_r29_unified.py \
+            scripts/apply_auto_review_ui_r29.py \
+            scripts/review_auto_review_ui_r29.py \
+            scripts/apply_r27_unified.py \
+            scripts/apply_proxy_lifecycle_r27.py \
+            scripts/apply_runtime_diag_r26.py \
+            scripts/apply_runtime_diag_r26_review.py
+          python scripts/apply_r29_unified.py
+          python scripts/review_auto_review_ui_r29.py
+          grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-UI-R29' frontend/src/components/provider/AutoReviewModelOverridesEditor.vue
+          grep -F -q ':models="availableModels"' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'void fetchModels(true)' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'compat_revision=29' SUB2API_GROK_COMPAT_VERSION.txt
+          test "$(grep -F -c 'pub mod auto_review_overlay; // CAS-AUTO-REVIEW-R24' crates/codex_integration/src/lib.rs)" = "1"
+
+      - name: Resolve r29 package version
+        id: compat-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          BASE_VERSION="${APP_VERSION%%+*}"
+          REVISION="${APP_VERSION#*+}"
+          SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
+          test "$REVISION" = '29'
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Packaging Sub2API Grok Compat v${APP_VERSION} / r${REVISION}"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r29-auto-review-ui-windows-package
+
+      - name: Normalize generated Rust and check textual patch cleanliness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+
+      - name: Prove complete r29 replay idempotence after rustfmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary > "$RUNNER_TEMP/r29-first.diff"
+          python scripts/apply_r29_unified.py
+          cargo fmt --all
+          python scripts/review_auto_review_ui_r29.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r29-second.diff"
+          if ! cmp -s "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff"; then
+            echo '::error::r29 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r29-first.diff" "$RUNNER_TEMP/r29-second.diff" || true
+            exit 1
+          fi
+
+      - name: Recheck r24 Auto Review copy-on-write semantics
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Recheck r25 Apps MCP auth regressions
+        run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
+
+      - name: Recheck r26 subagent failure-chain regressions
+        run: cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+
+      - name: Recheck r27 proxy lifecycle regressions
+        run: cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+
+      - name: Compile complete r29 Windows app
+        run: cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Test adapter regressions
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build and verify r29 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r29' frontend/dist
+          grep -R -F -q '添加映射' frontend/dist
+          grep -R -F -q '刷新模型列表' frontend/dist
+          grep -R -F -q 'Main model' frontend/dist
+
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: Build Windows NSIS and MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage r29 Windows bundles
+        shell: bash
+        env:
+          SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
+        run: |
+          set -euo pipefail
+          BDIR="target/x86_64-pc-windows-msvc/release/bundle"
+          mkdir -p staging
+          shopt -s nullglob
+          for f in "$BDIR"/nsis/*-setup.exe; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
+          done
+          for f in "$BDIR"/msi/*.msi; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
+          done
+          files=(staging/*)
+          if (( ${#files[@]} == 0 )); then
+            echo '::error::No r29 Windows bundles found'
+            exit 1
+          fi
+          ls -lh staging/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-${{ steps.compat-version.outputs.safe_version }}-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

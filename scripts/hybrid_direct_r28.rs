@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn setting_defaults_off_and_reads_explicit_true() {
-        assert!(!enabled_from_config(&json!({}))); 
+        assert!(!enabled_from_config(&json!({})));
         assert!(!enabled_from_config(&json!({"settings": {SETTING_KEY: false}})));
         assert!(enabled_from_config(&json!({"settings": {SETTING_KEY: true}})));
     }

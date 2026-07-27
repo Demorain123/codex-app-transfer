@@ -18,10 +18,6 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 text = PATH.read_text(encoding="utf-8")
 
 # CAS-R30-HYBRID-CATALOG-RESTORE-ONLY
-# Hybrid Direct deliberately blocks full snapshot restore because CC Switch owns provider/auth.
-# Auto Review is the one narrower Transfer-owned config mutation; restore only that pointer when the
-# active config still points at our shadow. r24 helper is already fail-safe when CC Switch/user has
-# moved the pointer elsewhere.
 if "CAS-R30-HYBRID-CATALOG-RESTORE-ONLY" not in text:
     anchor = "\n/// [MOC-257 三态] 应用插件解锁三态:设活动 auth.json + 驱动 proxy 伪造 atomic + apply(relay/非relay)。\n"
     if text.count(anchor) != 1:
@@ -70,74 +66,46 @@ pub fn restore_auto_review_source_catalog_only() -> Value {
     text = text.replace(anchor, "\n" + helper + anchor, 1)
 
 # CAS-R30-HYBRID-CATALOG-REFRESH
-# Every Hybrid Direct provider/gateway sync (including startup auto-apply and provider switch) must
-# rebase the shadow on the current source catalog. This prevents a shadow generated in an earlier
-# Transfer session from hiding a newer external catalog.
+# Patch only the Hybrid Direct early-return region. The r28 source exists in both pre-rustfmt and
+# rustfmt-normalized forms; anchoring on `let port` + the JSON field pair is stable in both.
 if "CAS-R30-HYBRID-CATALOG-REFRESH" not in text:
-    old = '''        let port = read_proxy_port(&cfg);
-        crate::codex_real_account::reset_applied_mode();
-        codex_app_transfer_proxy::set_fake_account_mode(false);
-        return match start_proxy_for_provider_if_needed(&state.proxy_manager, port, provider_id).await {
-            Ok(started) => json!({
-                "attempted": false,
-                "success": true,
-                "mode": "hybrid_direct_gateway",
-                "requiresProxy": true,
-                "proxyStarted": started,
-                "codexMutated": false,
-                "provider": provider_id,
-                "message": "Hybrid Direct gateway ready; CC Switch owns Codex provider/auth and official OAuth stays outside Transfer",
-            }),
-            Err(e) => json!({
-                "attempted": false,
-                "success": false,
-                "mode": "hybrid_direct_gateway",
-                "requiresProxy": true,
-                "proxyStarted": false,
-                "codexMutated": false,
-                "provider": provider_id,
-                "message": e,
-            }),
-        };'''
-    new = '''        // CAS-R30-HYBRID-CATALOG-REFRESH: catalog is the only permitted Codex config
-        // surface in Hybrid Direct. Restore/rebase the r24 shadow on every gateway sync so a
-        // previous-session shadow never hides a newer external model catalog.
-        let catalog_sync = sync_auto_review_catalog_only_for_provider(provider_id);
-        let port = read_proxy_port(&cfg);
-        crate::codex_real_account::reset_applied_mode();
-        codex_app_transfer_proxy::set_fake_account_mode(false);
-        return match start_proxy_for_provider_if_needed(&state.proxy_manager, port, provider_id).await {
-            Ok(started) => json!({
-                "attempted": false,
-                "success": true,
-                "mode": "hybrid_direct_gateway",
-                "requiresProxy": true,
-                "proxyStarted": started,
-                "codexMutated": false,
-                "providerAuthMutated": false,
-                "catalogSync": catalog_sync,
-                "provider": provider_id,
-                "message": "Hybrid Direct gateway ready; CC Switch owns Codex provider/auth and official OAuth stays outside Transfer",
-            }),
-            Err(e) => json!({
-                "attempted": false,
-                "success": false,
-                "mode": "hybrid_direct_gateway",
-                "requiresProxy": true,
-                "proxyStarted": false,
-                "codexMutated": false,
-                "providerAuthMutated": false,
-                "catalogSync": catalog_sync,
-                "provider": provider_id,
-                "message": e,
-            }),
-        };'''
-    text = replace_once(text, old, new, "gateway catalog refresh")
+    sync_start = text.find("async fn sync_desktop_for_active_provider_impl")
+    sync_end = text.find("    let target_result = with_config_write", sync_start)
+    if sync_start < 0 or sync_end <= sync_start:
+        raise SystemExit("r30 catalog lifecycle could not isolate Hybrid Direct gateway sync")
+    region = text[sync_start:sync_end]
+
+    port_anchor = "        let port = read_proxy_port(&cfg);"
+    if region.count(port_anchor) != 1:
+        raise SystemExit(
+            f"r30 catalog lifecycle gateway port anchor expected one in Hybrid Direct region, found {region.count(port_anchor)}"
+        )
+    region = region.replace(
+        port_anchor,
+        "        // CAS-R30-HYBRID-CATALOG-REFRESH: catalog is the only permitted Codex config\n"
+        "        // surface in Hybrid Direct. Restore/rebase the r24 shadow on every gateway sync so a\n"
+        "        // previous-session shadow never hides a newer external model catalog.\n"
+        "        let catalog_sync = sync_auto_review_catalog_only_for_provider(provider_id);\n"
+        + port_anchor,
+        1,
+    )
+
+    field_pair = '                "codexMutated": false,\n                "provider": provider_id,'
+    count = region.count(field_pair)
+    if count != 2:
+        raise SystemExit(
+            f"r30 catalog lifecycle expected two gateway provider JSON branches, found {count}"
+        )
+    region = region.replace(
+        field_pair,
+        '                "codexMutated": false,\n'
+        '                "providerAuthMutated": false,\n'
+        '                "catalogSync": catalog_sync,\n'
+        '                "provider": provider_id,',
+    )
+    text = text[:sync_start] + region + text[sync_end:]
 
 # CAS-R30-HYBRID-CATALOG-EXIT-RESTORE
-# r28 correctly blocks full restore under Hybrid Direct, but that must not leave Transfer's own
-# shadow pointer behind forever. Restore only the r24 pointer before returning the r28 no-restore
-# result; CC Switch-owned provider/auth/base URL remain untouched.
 if "CAS-R30-HYBRID-CATALOG-EXIT-RESTORE" not in text:
     old = '''    if super::hybrid_direct::enabled_from_config(&cfg) {
         return json!({"attempted": false, "restored": false, "success": true, "reason": reason, "message": "Hybrid Direct: restore skipped; CC Switch owns Codex provider/auth"});

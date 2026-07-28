@@ -47,6 +47,7 @@ jobs:
             scripts/apply_r30_unified.py \
             scripts/apply_r30_hybrid_auto_review.py \
             scripts/apply_r30_catalog_import_fix.py \
+            scripts/apply_r30_catalog_state_probe.py \
             scripts/apply_r30_catalog_lifecycle.py \
             scripts/apply_r30_catalog_mutation_truth.py \
             scripts/review_r30_unified.py \
@@ -60,6 +61,7 @@ jobs:
           grep -F -q 'app_version=2.4.5+30' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
           grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-R30-AUTO-REVIEW-OVERLAY-ACTIVE-PROBE' crates/codex_integration/src/auto_review_overlay.rs
           grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
           grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH' src-tauri/src/admin/handlers/providers/crud.rs
           grep -F -q 'CAS-R30-HYBRID-CATALOG-REFRESH' src-tauri/src/admin/services/desktop/snapshot.rs

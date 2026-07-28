@@ -19,6 +19,9 @@ use super::super::super::state::AdminState;
 use super::super::common::err;
 use super::super::desktop::switch_provider_and_sync;
 use super::{fresh_provider_id, provider_index};
+use crate::admin::services::desktop::snapshot::{
+    sync_auto_review_catalog_only_for_provider, sync_desktop_for_active_provider,
+};
 
 /// 提交时校验 `extraHeaders` 字段的合法性,非法返回 400 + 详细错误。
 /// `Value::Null` / 缺字段 / 空对象 → 视为无 extras,通过校验。
@@ -409,6 +412,7 @@ pub async fn add_provider(
 }
 
 pub async fn update_provider(
+    State(state): State<AdminState>,
     Path(id): Path<String>,
     Json(input): Json<AddProviderInput>,
 ) -> impl IntoResponse {
@@ -431,6 +435,11 @@ pub async fn update_provider(
     }
 
     let result = with_config_write(|cfg| {
+        // CAS-AUTO-REVIEW-R29-LIVE-APPLY: capture active identity before borrowing providers mutably.
+        let active_id = cfg
+            .get("activeProvider")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
         let Some(idx) = provider_index(cfg, &id) else {
             return Err("provider not found".into());
         };
@@ -439,6 +448,10 @@ pub async fn update_provider(
             .and_then(|v| v.as_array_mut())
             .expect("providers array");
         let existing = providers[idx].as_object().unwrap().clone();
+        let previous_auto_review = existing
+            .get("autoReviewModelOverrides")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
         let mut updated = existing.clone();
         let is_builtin = existing
             .get("isBuiltin")
@@ -520,19 +533,51 @@ pub async fn update_provider(
         updated.insert("id".into(), Value::String(id.clone()));
         updated.insert("isBuiltin".into(), Value::Bool(is_builtin));
 
+        let next_auto_review = updated
+            .get("autoReviewModelOverrides")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let auto_review_changed =
+            input.auto_review_model_overrides.is_some() && previous_auto_review != next_auto_review;
+        let edited_active_provider = active_id.as_deref() == Some(id.as_str());
         let updated_value = Value::Object(updated);
         providers[idx] = updated_value.clone();
-        Ok(ConfigMutation::Modified(updated_value))
+        Ok(ConfigMutation::Modified((
+            updated_value,
+            auto_review_changed,
+            edited_active_provider,
+        )))
     });
 
-    let updated_value = match result {
+    let (updated_value, auto_review_changed, edited_active_provider) = match result {
         Ok(v) => v,
         Err(e) if e == "provider not found" => {
             return err(StatusCode::NOT_FOUND, e).into_response();
         }
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     };
-    Json(json!({"success": true, "provider": public_provider(&updated_value)})).into_response()
+    let mut response = json!({
+        "success": true,
+        "provider": public_provider(&updated_value),
+        "autoReviewChanged": auto_review_changed,
+        "autoReviewActiveProvider": edited_active_provider,
+    });
+    if auto_review_changed && edited_active_provider {
+        // CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH: Hybrid Direct must not call the normal
+        // provider/auth apply path. It gets one explicit catalog-only exception.
+        let desktop_sync = if crate::admin::services::desktop::hybrid_direct::enabled() {
+            sync_auto_review_catalog_only_for_provider(&id)
+        } else {
+            sync_desktop_for_active_provider(&state).await
+        };
+        let applied = desktop_sync
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        response["autoReviewApplied"] = Value::Bool(applied);
+        response["autoReviewApply"] = desktop_sync;
+    }
+    Json(response).into_response()
 }
 
 pub async fn delete_provider(Path(id): Path<String>) -> impl IntoResponse {

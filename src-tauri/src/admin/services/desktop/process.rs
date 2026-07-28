@@ -198,6 +198,11 @@ const CHAT_GUARD_PATCH_JS: &str = include_str!("../../../../resources/chat_guard
 /// app 的 Chat 对话经 `CODEX_API_BASE_URL` 流进本地 proxy。**host 必须用 `localhost`**:守卫
 /// 判 `new URL(base).host`,补丁加的是 `localhost:<port>`,base 用 `127.0.0.1` 则 host 不匹配。
 fn chat_launch_env(platform: &str) -> Vec<(String, String)> {
+    // CAS-HYBRID-DIRECT-R28-CHAT-ENV-BLOCK: CODEX_API_BASE_URL would proxy official
+    // ChatGPT traffic even if config.toml is pristine, so Hybrid Direct forbids it.
+    if crate::admin::services::desktop::hybrid_direct::enabled() {
+        return Vec::new();
+    }
     if platform != "macos" {
         return Vec::new();
     }

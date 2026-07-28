@@ -1,0 +1,176 @@
+name: Materialize r30 Unified
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r30-unified
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'docs/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/materialize-r30-unified.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r28-hybrid-direct
+
+permissions:
+  contents: write
+
+jobs:
+  materialize-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check r30 overlay Python syntax
+        run: |
+          python -m py_compile \
+            scripts/apply_r30_unified.py \
+            scripts/apply_r30_hybrid_auto_review.py \
+            scripts/apply_r30_catalog_import_fix.py \
+            scripts/apply_r30_catalog_state_probe.py \
+            scripts/apply_r30_catalog_lifecycle.py \
+            scripts/apply_r30_catalog_mutation_truth.py \
+            scripts/review_r30_unified.py \
+            scripts/apply_r28_hybrid_direct.py \
+            scripts/apply_auto_review_ui_r29_hardening.py \
+            scripts/apply_auto_review_ui_r29.py \
+            scripts/apply_auto_review_effective_r29.py \
+            scripts/review_auto_review_ui_r29.py
+
+      - name: Compose r24 through r30
+        id: compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python scripts/apply_r30_unified.py > "$RUNNER_TEMP/r30-compose.log" 2>&1; then
+            echo '--- r30 compose failure tail ---'
+            tail -n 150 "$RUNNER_TEMP/r30-compose.log"
+            exit 1
+          fi
+          tail -n 40 "$RUNNER_TEMP/r30-compose.log"
+
+      - name: Upload r30 composition diagnostic
+        if: failure() && steps.compose.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r30-compose-diagnostic
+          path: ${{ runner.temp }}/r30-compose.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Check r30 version and materialization markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'compat_revision=30' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+30' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-R30-AUTO-REVIEW-OVERLAY-ACTIVE-PROBE' crates/codex_integration/src/auto_review_overlay.rs
+          grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-AUTO-REVIEW-MODULE-IMPORT' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-HYBRID-CATALOG-REFRESH' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-HYBRID-CATALOG-EXIT-RESTORE' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-CATALOG-MUTATION-TRUTH' src-tauri/src/admin/services/desktop/snapshot.rs
+          grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-DISPATCH' src-tauri/src/admin/handlers/providers/crud.rs
+
+      - name: Re-run deep r30 review on materialized source
+        run: python scripts/review_r30_unified.py
+
+      - name: Check materialized patch whitespace
+        id: diffcheck
+        shell: bash
+        run: |
+          set +e
+          git diff --check > "$RUNNER_TEMP/r30-diffcheck.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/r30-diffcheck.log"
+          exit $status
+
+      - name: Upload r30 diff-check diagnostic
+        if: failure() && steps.diffcheck.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r30-diffcheck-diagnostic
+          path: ${{ runner.temp }}/r30-diffcheck.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build r30 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r30' frontend/dist
+          grep -R -F -q 'Hybrid Direct' frontend/dist
+          grep -R -F -q 'CC Switch' frontend/dist
+          grep -R -F -q '添加映射' frontend/dist
+          grep -R -F -q '刷新模型列表' frontend/dist
+
+      - name: Normalize generated Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          cargo fmt --all
+          git diff --check
+          python scripts/review_r30_unified.py
+
+      - name: Recheck r24 catalog copy-on-write semantics
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Prove complete r30 replay idempotence after rustfmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary > "$RUNNER_TEMP/r30-first.diff"
+          python scripts/apply_r30_unified.py > "$RUNNER_TEMP/r30-second-replay.log" 2>&1 || {
+            tail -n 150 "$RUNNER_TEMP/r30-second-replay.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_r30_unified.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r30-second.diff"
+          if ! cmp -s "$RUNNER_TEMP/r30-first.diff" "$RUNNER_TEMP/r30-second.diff"; then
+            echo '::error::r30 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r30-first.diff" "$RUNNER_TEMP/r30-second.diff" || true
+            exit 1
+          fi
+
+      - name: Commit generated r30 source on push
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No generated source diff to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[r30-generated] materialize Hybrid Direct + Auto Review unified source'
+          git push origin HEAD:sub2api-grok-compat-next-r30-unified

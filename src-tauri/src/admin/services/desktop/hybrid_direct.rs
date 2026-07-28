@@ -6,9 +6,7 @@
 //! - Transfer may still run its authenticated localhost gateway for third-party/Grok
 //!   traffic selected by a CC Switch custom provider.
 
-use codex_app_transfer_codex_integration::{
-    has_snapshot, has_stale_active_snapshot, CodexPaths,
-};
+use codex_app_transfer_codex_integration::{has_snapshot, has_stale_active_snapshot, CodexPaths};
 use codex_app_transfer_registry::RawConfig;
 
 pub const SETTING_KEY: &str = "hybridDirectMode";
@@ -63,8 +61,12 @@ mod tests {
     #[test]
     fn setting_defaults_off_and_reads_explicit_true() {
         assert!(!enabled_from_config(&json!({})));
-        assert!(!enabled_from_config(&json!({"settings": {SETTING_KEY: false}})));
-        assert!(enabled_from_config(&json!({"settings": {SETTING_KEY: true}})));
+        assert!(!enabled_from_config(
+            &json!({"settings": {SETTING_KEY: false}})
+        ));
+        assert!(enabled_from_config(
+            &json!({"settings": {SETTING_KEY: true}})
+        ));
     }
 
     #[test]

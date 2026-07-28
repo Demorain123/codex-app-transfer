@@ -26,13 +26,16 @@ mod opencode_session;
 mod provider_quota;
 mod proxy_runner;
 mod qoder_quota;
+#[cfg(target_os = "windows")]
+mod runtime_diag;
 #[cfg(target_os = "macos")]
 mod single_instance;
 mod system_proxy;
 mod telemetry_bridge;
 mod trace_viewer;
 mod trae_quota;
-mod web_session_quota;
+mod web_session_quota; // CAS-RUNTIME-DIAG-R26-MODULE
+
 #[cfg(target_os = "windows")]
 mod windows_msix;
 mod workbuddy_quota;
@@ -57,6 +60,11 @@ use admin::{build_app_router, handlers, AdminState};
 /// stash 真账号挪回活动(否则违背意图、real-active 与 persisted off/synthetic 不一致;且 restore_codex 跳过
 /// 后 un-stash 也补不到 managed key)。
 fn restore_codex_on_exit_enabled() -> bool {
+    // CAS-HYBRID-DIRECT-R28-RESTORE-OWNER: Hybrid Direct never replays Transfer
+    // snapshots or unstashes auth over CC Switch-owned live files.
+    if admin::services::desktop::hybrid_direct::enabled() {
+        return false;
+    }
     handlers::settings::load_registry_for_startup_language_sync()
         .ok()
         .and_then(|cfg| {
@@ -224,6 +232,9 @@ fn main() {
             // [MOC-204] 额度条目注入 daemon:每 tick 读 settings.codexQuotaEnabled
             // + proxy rate limit 快照,经 CDP 推进 Codex Environment 卡片。
             // 开关关 / CDP 不可达时 tick 内静默跳过,常驻无负担。
+            #[cfg(target_os = "windows")]
+            runtime_diag::start_runtime_diag_daemon(); // CAS-RUNTIME-DIAG-R26-START
+
             tauri::async_runtime::spawn(codex_quota_injector::run_quota_daemon());
 
             // [MOC-323] Quick Chat 模型名注入 daemon:每 tick 读 settings.chatCustomModelEnabled
@@ -326,9 +337,15 @@ fn main() {
             // restoreCodexOnExit=false 没还原、auth.json 仍合成 + relay 仍指 proxy)。后者即使本次跳过 apply
             // 也要保持伪造开,否则 /backend-api 经现存 relay 透传假 token 撞 401。非合成态(active 不是合成
             // 且不 apply synthetic)则关,避免残留 config 误伪造。
-            codex_app_transfer_proxy::set_fake_account_mode(
-                will_apply_synthetic || crate::codex_real_account::active_is_synthetic(),
-            );
+            // CAS-HYBRID-DIRECT-R28-FAKE-OFF: no /backend-api fabrication in
+            // zero-proxy OAuth mode, even if an old synthetic auth marker survived externally.
+            if admin::services::desktop::hybrid_direct::enabled() {
+                codex_app_transfer_proxy::set_fake_account_mode(false);
+            } else {
+                codex_app_transfer_proxy::set_fake_account_mode(
+                    will_apply_synthetic || crate::codex_real_account::active_is_synthetic(),
+                );
+            }
 
             // #MOC-54:保留 JoinHandle,让下面的残留扫描能 await auto_apply
             // 真正跑完(确定性),而不是用固定 sleep 猜它有没有落盘。
@@ -442,6 +459,12 @@ fn main() {
                 // 只做「检测 + 必要时从导入镜像恢复」,杜绝跟外部 Codex 抢 single-use
                 // refresh_token(实测撞刷会触发 refresh_token_reused 把账号烧死)。
                 {
+                    // CAS-HYBRID-DIRECT-R28-STARTUP-PLUGIN-SKIP: plugin account/relay
+                    // management owns auth.json + chatgpt_base_url, so never run it here.
+                    if admin::services::desktop::hybrid_direct::enabled() {
+                        codex_app_transfer_proxy::set_fake_account_mode(false);
+                        tracing::info!("[hybrid-direct-r28] startup: skipped Plugin Unlock/auth relay reconciliation");
+                    } else {
                     // [MOC-257 三态] 统一插件解锁:迁移旧三开关 → pluginUnlockMode;解析生效三态;apply。
                     // 本 task 已 await 完 auto_apply,确定性串在 apply 之后(不抢写 auth.json)。
                     let _ = handlers::settings::migrate_plugin_unlock_mode_v1();
@@ -513,6 +536,7 @@ fn main() {
                                 tracing::error!("[PluginUnlock] 启动调谐 apply {mode:?} 失败: {e}");
                             }
                         }
+                    }
                     }
                 }
                 // [MOC-104] reconcile 已把活动账号 settle 完。relay 模式下真实 chatgpt
@@ -780,7 +804,11 @@ fn main() {
             // [devin review] 同理取消 in-flight `codex login`(真实账号登录):否则 user 在
             // OAuth 等待期间退出 app,孤儿 codex login 进程可能在下面 restore_codex_if_enabled
             // 恢复原配置**之后**才写 ~/.codex/auth.json,把刚恢复的状态又改脏(数据完整性)。
-            if crate::codex_real_account::cancel_login() {
+            // CAS-HYBRID-DIRECT-R28-LOGIN-OWNER: official Codex login belongs to
+            // Codex/CC Switch; exiting Transfer must not cancel that OAuth flow.
+            if !admin::services::desktop::hybrid_direct::enabled()
+                && crate::codex_real_account::cancel_login()
+            {
                 tracing::info!("app exit: 已取消 in-flight codex login,防孤儿进程退出后改写 auth.json");
             }
             // [MOC-257 三态] 退出前先把 OFF/synthetic 移走的真账号 stash 整文件还原回 ~/.codex/auth.json
@@ -872,7 +900,10 @@ fn handle_tray_menu(app: &AppHandle, event: tauri::menu::MenuEvent) {
                 // add_provider handler 的 re-apply)→ 这里补上:切 provider 后 relay 可用,重 apply 当前
                 // 生效三态(非 off),否则无 provider 时启动跳过的 synthetic/real unlock 仍不生效。
                 let mode = crate::codex_real_account::resolve_plugin_unlock_mode();
-                if !matches!(mode, crate::codex_real_account::PluginUnlockMode::Off) {
+                // CAS-HYBRID-DIRECT-R28-TRAY-PLUGIN-SKIP
+                if !admin::services::desktop::hybrid_direct::enabled()
+                    && !matches!(mode, crate::codex_real_account::PluginUnlockMode::Off)
+                {
                     let st = AdminState {
                         proxy_manager,
                         trace_viewer_manager,

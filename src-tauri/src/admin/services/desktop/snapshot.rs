@@ -1,6 +1,12 @@
 use std::fs;
 use std::sync::Arc;
 
+// CAS-R30-AUTO-REVIEW-MODULE-IMPORT: r24 exposes the COW implementation as a public module,
+// not as crate-root re-exports. Import from the authoritative module so full MSVC compile catches
+// API drift without widening r24's public surface just for r30.
+use codex_app_transfer_codex_integration::auto_review_overlay::{
+    apply_auto_review_overrides, auto_review_overlay_active, restore_source_if_overlay_active,
+};
 use codex_app_transfer_codex_integration::{
     apply_provider, ensure_file_store_mode, has_snapshot, has_stale_active_snapshot,
     restore_codex_state, sync_mcp_credentials, ApplyConfig, CodexPaths,
@@ -15,7 +21,9 @@ use crate::admin::handlers::providers::{
     provider_display_name, provider_index, provider_model_capabilities, provider_model_mappings,
     provider_review_model_slot, provider_supports_1m,
 };
-use crate::admin::handlers::proxy::{ensure_gateway_key, read_proxy_port, start_proxy_if_needed};
+use crate::admin::handlers::proxy::{
+    ensure_gateway_key, read_proxy_port, start_proxy_for_provider_if_needed, start_proxy_if_needed,
+};
 use crate::admin::registry_io::{load as load_registry, with_config_write, ConfigMutation};
 use crate::admin::state::AdminState;
 use crate::proxy_runner::ProxyManager;
@@ -219,6 +227,10 @@ pub fn desktop_target_for_active_provider(cfg: &RawConfig) -> Option<DesktopConf
 /// [MOC-234] direct 直连已移除,所有 provider 恒 requires_proxy=true,故等价于「有无 active provider」。
 /// 只读,不写盘。
 pub fn active_provider_supports_relay() -> bool {
+    // CAS-HYBRID-DIRECT-R28-RELAY-GATE: official OAuth is never a Transfer relay.
+    if super::hybrid_direct::enabled() {
+        return false;
+    }
     crate::admin::registry_io::load()
         .ok()
         .and_then(|cfg| desktop_target_for_active_provider(&cfg).map(|t| t.requires_proxy))
@@ -268,6 +280,13 @@ fn apply_desktop_target_impl(
     force_apikey: bool,
 ) -> Result<Value, String> {
     let paths = CodexPaths::from_home_env().map_err(|e| e.to_string())?;
+    // CAS-HYBRID-DIRECT-R28-APPLY-BLOCK: fail before apply_provider can touch
+    // config.toml/auth.json. CC Switch is the Codex provider/auth owner in this mode.
+    if super::hybrid_direct::enabled() {
+        return Err(super::hybrid_direct::mutation_blocked(
+            "改写 Codex provider/base URL/auth.json",
+        ));
+    }
     // [MOC-104] relay 模式 gate:活动已是可用真实 chatgpt 时,apply 保留 chatgpt
     // 登录态(让 Codex 原生显示 Plugins 入口、不再依赖 CDP daemon 注入,消除 MOC-100
     // 高延迟)。[MOC-178] force_apikey(清除真实账号)强制不 relay,即便活动仍是 chatgpt。
@@ -331,6 +350,183 @@ pub async fn sync_desktop_for_active_provider(state: &AdminState) -> Value {
     result
 }
 
+/// CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY
+///
+/// Explicit Auto Review exception for Hybrid Direct. CC Switch remains the sole owner of
+/// provider/auth/network routing; this path may only restore/rebuild r24's copy-on-write model
+/// catalog and update the `model_catalog_json` pointer. It never starts/stops the proxy and never
+/// calls `apply_provider`.
+pub fn sync_auto_review_catalog_only_for_provider(expected_provider_id: &str) -> Value {
+    let cfg = match load_registry() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "mode": "hybrid_direct_catalog_only",
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "message": e,
+            })
+        }
+    };
+    let Some(provider) = active_provider(&cfg) else {
+        return json!({
+            "attempted": false,
+            "success": false,
+            "mode": "hybrid_direct_catalog_only",
+            "catalogOnly": true,
+            "providerAuthMutated": false,
+            "message": "no active provider",
+        });
+    };
+    let active_id = provider.get("id").and_then(Value::as_str).unwrap_or("");
+    if active_id != expected_provider_id {
+        return json!({
+            "attempted": false,
+            "success": false,
+            "mode": "hybrid_direct_catalog_only",
+            "catalogOnly": true,
+            "providerAuthMutated": false,
+            "message": format!(
+                "active provider changed during Auto Review save (expected {expected_provider_id}, now {active_id}); catalog not touched"
+            ),
+        });
+    }
+
+    let overrides = provider_auto_review_model_overrides(&provider);
+    let override_count = overrides.as_object().map(|m| m.len()).unwrap_or(0);
+    let paths = match CodexPaths::from_home_env() {
+        Ok(paths) => paths,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "mode": "hybrid_direct_catalog_only",
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "message": e.to_string(),
+            })
+        }
+    };
+
+    // CAS-R30-CATALOG-MUTATION-TRUTH: restore_source_if_overlay_active returns (), so detect
+    // whether our exact shadow is active *before* restore. The probe reuses r24's path normalization.
+    let source_restored = match auto_review_overlay_active(&paths) {
+        Ok(active) => active,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "mode": "hybrid_direct_catalog_only",
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "catalogMutated": false,
+                "message": format!("inspect Auto Review catalog state failed: {e}"),
+            });
+        }
+    };
+    if let Err(e) = restore_source_if_overlay_active(&paths) {
+        return json!({
+            "attempted": true,
+            "success": false,
+            "mode": "hybrid_direct_catalog_only",
+            "catalogOnly": true,
+            "providerAuthMutated": false,
+            "catalogMutated": false,
+            "message": format!("restore Auto Review source catalog failed: {e}"),
+        });
+    }
+    let catalog_applied = match apply_auto_review_overrides(&paths, Some(&overrides)) {
+        Ok(applied) => applied,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "mode": "hybrid_direct_catalog_only",
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "sourceRestored": source_restored,
+                "catalogMutated": source_restored,
+                "overrideCount": override_count,
+                "message": format!("apply Auto Review catalog overlay failed: {e}"),
+            })
+        }
+    };
+
+    json!({
+        "attempted": true,
+        "success": true,
+        "mode": "hybrid_direct_catalog_only",
+        "catalogOnly": true,
+        "catalogApplied": catalog_applied,
+        "sourceRestored": source_restored,
+        "catalogMutated": source_restored || catalog_applied,
+        "overrideCount": override_count,
+        "providerAuthMutated": false,
+        "codexConfigScope": "model_catalog_json_only",
+        "message": if catalog_applied {
+            "Hybrid Direct: Auto Review shadow catalog rebuilt; provider/auth/network remain CC Switch-owned"
+        } else {
+            "Hybrid Direct: Auto Review override cleared/defaulted; source catalog restored when needed"
+        },
+    })
+}
+
+/// CAS-R30-HYBRID-CATALOG-RESTORE-ONLY
+/// Restore only Transfer's r24 Auto Review source pointer. This is safe under Hybrid Direct because
+/// `restore_source_if_overlay_active` is a no-op unless config currently points to Transfer's exact
+/// shadow path; it never replays provider/auth/base-URL snapshots.
+pub fn restore_auto_review_source_catalog_only() -> Value {
+    let paths = match CodexPaths::from_home_env() {
+        Ok(paths) => paths,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "message": e.to_string(),
+            })
+        }
+    };
+    let source_restored = match auto_review_overlay_active(&paths) {
+        Ok(active) => active,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "catalogOnly": true,
+                "providerAuthMutated": false,
+                "catalogMutated": false,
+                "message": format!("inspect Auto Review catalog state failed: {e}"),
+            })
+        }
+    };
+    match restore_source_if_overlay_active(&paths) {
+        Ok(()) => json!({
+            "attempted": true,
+            "success": true,
+            "catalogOnly": true,
+            "sourceRestored": source_restored,
+            "catalogMutated": source_restored,
+            "providerAuthMutated": false,
+            "message": if source_restored {
+                "Transfer Auto Review source catalog restored"
+            } else {
+                "Auto Review source restore not needed"
+            },
+        }),
+        Err(e) => json!({
+            "attempted": true,
+            "success": false,
+            "catalogOnly": true,
+            "providerAuthMutated": false,
+            "message": format!("restore Auto Review source catalog failed: {e}"),
+        }),
+    }
+}
+
 /// [MOC-257 三态] 应用插件解锁三态:设活动 auth.json + 驱动 proxy 伪造 atomic + apply(relay/非relay)。
 ///
 /// relay 写 chatgpt_base_url 仍复用现有 gate(`apply_desktop_target_impl` 的 `active_is_real_chatgpt_now`)——
@@ -358,6 +554,13 @@ pub async fn apply_plugin_unlock_mode(
 ) -> Result<(), String> {
     use crate::codex_real_account as ra;
     use crate::codex_real_account::PluginUnlockMode as M;
+    // CAS-HYBRID-DIRECT-R28-PLUGIN-BLOCK: plugin unlock stashes/rewrites auth.json and
+    // installs chatgpt_base_url relay, which is incompatible with zero-proxy OAuth.
+    if super::hybrid_direct::enabled() {
+        return Err(super::hybrid_direct::mutation_blocked(
+            "切换 Plugin Unlock / ChatGPT relay",
+        ));
+    }
     // [MOC-257 P1 review] **改 ~/.codex 之前**先捕获原始快照(若还没有)。**三态都要**:synthetic/real 会
     // 写合成/真 auth(否则首次 apply 时合成 auth 先写入、apply_provider 才取快照 → 快照把合成当「用户原始
     // 态」,退出 restore 还原成合成 → standalone Codex 拿假凭据撞 chatgpt.com);**OFF 会 clear auth.json**
@@ -570,6 +773,87 @@ async fn ensure_relay_applied(state: &AdminState) -> Result<(), String> {
 }
 
 async fn sync_desktop_for_active_provider_impl(state: &AdminState, force_apikey: bool) -> Value {
+    // CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC: gateway-only mode. Do not create a
+    // DesktopConfigTarget and do not call apply_provider; only refresh/reuse the local
+    // proxy resolver for Transfer's own active provider. Official GPT never reaches it.
+    if super::hybrid_direct::enabled() {
+        if force_apikey {
+            return json!({
+                "attempted": true,
+                "success": false,
+                "mode": "hybrid_direct_gateway",
+                "requiresProxy": true,
+                "codexMutated": false,
+                "message": super::hybrid_direct::mutation_blocked("清除/改写 Codex auth.json"),
+            });
+        }
+        let cfg = match load_registry() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                return json!({"attempted": false, "success": false, "mode": "hybrid_direct_gateway", "codexMutated": false, "message": e})
+            }
+        };
+        let Some(provider) = active_provider(&cfg) else {
+            return json!({
+                "attempted": false,
+                "success": false,
+                "mode": "hybrid_direct_gateway",
+                "requiresProxy": false,
+                "codexMutated": false,
+                "message": "no default provider",
+            });
+        };
+        let Some(provider_id) = provider.get("id").and_then(Value::as_str) else {
+            return json!({
+                "attempted": false,
+                "success": false,
+                "mode": "hybrid_direct_gateway",
+                "requiresProxy": false,
+                "codexMutated": false,
+                "message": "active provider has no id",
+            });
+        };
+        // CAS-R30-HYBRID-CATALOG-REFRESH: catalog is the only permitted Codex config
+        // surface in Hybrid Direct. Restore/rebase the r24 shadow on every gateway sync so a
+        // previous-session shadow never hides a newer external model catalog.
+        let catalog_sync = sync_auto_review_catalog_only_for_provider(provider_id);
+        let catalog_mutated = catalog_sync
+            .get("catalogMutated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let port = read_proxy_port(&cfg);
+        crate::codex_real_account::reset_applied_mode();
+        codex_app_transfer_proxy::set_fake_account_mode(false);
+        return match start_proxy_for_provider_if_needed(&state.proxy_manager, port, provider_id)
+            .await
+        {
+            Ok(started) => json!({
+                "attempted": false,
+                "success": true,
+                "mode": "hybrid_direct_gateway",
+                "requiresProxy": true,
+                "proxyStarted": started,
+                "codexMutated": catalog_mutated,
+                "providerAuthMutated": false,
+                "catalogSync": catalog_sync,
+                "provider": provider_id,
+                "message": "Hybrid Direct gateway ready; CC Switch owns Codex provider/auth and official OAuth stays outside Transfer",
+            }),
+            Err(e) => json!({
+                "attempted": false,
+                "success": false,
+                "mode": "hybrid_direct_gateway",
+                "requiresProxy": true,
+                "proxyStarted": false,
+                "codexMutated": catalog_mutated,
+                "providerAuthMutated": false,
+                "catalogSync": catalog_sync,
+                "provider": provider_id,
+                "message": e,
+            }),
+        };
+    }
+
     let target_result = with_config_write(|cfg| {
         let Some(provider) = active_provider(cfg) else {
             return Err("no default provider".into());
@@ -672,6 +956,31 @@ pub async fn auto_apply_on_startup_if_enabled(proxy_manager: Arc<ProxyManager>) 
             return json!({"applied": false, "requiresProxy": false, "proxyStarted": false, "message": format!("failed: {e}")})
         }
     };
+    // CAS-HYBRID-DIRECT-R28-AUTO-APPLY: in Hybrid Direct this setting means
+    // "auto-start Transfer gateway", never "apply provider into Codex".
+    if super::hybrid_direct::enabled_from_config(&cfg) {
+        codex_app_transfer_proxy::set_fake_account_mode(false);
+        if !read_setting_bool(&cfg, "autoApplyOnStart", true) {
+            return json!({"applied": false, "gatewayReady": false, "requiresProxy": false, "proxyStarted": false, "message": "Hybrid Direct: gateway auto-start disabled"});
+        }
+        if active_provider(&cfg).is_none() {
+            return json!({"applied": false, "gatewayReady": false, "requiresProxy": false, "proxyStarted": false, "message": "Hybrid Direct: no active Transfer provider"});
+        }
+        let state = AdminState {
+            proxy_manager,
+            trace_viewer_manager: Arc::new(crate::trace_viewer::TraceViewerManager::new()),
+        };
+        let synced = sync_desktop_for_active_provider(&state).await;
+        return json!({
+            "applied": false,
+            "gatewayReady": synced.get("success").and_then(Value::as_bool).unwrap_or(false),
+            "requiresProxy": synced.get("requiresProxy").and_then(Value::as_bool).unwrap_or(false),
+            "proxyStarted": synced.get("proxyStarted").and_then(Value::as_bool).unwrap_or(false),
+            "codexMutated": false,
+            "message": synced.get("message").cloned().unwrap_or_else(|| json!("Hybrid Direct gateway sync finished")),
+        });
+    }
+
     if !read_setting_bool(&cfg, "autoApplyOnStart", true) {
         // [MOC-257 review] autoApplyOnStart=false 跳过 apply,但若盘上是**保留的 relay 态**(restoreCodexOnExit=
         // false 把 auth + config.toml 的 chatgpt_base_url/openai_base_url→本地 proxy 留下、上次退出停了 proxy),
@@ -745,6 +1054,22 @@ pub fn restore_codex_if_enabled(reason: &str) -> Value {
             return json!({"attempted": true, "restored": false, "success": false, "reason": reason, "message": e})
         }
     };
+    // CAS-HYBRID-DIRECT-R28-RESTORE-BLOCK: CC Switch may have changed config/auth
+    // after Transfer started. Replaying an old Transfer snapshot would overwrite that owner.
+    if super::hybrid_direct::enabled_from_config(&cfg) {
+        // CAS-R30-HYBRID-CATALOG-EXIT-RESTORE: full snapshot restore stays blocked, but remove our
+        // own Auto Review shadow pointer when it is still active. The helper is exact-path gated.
+        let catalog_restore = restore_auto_review_source_catalog_only();
+        return json!({
+            "attempted": false,
+            "restored": false,
+            "success": true,
+            "reason": reason,
+            "providerAuthMutated": false,
+            "catalogRestore": catalog_restore,
+            "message": "Hybrid Direct: provider/auth restore skipped; CC Switch owns them; Transfer Auto Review catalog pointer restored when applicable",
+        });
+    }
     if !read_setting_bool(&cfg, "restoreCodexOnExit", true) {
         return json!({"attempted": false, "restored": false, "success": true, "reason": reason, "message": "disabled by settings"});
     }
@@ -1303,6 +1628,102 @@ mod tests {
                 assert!(restored_config.contains("approval_policy = \"on-request\""));
                 assert!(!restored_config.contains("sandbox_mode"));
                 assert!(!restored_config.contains("openai_base_url"));
+                manager.stop_silent();
+            });
+        });
+    }
+
+    #[test]
+    fn hybrid_direct_gateway_sync_preserves_codex_config_and_auth_bytes() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        with_isolated_home(|home| {
+            runtime.block_on(async {
+                let mut cfg = config_with_secret();
+                cfg["settings"]["hybridDirectMode"] = json!(true);
+                cfg["settings"]["proxyPort"] = json!(0);
+                save_registry(&cfg).unwrap();
+                let codex = home.join(".codex");
+                fs::create_dir_all(&codex).unwrap();
+                let config_before = b"model_provider = \"openai\"\n# cc-switch-owned\n".to_vec();
+                let auth_before =
+                    br#"{"auth_mode":"chatgpt","tokens":{"access_token":"official-oauth"}}"#
+                        .to_vec();
+                fs::write(codex.join("config.toml"), &config_before).unwrap();
+                fs::write(codex.join("auth.json"), &auth_before).unwrap();
+
+                let manager = Arc::new(ProxyManager::new());
+                let state = AdminState {
+                    proxy_manager: Arc::clone(&manager),
+                    trace_viewer_manager: Arc::new(crate::trace_viewer::TraceViewerManager::new()),
+                };
+                let result = sync_desktop_for_active_provider(&state).await;
+                assert_eq!(result["success"], json!(true));
+                assert_eq!(result["mode"], json!("hybrid_direct_gateway"));
+                assert_eq!(result["codexMutated"], json!(false));
+                assert!(manager.status().running);
+                assert_eq!(fs::read(codex.join("config.toml")).unwrap(), config_before);
+                assert_eq!(fs::read(codex.join("auth.json")).unwrap(), auth_before);
+                manager.stop_silent();
+            });
+        });
+    }
+
+    #[test]
+    fn hybrid_direct_provider_switch_refreshes_resolver_without_touching_codex() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        with_isolated_home(|home| {
+            runtime.block_on(async {
+                let mut cfg = config_with_secret();
+                cfg["settings"]["hybridDirectMode"] = json!(true);
+                cfg["settings"]["proxyPort"] = json!(0);
+                cfg["providers"] = json!([
+                    cfg["providers"][0].clone(),
+                    {
+                        "id": "p2",
+                        "name": "Provider Two",
+                        "baseUrl": "https://two.example.com/v1",
+                        "authScheme": "bearer",
+                        "apiFormat": "openai_chat",
+                        "apiKey": "sk-two",
+                        "models": {"default": "model-two"},
+                        "sortIndex": 1
+                    }
+                ]);
+                save_registry(&cfg).unwrap();
+                let codex = home.join(".codex");
+                fs::create_dir_all(&codex).unwrap();
+                let config_before = b"model_provider = \"custom\"\n# cc-switch-owned\n".to_vec();
+                let auth_before =
+                    br#"{"auth_mode":"chatgpt","tokens":{"access_token":"official-oauth"}}"#
+                        .to_vec();
+                fs::write(codex.join("config.toml"), &config_before).unwrap();
+                fs::write(codex.join("auth.json"), &auth_before).unwrap();
+
+                let manager = Arc::new(ProxyManager::new());
+                let state = AdminState {
+                    proxy_manager: Arc::clone(&manager),
+                    trace_viewer_manager: Arc::new(crate::trace_viewer::TraceViewerManager::new()),
+                };
+                let first = sync_desktop_for_active_provider(&state).await;
+                assert_eq!(first["success"], json!(true));
+                assert_eq!(manager.status().active_provider.as_deref(), Some("p1"));
+
+                let switched =
+                    switch_provider_and_sync(Arc::clone(&manager), "p2".to_owned()).await;
+                assert_eq!(switched["success"], json!(true));
+                assert_eq!(
+                    switched["desktopSync"]["mode"],
+                    json!("hybrid_direct_gateway")
+                );
+                assert_eq!(manager.status().active_provider.as_deref(), Some("p2"));
+                assert_eq!(fs::read(codex.join("config.toml")).unwrap(), config_before);
+                assert_eq!(fs::read(codex.join("auth.json")).unwrap(), auth_before);
                 manager.stop_silent();
             });
         });

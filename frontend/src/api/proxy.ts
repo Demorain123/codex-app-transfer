@@ -22,7 +22,7 @@ export const startProxy = (port?: number) =>
   api('POST', '/api/proxy/start', port ? { port: Number(port) } : undefined)
 export const stopProxy = () => api('POST', '/api/proxy/stop')
 export const getProxyStatus = () =>
-  api<{ running?: boolean; port?: number; stats?: ProxyStats }>('GET', '/api/proxy/status')
+  api<{ running?: boolean; port?: number; stats?: ProxyStats; hybridDirectMode?: boolean }>('GET', '/api/proxy/status')
 export async function getProxyLogs(): Promise<ProxyLogEntry[]> {
   const data = await api<{ logs?: { time: string; level: string; message: string }[] }>(
     'GET',

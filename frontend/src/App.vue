@@ -31,9 +31,13 @@ onMounted(async () => {
   // CAT-255:启动检测其他工具(cc-switch 等)留下的隔离会话(第三方 model_provider),
   // 有则弹窗问是否导入(确认即关 Codex→归一→重启)。放在最后,避免导入重启 Codex 跟
   // 上面的 hydrate 抢节奏。
-  const si = useSessionImport()
-  const foreign = await si.detect()
-  if (foreign > 0) await si.promptImport(foreign)
+  // CAS-HYBRID-DIRECT-R28-SESSION-OWNER: CC Switch owns model_provider in
+  // Hybrid Direct. Never auto-normalize its third-party threads back to openai.
+  if (!settings.bool('hybridDirectMode', false)) {
+    const si = useSessionImport()
+    const foreign = await si.detect()
+    if (foreign > 0) await si.promptImport(foreign)
+  }
 })
 </script>
 

@@ -6,6 +6,7 @@ import type { ProxyLogEntry, ProxyStats } from '@/api/proxy'
 export const useProxyStore = defineStore('proxy', () => {
   const running = ref(false)
   const port = ref(0)
+  const hybridDirectMode = ref(false)
   const stats = ref<ProxyStats>({ total: 0, success: 0, failed: 0, today: 0 })
   const logs = ref<ProxyLogEntry[]>([])
 
@@ -13,6 +14,7 @@ export const useProxyStore = defineStore('proxy', () => {
     const s = await proxyApi.getProxyStatus()
     running.value = !!s.running
     port.value = s.port || 18080
+    hybridDirectMode.value = !!s.hybridDirectMode
     stats.value = s.stats || { total: 0, success: 0, failed: 0, today: 0 }
   }
   async function toggle(on: boolean, startPort?: number) {
@@ -30,5 +32,5 @@ export const useProxyStore = defineStore('proxy', () => {
   async function openLogDir() {
     await proxyApi.openProxyLogDir()
   }
-  return { running, port, stats, logs, loadStatus, toggle, loadLogs, clearLogs, openLogDir }
+  return { running, port, hybridDirectMode, stats, logs, loadStatus, toggle, loadLogs, clearLogs, openLogDir }
 })

@@ -65,6 +65,16 @@ fn known_transfer_proxy_ports() -> Vec<u16> {
 // ── /api/desktop/* Axum HTTP Handlers ─────────────────────────────────
 
 pub async fn desktop_clear() -> impl IntoResponse {
+    // CAS-HYBRID-DIRECT-R28-MANUAL-CLEAR-GUARD
+    if crate::admin::services::desktop::hybrid_direct::enabled() {
+        return err(
+            StatusCode::CONFLICT,
+            crate::admin::services::desktop::hybrid_direct::mutation_blocked(
+                "手动清除/还原 Codex config.toml 与 auth.json",
+            ),
+        )
+        .into_response();
+    }
     let paths = match CodexPaths::from_home_env() {
         Ok(p) => p,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -211,6 +221,16 @@ pub async fn desktop_snapshots() -> impl IntoResponse {
 }
 
 pub async fn desktop_restore(Json(payload): Json<DesktopRestoreRequest>) -> impl IntoResponse {
+    // CAS-HYBRID-DIRECT-R28-MANUAL-RESTORE-GUARD
+    if crate::admin::services::desktop::hybrid_direct::enabled() {
+        return err(
+            StatusCode::CONFLICT,
+            crate::admin::services::desktop::hybrid_direct::mutation_blocked(
+                "恢复历史 Transfer Codex 快照",
+            ),
+        )
+        .into_response();
+    }
     let paths = match CodexPaths::from_home_env() {
         Ok(p) => p,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -270,6 +290,16 @@ pub async fn desktop_scan_residual() -> impl IntoResponse {
 pub async fn desktop_repair_residual(
     Json(payload): Json<ResidualRepairRequest>,
 ) -> impl IntoResponse {
+    // CAS-HYBRID-DIRECT-R28-RESIDUAL-REPAIR-GUARD
+    if crate::admin::services::desktop::hybrid_direct::enabled() {
+        return err(
+            StatusCode::CONFLICT,
+            crate::admin::services::desktop::hybrid_direct::mutation_blocked(
+                "执行 Transfer residual repair（可能误删 CC Switch 的 Grok→Transfer 路由）",
+            ),
+        )
+        .into_response();
+    }
     let paths = match CodexPaths::from_home_env() {
         Ok(p) => p,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

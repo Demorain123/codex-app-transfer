@@ -55,6 +55,7 @@ pub(super) fn default_config_value() -> Value {
             "adminPort": 18081,
            "autoStart": false,
            "autoApplyOnStart": true,
+           "hybridDirectMode": false,
            "exposeAllProviderModels": false,
            "showGrayProviders": false,
            "restoreCodexOnExit": true,
@@ -347,6 +348,20 @@ pub async fn get_settings() -> impl IntoResponse {
 }
 
 pub async fn save_settings(Json(input): Json<Value>) -> impl IntoResponse {
+    // CAS-HYBRID-DIRECT-R28-ENABLE-PREFLIGHT: transition only from a clean
+    // Transfer state. Do not auto-restore here because CC Switch may already own a newer config.
+    let requested_hybrid = input.get("hybridDirectMode").and_then(Value::as_bool);
+    if requested_hybrid == Some(true) {
+        let already_enabled = load_registry()
+            .ok()
+            .as_ref()
+            .is_some_and(crate::admin::services::desktop::hybrid_direct::enabled_from_config);
+        if !already_enabled {
+            if let Err(e) = crate::admin::services::desktop::hybrid_direct::enable_preflight() {
+                return err(StatusCode::CONFLICT, e).into_response();
+            }
+        }
+    }
     let result = with_config_write(|cfg| {
         // #MOC-62:记下旧值,只在 mcpCredentialsPortableStore 真变了才触发即时生效
         // (避免改主题等无关 settings 也去写 config.toml)。
@@ -401,6 +416,13 @@ pub async fn save_settings(Json(input): Json<Value>) -> impl IntoResponse {
     });
     match result {
         Ok((settings, portable_changed, auto_unlock_changed, web_fetch_changed)) => {
+            // CAS-HYBRID-DIRECT-R28-SETTING-ACTIVE: immediately disable any in-memory
+            // synthetic ChatGPT fabrication. The setting itself never rewrites Codex files.
+            if requested_hybrid == Some(true) {
+                codex_app_transfer_proxy::set_fake_account_mode(false);
+                crate::codex_real_account::reset_applied_mode();
+                tracing::info!("[hybrid-direct-r28] enabled: Transfer is gateway-only; Codex provider/auth remain externally owned");
+            }
             // #262:settings.language 改动后 hot reload 到 adapters 全局,
             // 让接下来的 prompt 注入跟新语言一致(用户切语言无需重启 transfer)。
             sync_user_language_from_settings(&settings);

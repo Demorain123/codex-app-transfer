@@ -43,7 +43,9 @@ jobs:
             scripts/apply_no_lagging_r32_doctor_init_fix.py \
             scripts/apply_no_lagging_r32_handler_prep.py \
             scripts/apply_no_lagging_r32.py \
-            scripts/review_no_lagging_r32.py
+            scripts/apply_r32_usage_sort.py \
+            scripts/review_no_lagging_r32.py \
+            scripts/review_r32_usage_sort.py
 
       - name: Compose r24 through r32
         run: python scripts/apply_r32_unified.py
@@ -57,7 +59,11 @@ jobs:
           grep -F -q 'CAS-NO-LAGGING-R32-MCP-EXIT-GUARD' src-tauri/resources/codex_no_lagging_janitor.ps1
           grep -F -q 'CAS-NO-LAGGING-R32-ACCESSORY-GUARD' src-tauri/src/admin/services/desktop/no_micro.rs
           grep -F -q 'CAS-NO-LAGGING-R32-UI' frontend/src/components/codex/NoMicroPanel.vue
+          grep -F -q 'CAS-R32-USAGE-CLICK-SORT' frontend/src/pages/UsagePage.vue
+          grep -F -q 'aria-sort' frontend/src/pages/UsagePage.vue
+          grep -F -q 'usage-sort-button' frontend/src/pages/UsagePage.vue
           python scripts/review_no_lagging_r32.py
+          python scripts/review_r32_usage_sort.py
           git diff --check
 
       - name: Parse r32 PowerShell exit guard
@@ -114,6 +120,7 @@ jobs:
           }
           cargo fmt --all
           python scripts/review_no_lagging_r32.py
+          python scripts/review_r32_usage_sort.py
           node scripts/test_no_micro_launcher.mjs
           git diff --check
           git diff --binary > "$RUNNER_TEMP/r32-second.diff"
@@ -135,5 +142,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m '[r32-generated] materialize No Lagging stability layer'
+          git commit -m '[r32-generated] materialize No Lagging and usage sorting'
           git push origin HEAD:sub2api-grok-compat-next-r32-no-lagging

@@ -693,7 +693,7 @@ async function save() {
       <SettingsRow :title="t('providerForm.reviewModelSlot')">
         <AppInput v-model="form.reviewModelSlot" placeholder="default" />
       </SettingsRow>
-      <SettingsRow :title="t('providerForm.autoReviewModelOverrides')">
+      <SettingsRow class="pf__auto-review-row" :title="t('providerForm.autoReviewModelOverrides')">
         <!-- CAS-AUTO-REVIEW-UI-R29-EDITOR -->
         <AutoReviewModelOverridesEditor
           v-model="form.autoReviewModelOverrides"
@@ -897,5 +897,23 @@ async function save() {
   font-size: var(--fs-sm);
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* CAS-AUTO-REVIEW-LAYOUT-R31
+ * Auto Review is a wide editor. Stack its SettingsRow so the generic
+ * flex-shrink:0 control slot cannot force the whole provider form wider than
+ * the modal. Keep the exception local to this one row. */
+.pf__auto-review-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.pf__auto-review-row :deep(.settings-row__text),
+.pf__auto-review-row :deep(.settings-row__control) {
+  width: 100%;
+  min-width: 0;
+}
+.pf__auto-review-row :deep(.settings-row__control) {
+  flex: 1 1 auto;
 }
 </style>

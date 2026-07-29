@@ -27,6 +27,7 @@ export interface NoMicroDoctor {
   nodeCompatible: boolean
   targetModuleCount: number
   serialportCount: number
+  hidMarkerCount: number
   featureGateCount: number
   stubShapeOk: boolean
   processState: 'running' | 'not-running' | 'unknown' | 'unsupported' | string
@@ -42,7 +43,11 @@ export interface NoMicroLaunchResult {
   doctor: NoMicroDoctor
   launch: NoMicroLaunchState
   abRunId?: string
-  mode?: 'no-micro'
+  mode?: 'no-lagging' | 'no-micro'
+  noLagging?: {
+    microAccessoryGuard?: string
+    mcpExitGuard?: { status?: string; pid?: number; scope?: string; error?: string }
+  }
 }
 
 export interface NormalAbLaunchResult {
@@ -61,4 +66,9 @@ export function launchCodexNormalAb() {
 
 export function launchCodexNoMicro() {
   return api<NoMicroLaunchResult>('POST', '/api/desktop/no-micro/launch')
+}
+
+// CAS-NO-LAGGING-R32-API-ALIAS
+export function launchCodexNoLagging() {
+  return api<NoMicroLaunchResult>('POST', '/api/desktop/no-micro/launch?mode=no-lagging')
 }

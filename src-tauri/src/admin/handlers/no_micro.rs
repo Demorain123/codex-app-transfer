@@ -44,6 +44,7 @@ fn ab_log(level: &str, run_id: &str, mode: &str, phase: &str, extra: Option<&str
 }
 
 // CAS-NO-MICRO-R23-AB-SHARED-PIPELINE
+// CAS-NO-LAGGING-R32-AB-MODE
 /// Wrap the exact legacy Restart config/provider preparation with deterministic A/B markers.
 async fn prepare_ab_environment(
     state: &AdminState,
@@ -90,7 +91,7 @@ pub async fn doctor() -> Response {
         Ok(report) => Json(report).into_response(),
         Err(e) => err(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("No Micro doctor task failed: {e}"),
+            format!("No Lagging doctor task failed: {e}"),
         )
         .into_response(),
     }
@@ -162,7 +163,7 @@ async fn launch_normal(_state: &AdminState, _run_id: &str) -> Response {
 pub async fn launch(State(state): State<AdminState>, Query(query): Query<LaunchQuery>) -> Response {
     let mode = match query.mode.as_deref() {
         Some("normal") => "normal",
-        None | Some("no-micro") => "no-micro",
+        None | Some("no-micro") | Some("no-lagging") => "no-lagging",
         Some(other) => {
             return err(
                 StatusCode::BAD_REQUEST,
@@ -182,7 +183,7 @@ pub async fn launch(State(state): State<AdminState>, Query(query): Query<LaunchQ
         Err(e) => {
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("No Micro doctor task failed: {e}"),
+                format!("No Lagging doctor task failed: {e}"),
             )
             .into_response()
         }
@@ -196,21 +197,21 @@ pub async fn launch(State(state): State<AdminState>, Query(query): Query<LaunchQ
                 .warnings
                 .first()
                 .cloned()
-                .unwrap_or_else(|| "No Micro B 当前未通过兼容性检查".to_owned()),
+                .unwrap_or_else(|| "No Lagging B 当前未通过兼容性检查".to_owned()),
         )
         .into_response();
     }
 
-    if let Err(message) = prepare_ab_environment(&state, &run_id, "no-micro").await {
+    if let Err(message) = prepare_ab_environment(&state, &run_id, "no-lagging").await {
         return err(StatusCode::CONFLICT, message).into_response();
     }
 
     ab_log(
         "INFO",
         &run_id,
-        "no-micro",
+        "no-lagging",
         "launch_requested",
-        Some("pipeline=legacy-restart-shared final_launcher=no-micro"),
+        Some("pipeline=legacy-restart-shared final_launcher=no-lagging"),
     );
     match process::launch_codex_app_restart_with(std::env::consts::OS, || {
         let extra_args = process::prepare_codex_alternate_launch_args();
@@ -226,13 +227,13 @@ pub async fn launch(State(state): State<AdminState>, Query(query): Query<LaunchQ
             ab_log(
                 "INFO",
                 &run_id,
-                "no-micro",
+                "no-lagging",
                 "injection_success",
                 Some(&format!("pid={pid} pipeline=legacy-restart-shared")),
             );
             if let Some(obj) = result.as_object_mut() {
                 obj.insert("abRunId".to_owned(), Value::String(run_id.clone()));
-                obj.insert("mode".to_owned(), Value::String("no-micro".to_owned()));
+                obj.insert("mode".to_owned(), Value::String("no-lagging".to_owned()));
                 obj.insert(
                     "configScope".to_owned(),
                     Value::String("legacy-restart-shared".to_owned()),
@@ -244,7 +245,7 @@ pub async fn launch(State(state): State<AdminState>, Query(query): Query<LaunchQ
             ab_log(
                 "ERROR",
                 &run_id,
-                "no-micro",
+                "no-lagging",
                 "launch_failed",
                 Some(&format!("pipeline=legacy-restart-shared error={message}")),
             );

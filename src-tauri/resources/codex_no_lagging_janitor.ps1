@@ -4,8 +4,10 @@
 # It does not read or log process command lines, prompts, tokens, or thread content.
 param(
   [ValidateRange(1,30)][int]$PollSeconds = 2,
+  [ValidateRange(5,300)][int]$InventorySeconds = 15,
   [ValidateRange(3,120)][int]$ExitStableSeconds = 8,
-  [ValidateRange(0,120)][int]$CleanupGraceSeconds = 5
+  [ValidateRange(0,120)][int]$CleanupGraceSeconds = 5,
+  [ValidateRange(30,1800)][int]$MissingExecutableExitSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +18,16 @@ try { $ExactCodexExe = [IO.Path]::GetFullPath($ExactCodexExe) } catch { exit 21 
 $stateDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CodexMcpJanitorR32'
 New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
 $logPath = Join-Path $stateDir 'events.jsonl'
-$mutexName = 'Local\CodexAppTransfer_NoLagging_R32_McpExitGuard'
+
+# Key the singleton to the exact packaged executable path. A future Codex update can
+# therefore start a watcher for its new package path even if an old watcher has not
+# noticed package removal yet. Old watchers self-retire after their executable vanishes.
+$sha = [Security.Cryptography.SHA256]::Create()
+try {
+  $hashBytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ExactCodexExe.ToLowerInvariant()))
+  $mutexSuffix = ([BitConverter]::ToString($hashBytes)).Replace('-','').Substring(0,16)
+} finally { $sha.Dispose() }
+$mutexName = "Local\CodexAppTransfer_NoLagging_R32_$mutexSuffix"
 $created = $false
 $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$created)
 if (-not $created) { $mutex.Dispose(); exit 0 }
@@ -26,6 +37,9 @@ $knownPattern = '(?i)(mcp|node_repl|playwright|context7|tavily|fast-context|ask-
 $tracked = @{}
 $seenDesktop = $false
 $zeroSince = $null
+$lastInventoryUtc = [DateTime]::MinValue
+$generationDesktopIds = @{}
+$missingExecutableSince = $null
 
 function Write-Event([string]$eventName, [hashtable]$data = @{}) {
   try {
@@ -40,10 +54,28 @@ function Base-Name([string]$name) {
   return $n
 }
 
-function Start-Utc($creationDate) {
-  try { return ([datetime]$creationDate).ToUniversalTime().ToString('o') } catch { return $null }
+function Start-Ticks($creationDate) {
+  try { return ([datetime]$creationDate).ToUniversalTime().Ticks } catch { return $null }
 }
 
+# CAS-NO-LAGGING-R32-LIGHT-DESKTOP-POLL
+# This is the 2-second heartbeat. Do not replace it with full Win32_Process CIM
+# enumeration: repeated WMI inventory has itself been implicated in Windows input lag.
+function Get-DesktopProcessesCheap {
+  $matches = @()
+  foreach ($p in @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue)) {
+    try { $path = [string]$p.Path } catch { continue }
+    if ([string]::IsNullOrWhiteSpace($path)) { continue }
+    try { $full = [IO.Path]::GetFullPath($path) } catch { continue }
+    if ([string]::Equals($full, $ExactCodexExe, [StringComparison]::OrdinalIgnoreCase)) {
+      $matches += $p
+    }
+  }
+  return @($matches)
+}
+
+# CAS-NO-LAGGING-R32-HEAVY-INVENTORY
+# Full parent topology is intentionally much less frequent than the desktop heartbeat.
 function Get-Inventory {
   $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CreationDate)
   $byId = @{}
@@ -83,12 +115,12 @@ function Track-Candidates($inv) {
     if (-not $candidate) { continue }
     $pid = [int]$p.ProcessId
     if ($tracked.ContainsKey($pid)) { continue }
-    $start = Start-Utc $p.CreationDate
-    if ([string]::IsNullOrWhiteSpace($start)) { continue }
+    $startTicks = Start-Ticks $p.CreationDate
+    if ($null -eq $startTicks) { continue }
     $tracked[$pid] = [pscustomobject]@{
       Pid = $pid
       ParentPid = [int]$p.ParentProcessId
-      StartUtc = $start
+      StartTicks = [long]$startTicks
       Path = if ($p.ExecutablePath) { [string]$p.ExecutablePath } else { $null }
       Name = $base
       Depth = [int]$ancestry.Depth
@@ -99,40 +131,37 @@ function Track-Candidates($inv) {
   if ($added -gt 0) { Write-Event 'helper_tracked' @{ added=$added; tracked=$tracked.Count } }
 }
 
+# Exact-PID cleanup validation uses System.Diagnostics.Process rather than per-PID CIM,
+# keeping WMI out of the exit/cleanup hot path while retaining PID-reuse protection.
 function Same-Identity($record) {
   try {
-    $p = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $record.Pid) -ErrorAction Stop
-    if ($null -eq $p) { return $false }
-    $start = Start-Utc $p.CreationDate
-    if ($start -ne $record.StartUtc) { return $false }
-    if ($record.Path -and $p.ExecutablePath -and -not [string]::Equals([string]$p.ExecutablePath,[string]$record.Path,[StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $p = Get-Process -Id ([int]$record.Pid) -ErrorAction Stop
+    $ticks = $p.StartTime.ToUniversalTime().Ticks
+    if ([long]$ticks -ne [long]$record.StartTicks) { return $false }
+    if ($record.Path) {
+      try { $path = [string]$p.Path } catch { return $false }
+      if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+      if (-not [string]::Equals([IO.Path]::GetFullPath($path),[IO.Path]::GetFullPath([string]$record.Path),[StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
     return $true
   } catch { return $false }
 }
 
 function Cleanup-OldGeneration {
-  try {
-    $guard = Get-Inventory
-    if ($guard.Desktop.Count -gt 0) {
-      Write-Event 'cleanup_cancelled_desktop_reappeared' @{ desktop=$guard.Desktop.Count; tracked=$tracked.Count }
-      return $false
-    }
-  } catch {
-    Write-Event 'cleanup_cancelled_inventory_error' @{ tracked=$tracked.Count }
+  $desktop = @(Get-DesktopProcessesCheap)
+  if ($desktop.Count -gt 0) {
+    Write-Event 'cleanup_cancelled_desktop_reappeared' @{ desktop=$desktop.Count; tracked=$tracked.Count }
     return $false
   }
 
   $survivors = @($tracked.Values | Where-Object { Same-Identity $_ } | Sort-Object Depth -Descending)
   $stopped = 0
   foreach ($r in $survivors) {
-    # Race guard immediately before every stop.
-    try {
-      $guard = Get-Inventory
-      if ($guard.Desktop.Count -gt 0) {
-        Write-Event 'cleanup_cancelled_desktop_reappeared' @{ desktop=$guard.Desktop.Count; stopped=$stopped }
-        return $false
-      }
-    } catch { return $false }
+    # Cheap race guard immediately before every exact-PID stop.
+    if (@(Get-DesktopProcessesCheap).Count -gt 0) {
+      Write-Event 'cleanup_cancelled_desktop_reappeared' @{ stopped=$stopped }
+      return $false
+    }
     if (-not (Same-Identity $r)) { continue }
     try {
       Stop-Process -Id $r.Pid -Force -ErrorAction Stop
@@ -146,25 +175,63 @@ function Cleanup-OldGeneration {
   return $true
 }
 
-Write-Event 'guard_started' @{ pollSeconds=$PollSeconds; stableSeconds=$ExitStableSeconds; graceSeconds=$CleanupGraceSeconds }
+Write-Event 'guard_started' @{ pollSeconds=$PollSeconds; inventorySeconds=$InventorySeconds; stableSeconds=$ExitStableSeconds; graceSeconds=$CleanupGraceSeconds }
 try {
   while ($true) {
-    try { $inv = Get-Inventory } catch { Write-Event 'inventory_failed'; Start-Sleep -Seconds $PollSeconds; continue }
-    if ($inv.Desktop.Count -gt 0) {
+    $desktop = @(Get-DesktopProcessesCheap)
+    if ($desktop.Count -gt 0) {
+      $missingExecutableSince = $null
       if (-not $seenDesktop) {
         $seenDesktop = $true
         $tracked.Clear()
-        Write-Event 'desktop_generation_started' @{ desktop=$inv.Desktop.Count }
+        $generationDesktopIds = @{}
+        $lastInventoryUtc = [DateTime]::MinValue
+        Write-Event 'desktop_generation_started' @{ desktop=$desktop.Count }
       }
+      foreach ($p in $desktop) { $generationDesktopIds[[int]$p.Id] = $true }
       $zeroSince = $null
-      Track-Candidates $inv
+
+      $nowUtc = [DateTime]::UtcNow
+      if (($nowUtc - $lastInventoryUtc).TotalSeconds -ge $InventorySeconds) {
+        try {
+          $inv = Get-Inventory
+          Track-Candidates $inv
+          $lastInventoryUtc = $nowUtc
+        } catch {
+          Write-Event 'inventory_failed'
+        }
+      }
       Start-Sleep -Seconds $PollSeconds
       continue
     }
 
-    if (-not $seenDesktop) { Start-Sleep -Seconds $PollSeconds; continue }
+    if (-not $seenDesktop) {
+      if (-not (Test-Path -LiteralPath $ExactCodexExe -PathType Leaf)) {
+        if ($null -eq $missingExecutableSince) {
+          $missingExecutableSince = Get-Date
+        } elseif (((Get-Date) - $missingExecutableSince).TotalSeconds -ge $MissingExecutableExitSeconds) {
+          Write-Event 'guard_retired_missing_executable'
+          break
+        }
+      } else {
+        $missingExecutableSince = $null
+      }
+      Start-Sleep -Seconds $PollSeconds
+      continue
+    }
+
     if ($null -eq $zeroSince) {
       $zeroSince = Get-Date
+      # One final topology pass catches long-lived helpers created since the previous
+      # 15-second inventory. Reuse the remembered Desktop PIDs as dead-root ancestry
+      # anchors; Get-Desktop-Ancestry checks those IDs before requiring a live parent row.
+      try {
+        $finalInv = Get-Inventory
+        $finalInv.DesktopIds = $generationDesktopIds
+        Track-Candidates $finalInv
+      } catch {
+        Write-Event 'final_inventory_failed'
+      }
       Write-Event 'desktop_zero_detected' @{ tracked=$tracked.Count }
     }
     $elapsed = ((Get-Date) - $zeroSince).TotalSeconds
@@ -175,12 +242,14 @@ try {
       $seenDesktop = $false
       $zeroSince = $null
       $tracked.Clear()
+      $generationDesktopIds = @{}
       Write-Event 'guard_waiting_next_generation'
     } else {
       # Safety wins over cleanup. Re-enter discovery and build fresh ownership evidence.
       $seenDesktop = $false
       $zeroSince = $null
       $tracked.Clear()
+      $generationDesktopIds = @{}
     }
   }
 } finally {

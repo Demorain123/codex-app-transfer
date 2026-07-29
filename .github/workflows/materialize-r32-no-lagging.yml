@@ -1,0 +1,134 @@
+name: Materialize r32 No Lagging
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r32-no-lagging
+    paths:
+      - 'frontend/**'
+      - 'src-tauri/**'
+      - 'scripts/**'
+      - 'docs/R32_NO_LAGGING.md'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - '.github/workflows/materialize-r32-no-lagging.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r31-auto-review-layout
+
+permissions:
+  contents: write
+
+jobs:
+  materialize-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check r32 overlay syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/apply_r32_unified.py \
+            scripts/apply_no_lagging_r32.py \
+            scripts/review_no_lagging_r32.py
+
+      - name: Compose r24 through r32
+        run: python scripts/apply_r32_unified.py
+
+      - name: Check r32 identity and safety markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'compat_revision=32' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+32' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'CAS-NO-LAGGING-R32-MCP-EXIT-GUARD' src-tauri/resources/codex_no_lagging_janitor.ps1
+          grep -F -q 'CAS-NO-LAGGING-R32-ACCESSORY-GUARD' src-tauri/src/admin/services/desktop/no_micro.rs
+          grep -F -q 'CAS-NO-LAGGING-R32-UI' frontend/src/components/codex/NoMicroPanel.vue
+          python scripts/review_no_lagging_r32.py
+          git diff --check
+
+      - name: Parse r32 PowerShell exit guard
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'src-tauri/resources/codex_no_lagging_janitor.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            exit 1
+          }
+          Write-Host 'r32 MCP Exit Guard PowerShell parse: PASS'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Recheck worker-safe Micro/Accessory injector
+        run: node scripts/test_no_micro_launcher.mjs
+
+      - name: Build r32 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r32' frontend/dist
+          grep -R -F -q 'No Lagging' frontend/dist
+          grep -R -F -q 'MCP Exit Guard' frontend/dist
+          grep -R -F -q 'Hybrid Direct' frontend/dist
+          grep -R -F -q 'Auto Review' frontend/dist
+
+      - name: Normalize Rust and prove complete r32 replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          cargo fmt --all
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r32-first.diff"
+          python scripts/apply_r32_unified.py > "$RUNNER_TEMP/r32-second-replay.log" 2>&1 || {
+            tail -n 200 "$RUNNER_TEMP/r32-second-replay.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_no_lagging_r32.py
+          node scripts/test_no_micro_launcher.mjs
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r32-second.diff"
+          if ! cmp -s "$RUNNER_TEMP/r32-first.diff" "$RUNNER_TEMP/r32-second.diff"; then
+            echo '::error::r32 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r32-first.diff" "$RUNNER_TEMP/r32-second.diff" || true
+            exit 1
+          fi
+
+      - name: Commit generated r32 source on push
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No generated source diff to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[r32-generated] materialize No Lagging stability layer'
+          git push origin HEAD:sub2api-grok-compat-next-r32-no-lagging

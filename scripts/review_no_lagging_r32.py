@@ -52,19 +52,34 @@ if "&& report.serialport_count > 0" in backend:
     raise SystemExit("r32 review: serialport marker incorrectly remains a hard compatibility gate")
 
 # MCP/helper cleanup is deliberately exit-only and generation-evidence based. It must not
-# inspect/log command lines or kill by generic executable name.
+# inspect/log command lines or kill by generic executable name. The light 2-second heartbeat
+# must use Get-Process; full Win32_Process topology is a slower 15-second inventory because
+# frequent WMI process inventory can itself add Windows UI/WmiPrvSE pressure.
 for marker in (
     "CAS-NO-LAGGING-R32-MCP-EXIT-GUARD",
     "CAS_NO_LAGGING_EXE",
+    "CAS-NO-LAGGING-R32-LIGHT-DESKTOP-POLL",
+    "CAS-NO-LAGGING-R32-HEAVY-INVENTORY",
+    "InventorySeconds = 15",
+    "Get-DesktopProcessesCheap",
+    "Get-Process -Name 'ChatGPT','Codex'",
     "Get-Desktop-Ancestry",
-    "StartUtc",
+    "Start-Ticks",
+    "StartTicks",
     "Same-Identity",
     "cleanup_cancelled_desktop_reappeared",
     "Stop-Process -Id $r.Pid",
     "guard_waiting_next_generation",
+    "guard_retired_missing_executable",
 ):
     if marker not in janitor:
         raise SystemExit(f"r32 review: MCP exit guard invariant missing: {marker}")
+
+if janitor.count("Get-CimInstance Win32_Process") != 1:
+    raise SystemExit("r32 review: full Win32_Process inventory must exist in exactly one heavy-scan function")
+if "Get-CimInstance Win32_Process -Filter" in janitor:
+    raise SystemExit("r32 review: per-PID cleanup must not return to WMI/CIM")
+
 for forbidden in (
     "CommandLine",
     "taskkill",

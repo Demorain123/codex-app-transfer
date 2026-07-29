@@ -207,6 +207,7 @@ function rowChanged() {
 <style scoped>
 .armap {
   width: 100%;
+  box-sizing: border-box; /* CAS-AUTO-REVIEW-LAYOUT-R31 */
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -246,7 +247,7 @@ function rowChanged() {
 }
 .armap__row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 24px minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) auto;
   align-items: end;
   gap: var(--space-2);
 }

@@ -1,0 +1,108 @@
+name: Materialize r31 Auto Review Layout
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r31-auto-review-layout
+    paths:
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/materialize-r31-auto-review-layout.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r30-unified
+
+permissions:
+  contents: write
+
+jobs:
+  materialize-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check r31 overlay Python syntax
+        run: |
+          python -m py_compile \
+            scripts/apply_r31_unified.py \
+            scripts/apply_auto_review_layout_r31.py \
+            scripts/review_auto_review_layout_r31.py
+
+      - name: Compose r30 plus r31 layout hotfix
+        run: python scripts/apply_r31_unified.py
+
+      - name: Check r31 identity and layout markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'compat_revision=31' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+31' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'CAS-AUTO-REVIEW-LAYOUT-R31' frontend/src/components/provider/ProviderFormModal.vue
+          grep -F -q 'CAS-AUTO-REVIEW-LAYOUT-R31' frontend/src/components/provider/AutoReviewModelOverridesEditor.vue
+          python scripts/review_auto_review_layout_r31.py
+          git diff --check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build r31 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r31' frontend/dist
+          grep -R -F -q 'Auto Review' frontend/dist
+          grep -R -F -q '添加映射' frontend/dist
+
+      - name: Normalize Rust and prove complete r31 replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          cargo fmt --all
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r31-first.diff"
+          python scripts/apply_r31_unified.py > "$RUNNER_TEMP/r31-second-replay.log" 2>&1 || {
+            tail -n 150 "$RUNNER_TEMP/r31-second-replay.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_auto_review_layout_r31.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r31-second.diff"
+          if ! cmp -s "$RUNNER_TEMP/r31-first.diff" "$RUNNER_TEMP/r31-second.diff"; then
+            echo '::error::r31 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r31-first.diff" "$RUNNER_TEMP/r31-second.diff" || true
+            exit 1
+          fi
+
+      - name: Commit generated r31 source on push
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No generated source diff to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[r31-generated] materialize Auto Review modal layout hotfix'
+          git push origin HEAD:sub2api-grok-compat-next-r31-auto-review-layout

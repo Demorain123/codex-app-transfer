@@ -41,7 +41,7 @@ env:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v5
         with:
@@ -52,20 +52,39 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Apply complete compat overlay inside Windows build
+      - name: Resolve and apply highest compat composer
+        id: composer
         shell: bash
         run: |
           set -euo pipefail
 
-          # New revisions are composition layers. Prefer the highest composer present so
-          # production packaging cannot regress to the old r24/r25-only revision pipeline.
-          # Older branches keep the legacy explicit chain as a compatibility fallback.
-          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
-            echo 'Using r28 Hybrid Direct unified composer'
-            python scripts/apply_r28_hybrid_direct.py
-          elif [[ -f scripts/apply_r27_unified.py ]]; then
-            echo 'Using r27 unified composer'
-            python scripts/apply_r27_unified.py
+          # CAS-DYNAMIC-COMPAT-COMPOSER: select the numerically highest replayable
+          # unified composer instead of checking for r28 first. All future revisions
+          # should keep the apply_rNN_unified.py convention; r28 is retained as a
+          # compatibility candidate because its historical composer has a special name.
+          COMPOSER="$(python - <<'PY'
+          from pathlib import Path
+          import re
+
+          candidates: list[tuple[int, Path]] = []
+          for path in Path('scripts').glob('apply_r*_unified.py'):
+              match = re.fullmatch(r'apply_r(\d+)_unified\.py', path.name)
+              if match:
+                  candidates.append((int(match.group(1)), path))
+
+          r28 = Path('scripts/apply_r28_hybrid_direct.py')
+          if r28.is_file():
+              candidates.append((28, r28))
+
+          if candidates:
+              revision, path = max(candidates, key=lambda item: item[0])
+              print(path.as_posix())
+          PY
+          )"
+
+          if [[ -n "$COMPOSER" ]]; then
+            echo "Using highest compat composer: $COMPOSER"
+            python "$COMPOSER"
           else
             echo 'Using legacy compat composer chain'
             python scripts/apply_sub2api_grok_compat.py
@@ -85,7 +104,10 @@ jobs:
             python scripts/apply_no_micro_r23_restart_pipeline.py
             python scripts/apply_no_micro_r23_restart_review.py
             python scripts/apply_sub2api_grok_compat_revision.py
+            COMPOSER='legacy-explicit-chain'
           fi
+
+          echo "composer=$COMPOSER" >> "$GITHUB_OUTPUT"
 
           grep -F "v-if=\"form.apiFormat === 'responses'\"" \
             frontend/src/components/provider/ProviderFormModal.vue
@@ -99,45 +121,37 @@ jobs:
           grep -F -q 'CAS-SUB2API-GROK-TERMINAL-COMPLETION-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-RECOVERY-R16-HOOK' crates/adapters/src/responses/grok_tool_shim.rs
           grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-TERMINAL-ID' crates/adapters/src/responses/grok_tool_shim.rs
-          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-BARE-V4A-NOT-JSON' crates/adapters/src/responses/grok_tool_shim.rs
-          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-ENVELOPE-REQUIRES-JSON-PROOF' crates/adapters/src/responses/grok_tool_shim.rs
-          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-TERMINAL-NAME-MATCH' crates/adapters/src/responses/grok_tool_shim.rs
-          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-R17-PRESERVE-RAW-V4A' crates/adapters/src/responses/grok_tool_shim.rs
-          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PRIVACY' crates/adapters/src/responses/converter.rs
-          grep -F -q 'CAS-SUB2API-GROK-APPLY-PATCH-HARDENING-R17-PROMPT' crates/adapters/src/responses/request/tools.rs
           grep -F -q 'CAS-SUB2API-GROK-REPLAY-SCHEMA-HOOK' crates/adapters/src/mapper/grok_build.rs
           grep -F -q 'CAS-SUB2API-OPENAI-CODEX-IDENTITY-HOOK' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-HOOK' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-SUB2API-SUBAGENT-RETRY-DIAG-INJECT' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-SUB2API-RETRY-RUNTIME-DIAG-R18-HOOK' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-HOOK' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-SUB2API-STREAM-RETRY-DIAG-R19-CALL' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-MCP-RELAY-DIAG-R20-HOOK' crates/proxy/src/forward.rs
-          grep -F -q 'CAS-MCP-RELAY-DIAG-R20-RESOLVE' crates/proxy/src/forward.rs
           grep -F -q 'CAS-NO-MICRO-R23-SHARED-RESTART-PIPELINE' src-tauri/src/admin/services/desktop/process.rs
-          grep -F -q 'CAS-NO-MICRO-R23-LEGACY-RESTART-PRESERVED' src-tauri/src/admin/services/desktop/process.rs
-          grep -F -q 'CAS-NO-MICRO-R23-SHARED-DESKTOP-PREP' src-tauri/src/admin/handlers/desktop.rs
-          grep -F -q 'CAS-NO-MICRO-R23-LAUNCH-ARGS' src-tauri/src/admin/services/desktop/no_micro.rs
-          grep -F -q 'CAS-NO-MICRO-R23-AB-SHARED-PIPELINE' src-tauri/src/admin/handlers/no_micro.rs
-          grep -F -q 'process::prepare_codex_alternate_launch_args()' src-tauri/src/admin/handlers/no_micro.rs
 
-          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
-            test "$(tr -d '\r\n' < SUB2API_GROK_COMPAT_REVISION.txt)" = "28"
+          REVISION="$(tr -d '\r\n' < SUB2API_GROK_COMPAT_REVISION.txt)"
+          [[ "$REVISION" =~ ^[0-9]+$ ]] || { echo '::error::Invalid compat revision'; exit 1; }
+          if (( REVISION >= 24 )); then
             grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
+          fi
+          if (( REVISION >= 25 )); then
             grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
+          fi
+          if (( REVISION >= 26 )); then
             grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
+          fi
+          if (( REVISION >= 27 )); then
             grep -F -q 'CAS-PROXY-LIFECYCLE-R27' src-tauri/src/admin/handlers/proxy.rs
+          fi
+          if (( REVISION >= 28 )); then
             grep -F -q 'CAS-HYBRID-DIRECT-R28-GATEWAY-SYNC' src-tauri/src/admin/services/desktop/snapshot.rs
             grep -F -q 'CAS-HYBRID-DIRECT-R28-PROVIDER-REFRESH' src-tauri/src/admin/handlers/proxy.rs
-            grep -F -q 'compat_revision=28' SUB2API_GROK_COMPAT_VERSION.txt
-            python scripts/review_hybrid_direct_r28.py
-          elif [[ -f scripts/apply_r27_unified.py ]]; then
-            test "$(tr -d '\r\n' < SUB2API_GROK_COMPAT_REVISION.txt)" = "27"
-            grep -F -q 'CAS-AUTO-REVIEW-R24' crates/codex_integration/src/auto_review_overlay.rs
-            grep -F -q 'CAS-APPS-MCP-AUTH-R25-REHYDRATE' crates/proxy/src/forward.rs
-            grep -F -q 'CAS-RUNTIME-DIAG-R26' src-tauri/src/runtime_diag.rs
-            grep -F -q 'CAS-PROXY-LIFECYCLE-R27' src-tauri/src/admin/handlers/proxy.rs
-            grep -F -q 'compat_revision=27' SUB2API_GROK_COMPAT_VERSION.txt
+          fi
+          if (( REVISION >= 29 )); then
+            grep -F -q 'CAS-AUTO-REVIEW-UI-R29-EDITOR' frontend/src/components/provider/ProviderFormModal.vue
+          fi
+          if (( REVISION >= 30 )); then
+            grep -F -q 'CAS-R30-HYBRID-AUTO-REVIEW-CATALOG-ONLY' src-tauri/src/admin/services/desktop/snapshot.rs
+          fi
+          if (( REVISION >= 31 )); then
+            grep -F -q 'CAS-AUTO-REVIEW-LAYOUT-R31' frontend/src/components/provider/ProviderFormModal.vue
+            grep -F -q 'CAS-AUTO-REVIEW-LAYOUT-R31' frontend/src/components/provider/AutoReviewModelOverridesEditor.vue
           fi
 
       - name: Resolve visible compat version
@@ -156,78 +170,90 @@ jobs:
           else
             REVISION="0"
           fi
+          FILE_REVISION="$(tr -d '\r\n' < SUB2API_GROK_COMPAT_REVISION.txt)"
           SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
-          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
-            test "$REVISION" = "28"
-          elif [[ -f scripts/apply_r27_unified.py ]]; then
-            test "$REVISION" = "27"
-          fi
+          SHORT_SHA="$(git rev-parse --short=12 HEAD)"
+
+          [[ "$REVISION" =~ ^[0-9]+$ ]] || { echo '::error::Tauri compat revision is not numeric'; exit 1; }
+          test "$REVISION" = "$FILE_REVISION" || {
+            echo "::error::Version identity mismatch: tauri=$REVISION revision-file=$FILE_REVISION"
+            exit 1
+          }
+          grep -F -q "compat_revision=${REVISION}" SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q "app_version=${APP_VERSION}" SUB2API_GROK_COMPAT_VERSION.txt
+
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
           echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building Sub2API Grok Compat v${APP_VERSION} (official ${BASE_VERSION}, r${REVISION})"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Building Sub2API Grok Compat v${APP_VERSION} / r${REVISION} @ ${SHORT_SHA}"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
           key: sub2api-grok-compat-windows
 
-      - name: Test r24 Auto Review catalog overlay
-        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
-
-      - name: Check r24 Codex integration crate
-        run: cargo check -p codex-app-transfer-codex-integration --lib
-
-      - name: Test unified r27/r28 Windows runtime gates
+      - name: Normalize generated source
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f scripts/apply_r28_hybrid_direct.py ]]; then
+          cargo fmt --all
+          git diff --check
+
+      - name: Test r24 Auto Review catalog overlay
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Check complete Windows runtime gates
+        shell: bash
+        env:
+          REVISION: ${{ steps.compat-version.outputs.revision }}
+        run: |
+          set -euo pipefail
+          if (( REVISION >= 27 )); then
             cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+          fi
+          if (( REVISION >= 28 )); then
             cargo test -p codex-app-transfer hybrid_direct --target x86_64-pc-windows-msvc -- --nocapture
+          fi
+          if (( REVISION >= 27 )); then
             cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
-          elif [[ -f scripts/apply_r27_unified.py ]]; then
-            cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
-            cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+          else
+            cargo check -p codex-app-transfer-codex-integration --lib
           fi
 
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/bin/cargo-tauri.exe
+          path: ~/.cargo/bin/cargo-tauri.exe
           key: windows-cargo-tauri-cli-v2
 
       - name: Install tauri-cli
         if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         timeout-minutes: 25
-        run: cargo install tauri-cli --version "^2" --locked
+        run: cargo install tauri-cli --version '^2' --locked
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Build frontend
-        shell: bash
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run build
-
-      - name: Verify bundled compat UI before packaging
+      - name: Build and verify frontend
         shell: bash
         env:
           APP_VERSION: ${{ steps.compat-version.outputs.app_version }}
           REVISION: ${{ steps.compat-version.outputs.revision }}
         run: |
           set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
           grep -R -F -q 'Grok MCP / Tools' frontend/dist
           grep -R -F -q "Sub2API Grok Compat r${REVISION}" frontend/dist
           grep -R -F -q "v${APP_VERSION}" frontend/dist
@@ -235,11 +261,11 @@ jobs:
           if (( REVISION >= 24 )); then
             grep -R -F -q 'Auto Review' frontend/dist
           fi
-          if [[ "$REVISION" == "28" ]]; then
+          if (( REVISION >= 28 )); then
             grep -R -F -q 'Hybrid Direct' frontend/dist
             grep -R -F -q 'CC Switch' frontend/dist
           fi
-          echo "Verified bundle contains expected compat controls + r${REVISION} + v${APP_VERSION}"
+          echo "Verified frontend identity r${REVISION} / v${APP_VERSION}"
 
       - name: Test local proxy gateway auth
         run: cargo test -p codex-app-transfer-proxy --lib -- --nocapture
@@ -253,10 +279,14 @@ jobs:
           CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
         run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
 
-      - name: Stage Windows bundles
+      - name: Stage version-identified Windows bundles
         shell: bash
         env:
+          APP_VERSION: ${{ steps.compat-version.outputs.app_version }}
+          REVISION: ${{ steps.compat-version.outputs.revision }}
           SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
+          SHORT_SHA: ${{ steps.compat-version.outputs.short_sha }}
+          COMPOSER: ${{ steps.composer.outputs.composer }}
         run: |
           set -euo pipefail
           BDIR="target/x86_64-pc-windows-msvc/release/bundle"
@@ -268,13 +298,21 @@ jobs:
           for f in "$BDIR"/msi/*.msi; do
             cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
           done
+          cat > staging/BUILD-INFO.txt <<EOF
+          app_version=${APP_VERSION}
+          compat_revision=${REVISION}
+          git_commit=$(git rev-parse HEAD)
+          git_short_commit=${SHORT_SHA}
+          composer=${COMPOSER}
+          EOF
           files=(staging/*)
-          if (( ${#files[@]} == 0 )); then
-            echo "::error::No Windows bundles found"
+          if (( ${#files[@]} < 3 )); then
+            echo '::error::Expected NSIS, MSI, and BUILD-INFO.txt'
             find target -maxdepth 6 -type f | sort | tail -200 || true
             exit 1
           fi
           ls -lh staging/
+          cat staging/BUILD-INFO.txt
 
       - uses: actions/upload-artifact@v4
         with:

@@ -24,6 +24,7 @@ REVISION.write_text("32\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_no_lagging_r32_doctor_init_fix.py")
 run("scripts/apply_no_lagging_r32_handler_prep.py")
+run("scripts/apply_no_lagging_r32_rustfmt_replay_prep.py")
 run("scripts/apply_no_lagging_r32.py")
 run("scripts/review_no_lagging_r32.py")
 

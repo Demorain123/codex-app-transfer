@@ -7,6 +7,7 @@ use std::process::{Command, Stdio};
 const MIN_NODE_MAJOR: u32 = 22;
 const TARGET_MODULE: &[u8] = b"@worklouder/device-kit-oai";
 const SERIALPORT_MARKER: &[u8] = b"serialport";
+const HID_MARKERS: &[&[u8]] = &[b"node-hid", b"HID.node", b"hid.dll"];
 const FEATURE_GATE_MARKER: &[u8] = b"3207467860";
 const STUB_SHAPE_MARKERS: &[&[u8]] = &[
     b"ConnectionEventType",
@@ -17,6 +18,8 @@ const STUB_SHAPE_MARKERS: &[&[u8]] = &[
     b"WLDeviceDiscovery",
 ];
 const LAUNCHER_JS: &str = include_str!("../../../../resources/codex_no_micro_launcher.mjs");
+// CAS-NO-LAGGING-R32-MCP-EXIT-GUARD
+const MCP_EXIT_GUARD_PS1: &str = include_str!("../../../../resources/codex_no_lagging_janitor.ps1");
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +35,7 @@ pub struct NoMicroDoctor {
     pub node_compatible: bool,
     pub target_module_count: usize,
     pub serialport_count: usize,
+    pub hid_marker_count: usize,
     pub feature_gate_count: usize,
     pub stub_shape_ok: bool,
     pub process_state: String,
@@ -56,6 +60,7 @@ impl NoMicroDoctor {
             node_compatible: false,
             target_module_count: 0,
             serialport_count: 0,
+            hid_marker_count: 0,
             feature_gate_count: 0,
             stub_shape_ok: false,
             process_state: "unsupported".to_owned(),
@@ -348,6 +353,7 @@ fn doctor_windows() -> NoMicroDoctor {
         node_compatible: false,
         target_module_count: 0,
         serialport_count: 0,
+        hid_marker_count: 0,
         feature_gate_count: 0,
         stub_shape_ok: false,
         process_state: "unknown".to_owned(),
@@ -382,6 +388,10 @@ fn doctor_windows() -> NoMicroDoctor {
     if let Ok(bytes) = fs::read(&app_asar) {
         report.target_module_count = count_occurrences(&bytes, TARGET_MODULE);
         report.serialport_count = count_occurrences(&bytes, SERIALPORT_MARKER);
+        report.hid_marker_count = HID_MARKERS
+            .iter()
+            .map(|marker| count_occurrences(&bytes, marker))
+            .sum();
         report.feature_gate_count = count_occurrences(&bytes, FEATURE_GATE_MARKER);
         report.stub_shape_ok = STUB_SHAPE_MARKERS
             .iter()
@@ -422,8 +432,7 @@ fn doctor_windows() -> NoMicroDoctor {
         && app_asar.is_file()
         && report.node_compatible
         && report.target_module_count > 0
-        && report.serialport_count > 0
-        && report.stub_shape_ok;
+        && report.stub_shape_ok; // CAS-NO-LAGGING-R32-ACCESSORY-GUARD
     report.launch_ready = report.compatible && report.process_state == "not-running";
     if report.process_state == "running" {
         report
@@ -431,9 +440,15 @@ fn doctor_windows() -> NoMicroDoctor {
             .push("Codex 正在运行；请完全退出后再使用 No Micro 启动".to_owned());
     }
     if report.target_module_count == 0 {
-        report
-            .warnings
-            .push("当前 app.asar 未检测到 @worklouder/device-kit-oai；不要强行注入".to_owned());
+        report.warnings.push(
+            "当前 app.asar 未检测到 @worklouder/device-kit-oai；No Lagging 不会强行注入".to_owned(),
+        );
+    }
+    if report.target_module_count > 0 && report.serialport_count == 0 && report.hid_marker_count > 0
+    {
+        report.warnings.push(
+            "当前 build 未发现旧 serialport 标记，但仍检测到 HID/accessory 路径；r32 会继续在顶层 @worklouder/device-kit-oai 处阻断，避免进入 HID/native 枚举路径".to_owned(),
+        );
     }
     if !report.stub_shape_ok && report.target_module_count > 0 {
         report
@@ -457,6 +472,103 @@ fn write_launcher() -> Result<PathBuf, String> {
             .map_err(|e| format!("无法写入 No Micro launcher {}: {e}", launcher.display()))?;
     }
     Ok(launcher)
+}
+
+#[cfg(target_os = "windows")]
+fn write_mcp_exit_guard() -> Result<PathBuf, String> {
+    let dir = no_micro_dir().ok_or_else(|| "无法解析用户 HOME 目录".to_owned())?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("无法创建 No Lagging 目录 {}: {e}", dir.display()))?;
+    let script = dir.join("mcp-exit-guard-r32.ps1");
+    let unchanged = fs::read_to_string(&script)
+        .map(|current| current == MCP_EXIT_GUARD_PS1)
+        .unwrap_or(false);
+    if !unchanged {
+        fs::write(&script, MCP_EXIT_GUARD_PS1)
+            .map_err(|e| format!("无法写入 MCP Exit Guard {}: {e}", script.display()))?;
+    }
+    Ok(script)
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_janitor_shell() -> PathBuf {
+    let mut where_cmd = Command::new("where.exe");
+    where_cmd
+        .arg("pwsh.exe")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Ok(output) = hide_console_window(&mut where_cmd).output() {
+        if output.status.success() {
+            if let Some(line) = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+            {
+                return PathBuf::from(line);
+            }
+        }
+    }
+    PathBuf::from("powershell.exe")
+}
+
+#[cfg(target_os = "windows")]
+fn start_mcp_exit_guard(executable: &Path) -> Value {
+    let script = match write_mcp_exit_guard() {
+        Ok(path) => path,
+        Err(error) => return json!({ "status": "script-write-failed", "error": error }),
+    };
+    let shell = resolve_janitor_shell();
+    let mut command = Command::new(&shell);
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+        ])
+        .arg(&script)
+        .env("CAS_NO_LAGGING_EXE", executable)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    match hide_console_window(&mut command).spawn() {
+        Ok(mut child) => {
+            let pid = child.id();
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            match child.try_wait() {
+                Ok(None) => json!({
+                    "status": "watching",
+                    "pid": pid,
+                    "scope": "exact-codex-desktop-generation",
+                }),
+                Ok(Some(status)) if status.success() => json!({
+                    "status": "already-active-or-clean-exit",
+                    "pid": pid,
+                }),
+                Ok(Some(status)) => json!({
+                    "status": "start-failed",
+                    "pid": pid,
+                    "exitCode": status.code(),
+                }),
+                Err(error) => json!({
+                    "status": "unknown",
+                    "pid": pid,
+                    "error": error.to_string(),
+                }),
+            }
+        }
+        Err(error) => json!({
+            "status": "spawn-failed",
+            "error": error.to_string(),
+            "shell": shell.to_string_lossy(),
+        }),
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -492,7 +604,10 @@ fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
     );
     let launcher = write_launcher()?;
     let status_path =
-        last_launch_path().ok_or_else(|| "无法解析 No Micro 状态文件路径".to_owned())?;
+        last_launch_path().ok_or_else(|| "无法解析 No Lagging 状态文件路径".to_owned())?;
+    // Start before Codex so the watcher can observe the generation from its first helper stack.
+    // Failure is reported but does not block the already-proven Micro/Accessory guard.
+    let mcp_exit_guard = start_mcp_exit_guard(&executable);
 
     let mut command = Command::new(&node);
     command
@@ -523,6 +638,10 @@ fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
                 "success": true,
                 "doctor": report,
                 "launch": value,
+                "noLagging": {
+                    "microAccessoryGuard": "success",
+                    "mcpExitGuard": mcp_exit_guard,
+                },
             }));
         }
         return Err("No Micro launcher 未确认注入成功".to_owned());

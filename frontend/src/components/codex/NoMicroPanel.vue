@@ -37,62 +37,62 @@ const zh = computed(() => i18nState.locale === 'zh')
 const copy = computed(() =>
   zh.value
     ? {
-        title: 'Codex No Micro A/B（实验性）',
-        desc: 'r23 的 A/B 直接复用已验证正常的“重启 Codex App”流程：A 使用相同配置/代理/启动路径并正常加载 Micro；B 使用相同准备与关闭/清理流程，只在最后一步改为 No Micro 注入。两边都会把 [codex-ab]、run_id、mode 和阶段写入同一份 proxy 日志。',
+        title: 'Codex No Lagging A/B（实验性）',
+        desc: 'r32 在原 r23 No Micro A/B 上扩展为 No Lagging：B 仍只在顶层拦截 @worklouder/device-kit-oai，从而同时避开旧 serialport 与新 HID/accessory native 路径；并启动 MCP Exit Guard，仅在 Codex Desktop 真正退出后回收本 generation 已跟踪的残留 helper。不会减少 MCP、不会限制 subagent，也不会处理 429/503/agent-loop 类网络或会话故障。',
         doctor: '兼容性检查',
         checking: '检查中…',
         normalLaunch: '普通启动（A）',
         normalLaunching: 'A 启动中…',
-        noMicroLaunch: 'No Micro 启动（B）',
+        noMicroLaunch: 'No Lagging 启动（B）',
         noMicroLaunching: 'B 启动中…',
         ready: '环境兼容，可以进行 A/B。Codex 即使正在运行也可以点击；r23 会先复用原“重启 Codex App”的安全关闭/清理流程。',
         running: 'Codex 当前正在运行；可以直接开始下一轮，r23 会先按原“重启 Codex App”流程关闭并重新启动。',
-        incompatible: 'No Micro 注入兼容性未通过；A 仍可用于验证原“重启 Codex App”对照路径。',
+        incompatible: 'No Lagging 的 Micro/Accessory Guard 兼容性未通过；A 仍可用于对照。',
         unknown: '无法可靠确认 Codex 进程状态。为避免误操作，A/B 暂时禁用，请重新兼容性检查。',
         normalConfirmTitle: '普通启动 Codex（A）？',
         normalConfirmMessage:
           'A 会复用原有“重启 Codex App”的配置同步、关闭/清理和正常启动路径，Micro 正常加载；额外只写入 mode=normal 的 A/B 日志标识。',
         normalConfirmLabel: '启动 A',
-        noMicroConfirmTitle: '以 No Micro 模式启动 Codex（B）？',
+        noMicroConfirmTitle: '以 No Lagging 模式启动 Codex（B）？',
         noMicroConfirmMessage:
-          'B 会复用与 A 相同的配置同步和关闭/清理流程，只把最终启动替换为 No Micro 注入（拦截 @worklouder/device-kit-oai）；并写入 mode=no-micro 标识。',
+          'B 会复用与 A 相同的配置同步和关闭/清理流程；最终启动使用 Micro/Accessory Guard，并在后台启动 MCP Exit Guard。Exit Guard 只在 Codex Desktop 已退出时处理本 generation 的残留，不会动正在工作的 MCP/subagent。',
         noMicroConfirmLabel: '启动 B',
         normalLaunchOk: '普通 A 已按原重启流程启动并写入日志标识',
-        noMicroLaunchOk: 'No Micro B 注入已验证并写入日志标识',
-        lastSuccess: '最近一次 B：注入成功',
-        lastFailed: '最近一次 B：注入失败',
-        never: '尚无 No Micro B 启动记录',
+        noMicroLaunchOk: 'No Lagging B：Micro/Accessory Guard 已验证，MCP Exit Guard 已请求后台监控',
+        lastSuccess: '最近一次 B：Micro/Accessory Guard 注入成功',
+        lastFailed: '最近一次 B：Micro/Accessory Guard 注入失败',
+        never: '尚无 No Lagging B 启动记录',
         unsupported: '当前平台暂不支持（仅 Windows Store/MSIX Codex）。',
-        logHint: '日志关键字：[codex-ab]。A：mode=normal + environment_ready + launch_success；B：mode=no-micro + environment_ready + injection_success。每轮 run_id 独立。',
+        logHint: '日志关键字：[codex-ab]。A：mode=normal；B：mode=no-lagging + injection_success。MCP Exit Guard 另写 %LOCALAPPDATA%\\CodexMcpJanitorR32\\events.jsonl。',
       }
     : {
-        title: 'Codex No Micro A/B (experimental)',
-        desc: 'r23 reuses the proven Restart Codex App pipeline for both sides. A keeps the same config/proxy/restart path with Micro enabled; B uses the same preparation and quit/reap path and changes only the final launcher to No Micro. Both write [codex-ab] run_id/mode/phase markers to the same proxy log.',
+        title: 'Codex No Lagging A/B (experimental)',
+        desc: 'r32 extends the proven r23 No Micro A/B into No Lagging. B still intercepts only @worklouder/device-kit-oai, covering both the old serialport path and newer HID/accessory native path, and starts an MCP Exit Guard that cleans only tracked helpers after Codex Desktop has exited. It does not reduce MCPs, limit subagents, or claim to fix 429/503/agent-loop failures.',
         doctor: 'Compatibility check',
         checking: 'Checking…',
         normalLaunch: 'Normal launch (A)',
         normalLaunching: 'Launching A…',
-        noMicroLaunch: 'No Micro launch (B)',
+        noMicroLaunch: 'No Lagging launch (B)',
         noMicroLaunching: 'Launching B…',
         ready: 'Environment is compatible and ready for A/B. Codex may already be running; r23 will reuse the legacy safe quit/restart flow first.',
         running: 'Codex is currently running. You may start the next run directly; r23 will first reuse the legacy safe quit/restart flow.',
-        incompatible: 'No Micro compatibility did not pass; A can still validate the legacy Restart Codex App control path.',
+        incompatible: 'No Lagging Micro/Accessory Guard compatibility did not pass; A remains available as the control path.',
         unknown: 'Codex process state cannot be verified reliably. A/B is disabled until compatibility is checked again.',
         normalConfirmTitle: 'Launch normal Codex (A)?',
         normalConfirmMessage:
           'A reuses the existing Restart Codex App config sync, safe quit/reap, and normal launch path with Micro enabled. The only addition is an explicit mode=normal A/B log marker.',
         normalConfirmLabel: 'Launch A',
-        noMicroConfirmTitle: 'Launch Codex with No Micro (B)?',
+        noMicroConfirmTitle: 'Launch Codex with No Lagging (B)?',
         noMicroConfirmMessage:
-          'B reuses the same config sync and safe quit/reap path as A, but replaces only the final launcher with the No Micro interception for @worklouder/device-kit-oai. It writes a mode=no-micro marker.',
+          'B reuses the same config sync and safe quit/reap path as A, adds the Micro/Accessory Guard, and starts the background MCP Exit Guard. The exit guard never kills MCP/subagent helpers while Codex Desktop is still running.',
         noMicroConfirmLabel: 'Launch B',
         normalLaunchOk: 'Normal A launched through the legacy restart path and its marker was written',
-        noMicroLaunchOk: 'No Micro B injection verified and its marker was written',
-        lastSuccess: 'Last B: injection succeeded',
-        lastFailed: 'Last B: injection failed',
-        never: 'No No Micro B launch has been recorded yet',
+        noMicroLaunchOk: 'No Lagging B Micro/Accessory Guard verified; MCP Exit Guard start requested',
+        lastSuccess: 'Last B: Micro/Accessory Guard injection succeeded',
+        lastFailed: 'Last B: Micro/Accessory Guard injection failed',
+        never: 'No No Lagging B launch has been recorded yet',
         unsupported: 'This feature currently supports Windows Store/MSIX Codex only.',
-        logHint: 'Log key: [codex-ab]. A: mode=normal + environment_ready + launch_success. B: mode=no-micro + environment_ready + injection_success. Every run has a unique run_id.',
+        logHint: 'Log key: [codex-ab]. A: mode=normal. B: mode=no-lagging + injection_success. MCP Exit Guard writes %LOCALAPPDATA%\\CodexMcpJanitorR32\\events.jsonl.',
       },
 )
 
@@ -114,6 +114,7 @@ const metaText = computed(() => {
     d.nodeVersion ? `Node ${d.nodeVersion}` : null,
     `device-kit ×${d.targetModuleCount}`,
     `serialport ×${d.serialportCount}`,
+    `HID/accessory ×${d.hidMarkerCount}`,
     `gate ×${d.featureGateCount}`,
   ].filter(Boolean)
   return parts.join(' · ')
@@ -186,7 +187,7 @@ onMounted(() => void refresh())
 </script>
 
 <template>
-  <section class="no-micro-panel">
+  <section class="no-micro-panel" data-compat="CAS-NO-LAGGING-R32-UI">
     <div class="no-micro-panel__header">
       <div>
         <div class="no-micro-panel__title">{{ copy.title }}</div>

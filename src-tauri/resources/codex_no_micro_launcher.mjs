@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MODE = "micro-disabled-worker-safe";
+const MODE = "micro-disabled-worker-safe"; // CAS-NO-LAGGING-R32-MICRO-ACCESSORY-GUARD
 const EXPECTED_MARKER = "codex-micro-disabled-worker-safe";
 const fixDirectory = path.dirname(fileURLToPath(import.meta.url));
 const statusPath = process.env.CAS_NO_MICRO_STATUS_PATH || path.join(fixDirectory, "last-launch.json");
@@ -188,6 +188,7 @@ function stubExpression(expectedPid, expectedExecutable) {
   };
 
   globalThis.__CODEX_MICRO_DISABLED_LOCAL__ = true;
+  globalThis.__CODEX_NO_LAGGING_MICRO_ACCESSORY_GUARD__ = true;
   setTimeout(() => {
     try { process.getBuiltinModule("inspector").close(); } catch {}
   }, 500);

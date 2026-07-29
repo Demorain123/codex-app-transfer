@@ -1,0 +1,220 @@
+name: Test r32 No Lagging Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r32-no-lagging
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'docs/R32_NO_LAGGING.md'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r32-windows-package.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r31-auto-review-layout
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-r32-windows:
+    runs-on: windows-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compose r24 through r32
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/apply_r32_unified.py \
+            scripts/apply_no_lagging_r32_doctor_init_fix.py \
+            scripts/apply_no_lagging_r32_handler_prep.py \
+            scripts/apply_no_lagging_r32.py \
+            scripts/review_no_lagging_r32.py
+          python scripts/apply_r32_unified.py
+          grep -F -q 'compat_revision=32' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+32' SUB2API_GROK_COMPAT_VERSION.txt
+          python scripts/review_no_lagging_r32.py
+
+      - name: Resolve r32 package version
+        id: compat-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          BASE_VERSION="${APP_VERSION%%+*}"
+          REVISION="${APP_VERSION#*+}"
+          SAFE_VERSION="${BASE_VERSION}-r${REVISION}"
+          test "$REVISION" = '32'
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Parse r32 PowerShell exit guard
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'src-tauri/resources/codex_no_lagging_janitor.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            exit 1
+          }
+          Write-Host 'r32 MCP Exit Guard PowerShell parse: PASS'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r32-no-lagging-windows-package
+
+      - name: Normalize generated source and prove replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r32-first.diff"
+          python scripts/apply_r32_unified.py > "$RUNNER_TEMP/r32-second-replay.log" 2>&1 || {
+            tail -n 200 "$RUNNER_TEMP/r32-second-replay.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_no_lagging_r32.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r32-second.diff"
+          if ! cmp -s "$RUNNER_TEMP/r32-first.diff" "$RUNNER_TEMP/r32-second.diff"; then
+            echo '::error::r32 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r32-first.diff" "$RUNNER_TEMP/r32-second.diff" || true
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match the original r23 Windows injector CI and the product doctor
+          # requirement (Node >=22). Node 24 supplies the global WebSocket used
+          # by the inspector transport.
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Recheck worker-safe Micro/Accessory injector
+        run: node scripts/test_no_micro_launcher.mjs
+
+      - name: Recheck r24 Auto Review copy-on-write semantics
+        run: cargo test -p codex-app-transfer-codex-integration auto_review_overlay --lib -- --nocapture
+
+      - name: Recheck r25 Apps MCP auth regressions
+        run: cargo test -p codex-app-transfer-proxy --lib apps_mcp_auth_r25 -- --nocapture
+
+      - name: Recheck r26 subagent failure-chain regressions
+        run: cargo test -p codex-app-transfer-proxy --lib subagent_failure_chain_r26 -- --nocapture
+
+      - name: Compile complete r32 Windows app
+        run: cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Recheck r27 proxy lifecycle regressions
+        run: cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+
+      - name: Recheck r28 Hybrid Direct safety invariants
+        run: cargo test -p codex-app-transfer hybrid_direct --target x86_64-pc-windows-msvc -- --nocapture
+
+      - name: Test adapter regressions
+        run: cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+
+      - name: Build and verify r32 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r32' frontend/dist
+          grep -R -F -q 'No Lagging' frontend/dist
+          grep -R -F -q 'MCP Exit Guard' frontend/dist
+          grep -R -F -q 'Hybrid Direct' frontend/dist
+          grep -R -F -q 'Auto Review' frontend/dist
+
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: Build Windows NSIS and MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage r32 Windows bundles
+        shell: bash
+        env:
+          SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
+          APP_VERSION: ${{ steps.compat-version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          BDIR="target/x86_64-pc-windows-msvc/release/bundle"
+          mkdir -p staging
+          shopt -s nullglob
+          for f in "$BDIR"/nsis/*-setup.exe; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
+          done
+          for f in "$BDIR"/msi/*.msi; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
+          done
+          cat > staging/BUILD-INFO.txt <<EOF
+          app_version=${APP_VERSION}
+          compat_revision=32
+          git_commit=$(git rev-parse HEAD)
+          composer=scripts/apply_r32_unified.py
+          feature=no-lagging-micro-accessory-plus-mcp-exit-guard
+          EOF
+          files=(staging/*)
+          if (( ${#files[@]} < 3 )); then
+            echo '::error::Expected r32 NSIS, MSI, and BUILD-INFO.txt'
+            exit 1
+          fi
+          ls -lh staging/
+          cat staging/BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-${{ steps.compat-version.outputs.safe_version }}-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

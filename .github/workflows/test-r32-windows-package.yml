@@ -45,6 +45,8 @@ jobs:
           set -euo pipefail
           python -m py_compile \
             scripts/apply_r32_unified.py \
+            scripts/apply_no_lagging_r32_doctor_init_fix.py \
+            scripts/apply_no_lagging_r32_handler_prep.py \
             scripts/apply_no_lagging_r32.py \
             scripts/review_no_lagging_r32.py
           python scripts/apply_r32_unified.py
@@ -118,7 +120,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Match the original r23 Windows injector CI and the product doctor
+          # requirement (Node >=22). Node 24 supplies the global WebSocket used
+          # by the inspector transport.
+          node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -157,7 +162,6 @@ jobs:
           grep -R -F -q 'MCP Exit Guard' frontend/dist
           grep -R -F -q 'Hybrid Direct' frontend/dist
           grep -R -F -q 'Auto Review' frontend/dist
-          grep -R -F -q 'No Micro' frontend/dist || true
 
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli

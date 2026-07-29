@@ -26,7 +26,9 @@ run("scripts/apply_no_lagging_r32_doctor_init_fix.py")
 run("scripts/apply_no_lagging_r32_handler_prep.py")
 run("scripts/apply_no_lagging_r32_rustfmt_replay_prep.py")
 run("scripts/apply_no_lagging_r32.py")
+run("scripts/apply_r32_usage_sort.py")
 run("scripts/review_no_lagging_r32.py")
+run("scripts/review_r32_usage_sort.py")
 
 required = {
     "src-tauri/src/admin/services/desktop/no_micro.rs": [
@@ -45,6 +47,11 @@ required = {
     "frontend/src/components/codex/NoMicroPanel.vue": [
         "CAS-NO-LAGGING-R32-UI",
         "Codex No Lagging A/B",
+    ],
+    "frontend/src/pages/UsagePage.vue": [
+        "CAS-R32-USAGE-CLICK-SORT",
+        "usage-sort-button",
+        "sortAria",
     ],
     "frontend/src/components/provider/ProviderFormModal.vue": [
         "CAS-AUTO-REVIEW-LAYOUT-R31",
@@ -69,4 +76,4 @@ version = VERSION.read_text(encoding="utf-8")
 if "compat_revision=32" not in version or "app_version=2.4.5+32" not in version:
     raise SystemExit("r32 visible/package version stamp missing after composition")
 
-print("r32 unified composition: COMPLETE (r31 preserved + No Lagging Micro/Accessory + MCP Exit Guard)")
+print("r32 unified composition: COMPLETE (r31 preserved + No Lagging + MCP Exit Guard + click-sort usage headers)")

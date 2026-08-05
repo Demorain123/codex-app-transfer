@@ -46,6 +46,7 @@ jobs:
           python -m py_compile \
             scripts/apply_r33_unified.py \
             scripts/apply_r33_chain_health.py \
+            scripts/apply_r33_chain_health_replay_fix.py \
             scripts/apply_r33_chain_health_hardening.py \
             scripts/apply_r33_chain_health_inspect_privacy.py \
             scripts/apply_r33_chain_health_state_privacy.py \
@@ -57,6 +58,7 @@ jobs:
           grep -F -q 'CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY' src-tauri/src/admin/handlers/chain_health.rs
           grep -F -q 'CAS-R33-CHAIN-HEALTH-STATE-PROJECTION' src-tauri/src/admin/handlers/chain_health.rs
           grep -F -q 'CAS-R33-CHAIN-HEALTH-LABEL-PROJECTION' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q '/api/chain-health' src-tauri/src/admin/mod.rs
           python scripts/review_r33_chain_health.py
 
       - name: Resolve r33 package version

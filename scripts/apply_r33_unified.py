@@ -35,6 +35,9 @@ run("scripts/review_r32_usage_sort.py")
 REVISION.write_text("33\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_r33_chain_health.py")
+# Inherited r24-r32 replays can rewrite router/module files while preserving
+# unrelated r33 markers. Restore concrete wiring by semantic presence checks.
+run("scripts/apply_r33_chain_health_replay_fix.py")
 run("scripts/apply_r33_chain_health_hardening.py")
 run("scripts/apply_r33_chain_health_inspect_privacy.py")
 run("scripts/apply_r33_chain_health_state_privacy.py")
@@ -53,8 +56,8 @@ required = {
         "upstream_headers_stalled",
         "kill_on_drop(true)",
     ],
-    "src-tauri/src/admin/handlers/mod.rs": ["CAS-R33-CHAIN-HEALTH"],
-    "src-tauri/src/admin/mod.rs": ["/api/chain-health", "CAS-R33-CHAIN-HEALTH"],
+    "src-tauri/src/admin/handlers/mod.rs": ["pub mod chain_health;"],
+    "src-tauri/src/admin/mod.rs": ["/api/chain-health"],
     "frontend/src/api/chainHealth.ts": ["CAS-R33-CHAIN-HEALTH", "getChainHealth"],
     "frontend/src/pages/ProxyPage.vue": [
         "CAS-R33-CHAIN-HEALTH",

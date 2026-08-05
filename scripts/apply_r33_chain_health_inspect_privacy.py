@@ -20,8 +20,8 @@ old = '''    let mut args = vec!["inspect".to_owned()];
     serde_json::from_str::<Vec<Value>>(&result.stdout).unwrap_or_default()
 '''
 new = r'''    // CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY: request a strict safe projection.
-    // Bare `docker inspect` includes Config.Env and mount details even when the UI
-    // never renders them. Keep those fields outside Transfer entirely.
+    // Bare `docker inspect` includes configuration secrets and mount details even
+    // when the UI never renders them. Keep all unrequested fields outside Transfer.
     let projection = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"State":{{json .State}},"RestartCount":{{json .RestartCount}},"Labels":{{json .Config.Labels}}}"#;
     let mut args = vec![
         "inspect".to_owned(),

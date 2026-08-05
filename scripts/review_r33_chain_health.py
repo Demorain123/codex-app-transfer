@@ -43,9 +43,9 @@ required_handler = [
     "set_fragment(None)",
     '"--format".to_owned()',
     '"HealthStatus":{{if .State.Health}}',
-    'index .Config.Labels \\"com.docker.compose.project\\"',
-    'index .Config.Labels \\"com.docker.compose.service\\"',
-    'index .Config.Labels \\"com.docker.compose.oneoff\\"',
+    'index .Config.Labels "com.docker.compose.project"',
+    'index .Config.Labels "com.docker.compose.service"',
+    'index .Config.Labels "com.docker.compose.oneoff"',
 ]
 for marker in required_handler:
     if marker not in handler:
@@ -65,6 +65,7 @@ for forbidden in [
     '"State":{{json .State}}',
     "Health.Log",
     '"Labels":{{json .Config.Labels}}',
+    '\\"com.docker.compose.project\\"',
 ]:
     if forbidden in handler:
         raise SystemExit(f"r33 automatic health handler contains forbidden behavior: {forbidden}")

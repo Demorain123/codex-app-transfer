@@ -1,6 +1,7 @@
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r33 · v2.4.5+33",
+  "compat.buildBadge": "Sub2API Grok Compat r34 · v2.4.5+34",
   "chainHealth.title": '全链路健康',
   "chainHealth.loading": '正在收集无额度诊断证据…',
   "chainHealth.refresh": '立即检查',
@@ -10,6 +11,8 @@ export default {
   "chainHealth.privacy": '隐私边界',
   "chainHealth.loadFailed": '链路健康检查失败',
   "chainHealth.layer.codex": 'Codex',
+  "chainHealth.layer.session": '会话 / Turn',
+  "chainHealth.layer.mcp": 'MCP 健康',
   "chainHealth.layer.transfer": 'Transfer',
   "chainHealth.layer.gateway": '网关',
   "chainHealth.layer.runtime": '运行环境',

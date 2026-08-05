@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Codex App Transfer",
-  "version": "2.4.5+33",
+  "version": "2.4.5+34",
   "identifier": "store.alyse.codex-app-transfer",
   "build": {
     "frontendDist": "../frontend/dist",
@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Codex App Transfer — Sub2API Grok Compat r33 — v2.4.5+33",
+        "title": "Codex App Transfer — Sub2API Grok Compat r34 — v2.4.5+34",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "url": "cas://localhost/",

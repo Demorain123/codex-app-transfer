@@ -1,4 +1,5 @@
 // CAS-R33-CHAIN-HEALTH
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 import { api } from './http'
 
 export type ChainHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown' | 'idle'
@@ -33,6 +34,7 @@ export interface ChainHealthContainer {
   oomKilled: boolean
   exitCode: number
   restartCount: number
+  restartDelta: number
   cpu?: string | null
   memory?: string | null
   pids?: string | null
@@ -56,6 +58,8 @@ export interface ChainHealthSnapshot {
   overallSummary: string
   provider?: ChainHealthProvider | null
   codex: ChainHealthLayer
+  session: ChainHealthLayer
+  mcp: ChainHealthLayer
   transfer: ChainHealthLayer
   gateway: ChainHealthLayer
   runtime: ChainRuntimeHealth

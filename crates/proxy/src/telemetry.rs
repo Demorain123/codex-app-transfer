@@ -206,10 +206,150 @@ impl LogBuffer {
     }
 }
 
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH
+// Privacy-bounded request lifecycle telemetry. Records only stage timestamps,
+// provider/model labels and fingerprinted correlation supplied by forward.rs.
+// Prompt/response bodies, tool arguments, raw thread/session IDs and credentials
+// never enter this store.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLifecycleSnapshot {
+    pub id: u64,
+    pub correlation: String,
+    pub provider: String,
+    pub model: String,
+    pub accepted_at_ms: i64,
+    pub forwarded_at_ms: Option<i64>,
+    pub headers_at_ms: Option<i64>,
+    pub first_event_at_ms: Option<i64>,
+    pub completed_at_ms: Option<i64>,
+    pub status: Option<u16>,
+    pub bytes: u64,
+    pub terminal: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct RequestLifecycleTracker {
+    inner: Mutex<std::collections::VecDeque<RequestLifecycleSnapshot>>,
+    next_id: std::sync::atomic::AtomicU64,
+    max_size: usize,
+}
+
+impl Default for RequestLifecycleTracker {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(std::collections::VecDeque::new()),
+            next_id: std::sync::atomic::AtomicU64::new(1),
+            max_size: 256,
+        }
+    }
+}
+
+impl RequestLifecycleTracker {
+    fn now_ms() -> i64 {
+        Local::now().timestamp_millis()
+    }
+
+    pub fn start(
+        &self,
+        correlation: impl Into<String>,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+    ) -> u64 {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        while inner.len() >= self.max_size {
+            inner.pop_front();
+        }
+        inner.push_back(RequestLifecycleSnapshot {
+            id,
+            correlation: correlation.into(),
+            provider: provider.into(),
+            model: model.into(),
+            accepted_at_ms: Self::now_ms(),
+            forwarded_at_ms: None,
+            headers_at_ms: None,
+            first_event_at_ms: None,
+            completed_at_ms: None,
+            status: None,
+            bytes: 0,
+            terminal: None,
+        });
+        id
+    }
+
+    fn update(&self, id: u64, f: impl FnOnce(&mut RequestLifecycleSnapshot)) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(record) = inner.iter_mut().rev().find(|record| record.id == id) {
+            f(record);
+        }
+    }
+
+    pub fn mark_forwarded(&self, id: u64) {
+        self.update(id, |record| {
+            record.forwarded_at_ms.get_or_insert_with(Self::now_ms);
+        });
+    }
+
+    pub fn mark_headers(&self, id: u64, status: u16) {
+        self.update(id, |record| {
+            record.headers_at_ms.get_or_insert_with(Self::now_ms);
+            record.status = Some(status);
+        });
+    }
+
+    pub fn mark_first_event(&self, id: u64) {
+        self.update(id, |record| {
+            record.first_event_at_ms.get_or_insert_with(Self::now_ms);
+        });
+    }
+
+    pub fn mark_completed(&self, id: u64, status: u16, bytes: u64) {
+        self.update(id, |record| {
+            if record.terminal.is_none() {
+                record.completed_at_ms = Some(Self::now_ms());
+                record.status = Some(status);
+                record.bytes = bytes;
+                record.terminal = Some("completed".to_owned());
+            }
+        });
+    }
+
+    pub fn mark_failed(&self, id: u64, stage: &'static str) {
+        self.update(id, |record| {
+            if record.terminal.is_none() {
+                record.completed_at_ms = Some(Self::now_ms());
+                record.terminal = Some(format!("failed:{stage}"));
+            }
+        });
+    }
+
+    pub fn mark_cancelled(&self, id: u64) {
+        self.update(id, |record| {
+            if record.terminal.is_none() {
+                record.completed_at_ms = Some(Self::now_ms());
+                record.terminal = Some("cancelled".to_owned());
+            }
+        });
+    }
+
+    pub fn snapshot(&self) -> Vec<RequestLifecycleSnapshot> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+}
+
 #[derive(Debug)]
 pub struct ProxyTelemetry {
     pub stats: ProxyStats,
     pub logs: LogBuffer,
+    pub lifecycles: RequestLifecycleTracker,
 }
 
 impl Default for ProxyTelemetry {
@@ -217,6 +357,7 @@ impl Default for ProxyTelemetry {
         Self {
             stats: ProxyStats::default(),
             logs: LogBuffer::new(200),
+            lifecycles: RequestLifecycleTracker::default(),
         }
     }
 }

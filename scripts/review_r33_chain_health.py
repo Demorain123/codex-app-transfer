@@ -23,6 +23,7 @@ required_handler = [
     "CAS-R33-CHAIN-HEALTH",
     "CAS-R33-CHAIN-HEALTH-PRIVACY",
     "CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY",
+    "CAS-R33-CHAIN-HEALTH-STATE-PROJECTION",
     "CACHE_TTL",
     "DNS_TIMEOUT",
     "TCP_TIMEOUT",
@@ -40,6 +41,7 @@ required_handler = [
     "set_query(None)",
     "set_fragment(None)",
     '"--format".to_owned()',
+    '"HealthStatus":{{if .State.Health}}',
     '"Labels":{{json .Config.Labels}}',
 ]
 for marker in required_handler:
@@ -57,16 +59,23 @@ for forbidden in [
     "Authorization",
     "/v1/responses",
     "/chat/completions",
+    '"State":{{json .State}}',
+    "Health.Log",
 ]:
     if forbidden in handler:
         raise SystemExit(f"r33 automatic health handler contains forbidden behavior: {forbidden}")
 
-# The only inspect call must include the safe projection before container IDs.
+# The only inspect call must include the safe scalar projection before container IDs.
 inspect_function = handler.split("async fn inspect_containers", 1)[1].split("async fn container_stats", 1)[0]
 if '"inspect".to_owned(),\n        "--format".to_owned()' not in inspect_function:
     raise SystemExit("r33 Docker inspect is not field-projected")
 if "serde_json::from_str::<Vec<Value>>" in inspect_function:
     raise SystemExit("r33 Docker inspect still expects an unprojected full array")
+if '"State":{{json .State}}' in inspect_function or "Health.Log" in inspect_function:
+    raise SystemExit("r33 Docker inspect still ingests full state or healthcheck output")
+for scalar in [".State.Running", ".State.Status", ".State.Health.Status", ".State.Restarting", ".State.OOMKilled", ".State.ExitCode"]:
+    if scalar not in inspect_function:
+        raise SystemExit(f"r33 Docker inspect scalar state projection missing: {scalar}")
 
 if 'features = ["sync", "net", "process", "rt-multi-thread", "time"]' not in cargo:
     raise SystemExit("r33 tokio process feature missing")

@@ -44,6 +44,7 @@ jobs:
           python -m py_compile \
             scripts/apply_r33_unified.py \
             scripts/apply_r33_chain_health.py \
+            scripts/apply_r33_chain_health_replay_fix.py \
             scripts/apply_r33_chain_health_hardening.py \
             scripts/apply_r33_chain_health_inspect_privacy.py \
             scripts/apply_r33_chain_health_state_privacy.py \

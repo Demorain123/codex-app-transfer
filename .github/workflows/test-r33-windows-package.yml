@@ -47,10 +47,12 @@ jobs:
             scripts/apply_r33_unified.py \
             scripts/apply_r33_chain_health.py \
             scripts/apply_r33_chain_health_hardening.py \
+            scripts/apply_r33_chain_health_inspect_privacy.py \
             scripts/review_r33_chain_health.py
           python scripts/apply_r33_unified.py
           grep -F -q 'compat_revision=33' SUB2API_GROK_COMPAT_VERSION.txt
           grep -F -q 'app_version=2.4.5+33' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY' src-tauri/src/admin/handlers/chain_health.rs
           python scripts/review_r33_chain_health.py
 
       - name: Resolve r33 package version

@@ -15,7 +15,7 @@ old = r'''    let projection = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"Runn
 new = r'''    // CAS-R33-CHAIN-HEALTH-LABEL-PROJECTION: request only the three standard
     // Compose identity labels needed for dependency grouping. Custom labels stay
     // outside Transfer because they may contain user-defined sensitive metadata.
-    let projection = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"Running":{{json .State.Running}},"Status":{{json .State.Status}},"HealthStatus":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},"Restarting":{{json .State.Restarting}},"OOMKilled":{{json .State.OOMKilled}},"ExitCode":{{json .State.ExitCode}},"RestartCount":{{json .RestartCount}},"ComposeProject":{{json (index .Config.Labels \"com.docker.compose.project\")}},"ComposeService":{{json (index .Config.Labels \"com.docker.compose.service\")}},"ComposeOneoff":{{json (index .Config.Labels \"com.docker.compose.oneoff\")}}}"#;'''
+    let projection = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"Running":{{json .State.Running}},"Status":{{json .State.Status}},"HealthStatus":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},"Restarting":{{json .State.Restarting}},"OOMKilled":{{json .State.OOMKilled}},"ExitCode":{{json .State.ExitCode}},"RestartCount":{{json .RestartCount}},"ComposeProject":{{json (index .Config.Labels "com.docker.compose.project")}},"ComposeService":{{json (index .Config.Labels "com.docker.compose.service")}},"ComposeOneoff":{{json (index .Config.Labels "com.docker.compose.oneoff")}}}"#;'''
 if old not in body:
     raise SystemExit("r33 broad label projection anchor missing")
 body = body.replace(old, new, 1)

@@ -116,11 +116,18 @@ for marker in [
 if "getChainHealth" not in api or "/api/chain-health" not in api:
     raise SystemExit("r33 frontend chain-health API missing")
 
-route_marker = '.route("/api/chain-health", get(handlers::chain_health::chain_health))'
+# Rustfmt is free to wrap the route call across lines. Count the stable semantic
+# pieces instead of requiring one exact one-line rendering.
+route_url = '"/api/chain-health"'
+route_handler = "handlers::chain_health::chain_health"
 module_marker = "pub mod chain_health;"
-if admin.count(route_marker) != 1:
+if admin.count(route_url) != 1:
     raise SystemExit(
-        f"r33 backend chain-health route count must be 1, got {admin.count(route_marker)}"
+        f"r33 backend chain-health URL count must be 1, got {admin.count(route_url)}"
+    )
+if admin.count(route_handler) != 1:
+    raise SystemExit(
+        f"r33 backend chain-health handler count must be 1, got {admin.count(route_handler)}"
     )
 if handlers_mod.count(module_marker) != 1:
     raise SystemExit(

@@ -27,6 +27,9 @@ run("scripts/review_r33_chain_health.py")
 
 REVISION.write_text("34\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
+# Normalize the r34 source overlay itself before executing it. This prep is
+# idempotent and removes a layout-sensitive container insertion anchor.
+run("scripts/apply_r34_restart_delta_overlay_prep.py")
 run("scripts/apply_r34_runtime_behavior_health.py")
 run("scripts/review_r34_runtime_behavior_health.py")
 

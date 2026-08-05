@@ -13,8 +13,8 @@ if MARKER in body:
 
 old_projection = r'''    let projection = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"State":{{json .State}},"RestartCount":{{json .RestartCount}},"Labels":{{json .Config.Labels}}}"#;'''
 new_projection = r'''    // CAS-R33-CHAIN-HEALTH-STATE-PROJECTION: project only scalar state fields.
-    // `.State` also contains Health.Log with command output; diagnostics need only
-    // the current health status, never healthcheck history or output text.
+    // Container state also carries historical healthcheck command output; diagnostics
+    // need only the current status and must not ingest that output history.
     let projection = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"Running":{{json .State.Running}},"Status":{{json .State.Status}},"HealthStatus":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},"Restarting":{{json .State.Restarting}},"OOMKilled":{{json .State.OOMKilled}},"ExitCode":{{json .State.ExitCode}},"RestartCount":{{json .RestartCount}},"Labels":{{json .Config.Labels}}}"#;'''
 if old_projection not in body:
     raise SystemExit("r33 full State projection anchor missing")

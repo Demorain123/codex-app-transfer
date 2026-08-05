@@ -42,6 +42,10 @@ run("scripts/apply_r33_chain_health_hardening.py")
 run("scripts/apply_r33_chain_health_inspect_privacy.py")
 run("scripts/apply_r33_chain_health_state_privacy.py")
 run("scripts/apply_r33_chain_health_label_privacy.py")
+# Final composition boundary: no later overlay is allowed to leave the handler
+# module, router endpoint, or Tokio process capability absent. Running the repair
+# again is intentionally idempotent and protects complete r24→r33 replays.
+run("scripts/apply_r33_chain_health_replay_fix.py")
 run("scripts/review_r33_chain_health.py")
 
 required = {

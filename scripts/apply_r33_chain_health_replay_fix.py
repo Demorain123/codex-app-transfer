@@ -24,9 +24,12 @@ ensure_after(
     "\n// CAS-R33-CHAIN-HEALTH-REPLAY-WIRING\npub mod chain_health;",
 )
 
+# Rustfmt may wrap `.route(`, the path, and handler across separate lines. The
+# URL literal is the stable semantic key; do not insert a second route merely
+# because the original one-line spelling changed.
 ensure_after(
     "src-tauri/src/admin/mod.rs",
-    '.route("/api/chain-health", get(handlers::chain_health::chain_health))',
+    '"/api/chain-health"',
     '        .route("/api/proxy/status", get(handlers::proxy::proxy_status))',
     '\n        // CAS-R33-CHAIN-HEALTH-REPLAY-WIRING\n'
     '        .route("/api/chain-health", get(handlers::chain_health::chain_health))',
@@ -45,5 +48,15 @@ if '"process"' not in line:
     print("r33 replay wiring restored: tokio process feature")
 else:
     print("r33 replay wiring already present: tokio process feature")
+
+admin = (ROOT / "src-tauri/src/admin/mod.rs").read_text(encoding="utf-8")
+if admin.count('"/api/chain-health"') != 1:
+    raise SystemExit(
+        f"r33 replay wiring: chain-health URL count must be 1, got {admin.count(chr(34) + '/api/chain-health' + chr(34))}"
+    )
+if admin.count("handlers::chain_health::chain_health") != 1:
+    raise SystemExit(
+        "r33 replay wiring: chain-health handler reference count must be exactly 1"
+    )
 
 print("r33 chain-health inherited replay wiring: PASS")

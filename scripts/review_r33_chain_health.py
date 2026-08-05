@@ -24,6 +24,7 @@ required_handler = [
     "CAS-R33-CHAIN-HEALTH-PRIVACY",
     "CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY",
     "CAS-R33-CHAIN-HEALTH-STATE-PROJECTION",
+    "CAS-R33-CHAIN-HEALTH-LABEL-PROJECTION",
     "CACHE_TTL",
     "DNS_TIMEOUT",
     "TCP_TIMEOUT",
@@ -42,7 +43,9 @@ required_handler = [
     "set_fragment(None)",
     '"--format".to_owned()',
     '"HealthStatus":{{if .State.Health}}',
-    '"Labels":{{json .Config.Labels}}',
+    'index .Config.Labels \\"com.docker.compose.project\\"',
+    'index .Config.Labels \\"com.docker.compose.service\\"',
+    'index .Config.Labels \\"com.docker.compose.oneoff\\"',
 ]
 for marker in required_handler:
     if marker not in handler:
@@ -61,6 +64,7 @@ for forbidden in [
     "/chat/completions",
     '"State":{{json .State}}',
     "Health.Log",
+    '"Labels":{{json .Config.Labels}}',
 ]:
     if forbidden in handler:
         raise SystemExit(f"r33 automatic health handler contains forbidden behavior: {forbidden}")
@@ -73,9 +77,25 @@ if "serde_json::from_str::<Vec<Value>>" in inspect_function:
     raise SystemExit("r33 Docker inspect still expects an unprojected full array")
 if '"State":{{json .State}}' in inspect_function or "Health.Log" in inspect_function:
     raise SystemExit("r33 Docker inspect still ingests full state or healthcheck output")
-for scalar in [".State.Running", ".State.Status", ".State.Health.Status", ".State.Restarting", ".State.OOMKilled", ".State.ExitCode"]:
+if '"Labels":{{json .Config.Labels}}' in inspect_function:
+    raise SystemExit("r33 Docker inspect still ingests the full custom label map")
+for scalar in [
+    ".State.Running",
+    ".State.Status",
+    ".State.Health.Status",
+    ".State.Restarting",
+    ".State.OOMKilled",
+    ".State.ExitCode",
+]:
     if scalar not in inspect_function:
         raise SystemExit(f"r33 Docker inspect scalar state projection missing: {scalar}")
+for compose_key in [
+    "com.docker.compose.project",
+    "com.docker.compose.service",
+    "com.docker.compose.oneoff",
+]:
+    if compose_key not in inspect_function:
+        raise SystemExit(f"r33 Docker inspect Compose identity key missing: {compose_key}")
 
 if 'features = ["sync", "net", "process", "rt-multi-thread", "time"]' not in cargo:
     raise SystemExit("r33 tokio process feature missing")

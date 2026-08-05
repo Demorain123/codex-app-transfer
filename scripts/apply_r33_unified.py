@@ -24,12 +24,14 @@ REVISION.write_text("33\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_r33_chain_health.py")
 run("scripts/apply_r33_chain_health_hardening.py")
+run("scripts/apply_r33_chain_health_inspect_privacy.py")
 run("scripts/review_r33_chain_health.py")
 
 required = {
     "src-tauri/src/admin/handlers/chain_health.rs": [
         "CAS-R33-CHAIN-HEALTH",
         "CAS-R33-CHAIN-HEALTH-PRIVACY",
+        "CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY",
         "docker_daemon_timeout",
         "gateway_tcp_timeout",
         "upstream_headers_stalled",

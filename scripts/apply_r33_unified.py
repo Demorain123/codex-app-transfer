@@ -13,12 +13,24 @@ def run(rel: str) -> None:
     if not path.is_file():
         raise SystemExit(f"r33 required overlay/composer missing: {rel}")
     print(f"r33 applying {rel}")
-    runpy.run_path(str(path), run_name="__main__")
+    try:
+        runpy.run_path(str(path), run_name="__main__")
+    except SystemExit as exc:
+        # Some inherited idempotent overlays use SystemExit(0) to mean
+        # "already materialized". That is a successful no-op, not a reason to
+        # abort the outer r33 composition. Non-zero exits remain fatal.
+        if exc.code not in (None, 0):
+            raise
+        print(f"r33 inherited successful no-op: {rel}")
 
 
 # Preserve the validated r32 stack. r33 adds a privacy-bounded, non-destructive
 # chain health center to the existing Route page.
 run("scripts/apply_r32_unified.py")
+# The current r32 composer may return early after its already-applied Usage sort
+# overlay. Explicitly rerun both inherited semantic reviews before adding r33.
+run("scripts/review_no_lagging_r32.py")
+run("scripts/review_r32_usage_sort.py")
 
 REVISION.write_text("33\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")

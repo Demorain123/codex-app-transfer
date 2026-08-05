@@ -4,16 +4,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HANDLER = ROOT / "src-tauri/src/admin/handlers/chain_health.rs"
+HANDLERS_MOD = ROOT / "src-tauri/src/admin/handlers/mod.rs"
 PAGE = ROOT / "frontend/src/pages/ProxyPage.vue"
 API = ROOT / "frontend/src/api/chainHealth.ts"
 ADMIN = ROOT / "src-tauri/src/admin/mod.rs"
 CARGO = ROOT / "src-tauri/Cargo.toml"
 
-for path in [HANDLER, PAGE, API, ADMIN, CARGO]:
+for path in [HANDLER, HANDLERS_MOD, PAGE, API, ADMIN, CARGO]:
     if not path.is_file():
         raise SystemExit(f"r33 review missing file: {path.relative_to(ROOT)}")
 
 handler = HANDLER.read_text(encoding="utf-8")
+handlers_mod = HANDLERS_MOD.read_text(encoding="utf-8")
 page = PAGE.read_text(encoding="utf-8")
 api = API.read_text(encoding="utf-8")
 admin = ADMIN.read_text(encoding="utf-8")
@@ -113,8 +115,17 @@ for marker in [
 
 if "getChainHealth" not in api or "/api/chain-health" not in api:
     raise SystemExit("r33 frontend chain-health API missing")
-if '.route("/api/chain-health"' not in admin:
-    raise SystemExit("r33 backend chain-health route missing")
+
+route_marker = '.route("/api/chain-health", get(handlers::chain_health::chain_health))'
+module_marker = "pub mod chain_health;"
+if admin.count(route_marker) != 1:
+    raise SystemExit(
+        f"r33 backend chain-health route count must be 1, got {admin.count(route_marker)}"
+    )
+if handlers_mod.count(module_marker) != 1:
+    raise SystemExit(
+        f"r33 chain-health handler module count must be 1, got {handlers_mod.count(module_marker)}"
+    )
 
 # No automatic recovery buttons in r33: health diagnosis must stay read-only.
 for forbidden in ["restartDocker", "restartContainer", "killContainer", "autoRecover"]:

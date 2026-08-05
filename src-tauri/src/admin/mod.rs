@@ -228,6 +228,11 @@ pub fn build_app_router(state: AdminState) -> Router {
         .route("/api/proxy/start", post(handlers::proxy::start_proxy))
         .route("/api/proxy/stop", post(handlers::proxy::stop_proxy))
         .route("/api/proxy/status", get(handlers::proxy::proxy_status))
+        // CAS-R33-CHAIN-HEALTH: privacy-bounded DNS/TCP/HTTP + local runtime diagnostics.
+        .route(
+            "/api/chain-health",
+            get(handlers::chain_health::chain_health),
+        )
         // [MOC-169] 诊断流量查看器开关
         .route(
             "/api/trace-viewer/start",

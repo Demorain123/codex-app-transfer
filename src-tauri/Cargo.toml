@@ -1,6 +1,6 @@
 [package]
 name = "codex-app-transfer"
-version = "2.4.5+32"
+version = "2.4.5+33"
 description = "Codex App Transfer - Tauri 2 shell"
 edition.workspace = true
 rust-version.workspace = true
@@ -38,7 +38,7 @@ codex-app-transfer-proxy = { path = "../crates/proxy" }
 codex-app-transfer-adapters = { path = "../crates/adapters" }
 codex-app-transfer-gemini-oauth = { path = "../crates/gemini_oauth" }
 codex-app-transfer-http = { path = "../crates/http" }
-tokio = { version = "1", features = ["sync", "net", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["sync", "net", "process", "rt-multi-thread", "time"] } # CAS-R33-CHAIN-HEALTH
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 axum = { version = "0.8", features = ["http1", "tokio", "macros"] }

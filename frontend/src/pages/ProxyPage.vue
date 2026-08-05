@@ -7,6 +7,8 @@ import { getDroppedTools, type DroppedToolsStatus } from '@/api/system'
 import { t } from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
+// CAS-R33-CHAIN-HEALTH
+import { getChainHealth, type ChainHealthSnapshot, type ChainHealthStatus } from '@/api/chainHealth'
 import IconPlay from '~icons/lucide/play'
 import IconSquare from '~icons/lucide/square'
 import IconList from '~icons/lucide/list'
@@ -15,14 +17,47 @@ import IconX from '~icons/lucide/circle-x'
 import IconCalendar from '~icons/lucide/calendar-days'
 import IconFolder from '~icons/lucide/folder-open'
 import IconTrash from '~icons/lucide/trash-2'
+import IconRefreshCw from '~icons/lucide/refresh-cw'
+import IconChevronDown from '~icons/lucide/chevron-down'
 
 const store = useProxyStore()
 const { show: toast } = useToast()
 let timer: number | undefined
+let chainTimer: number | undefined
 
 const portInput = ref<number>(18080)
 const autoScroll = ref(true)
 const logsEl = ref<HTMLElement>()
+
+// CAS-R33-CHAIN-HEALTH
+const chainHealth = ref<ChainHealthSnapshot | null>(null)
+const chainLoading = ref(false)
+const chainExpanded = ref(false)
+const chainLayers = computed(() => {
+  const h = chainHealth.value
+  if (!h) return []
+  return [
+    { key: 'codex', label: t('chainHealth.layer.codex'), data: h.codex },
+    { key: 'transfer', label: t('chainHealth.layer.transfer'), data: h.transfer },
+    { key: 'gateway', label: t('chainHealth.layer.gateway'), data: h.gateway },
+    { key: 'runtime', label: t('chainHealth.layer.runtime'), data: h.runtime.layer },
+    { key: 'upstream', label: t('chainHealth.layer.upstream'), data: h.upstream },
+  ]
+})
+function chainStatusLabel(status: ChainHealthStatus) {
+  return t(`chainHealth.status.${status}`)
+}
+async function loadChainHealth(force = false) {
+  if (chainLoading.value) return
+  chainLoading.value = true
+  try {
+    chainHealth.value = await getChainHealth(force)
+  } catch (e) {
+    if (force) toast((e as Error).message || t('chainHealth.loadFailed'), 'error')
+  } finally {
+    chainLoading.value = false
+  }
+}
 
 // [MOC-261 一-11] 静默丢弃工具诊断(金丝雀):本进程累计被丢弃的未知 Responses API 工具类型。
 const dropped = ref<DroppedToolsStatus>({ total: 0, by_type: {} })
@@ -43,6 +78,7 @@ onMounted(async () => {
   portInput.value = store.port || 18080
   await store.loadLogs().catch(() => {})
   loadDropped()
+  loadChainHealth()
   scrollToBottom()
   timer = window.setInterval(() => {
     if (store.running) {
@@ -50,9 +86,11 @@ onMounted(async () => {
       loadDropped()
     }
   }, 2000)
+  chainTimer = window.setInterval(() => loadChainHealth(), 10000)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  if (chainTimer) clearInterval(chainTimer)
 })
 
 // 端口随后端状态同步(用户编辑后下一次 loadStatus 会覆盖,符合原版行为)
@@ -145,6 +183,91 @@ async function onClearLogs() {
         <span class="stat-card__label">{{ t('proxy.stats.today') }}</span>
       </div>
     </div>
+
+
+    <!-- CAS-R33-CHAIN-HEALTH -->
+    <section class="chain-health" :class="chainHealth ? `chain-health--${chainHealth.overall}` : ''">
+      <div class="chain-health__head">
+        <div>
+          <div class="chain-health__title-row">
+            <span class="chain-health__pulse" />
+            <h2>{{ t('chainHealth.title') }}</h2>
+            <span v-if="chainHealth" class="chain-health__overall">
+              {{ chainStatusLabel(chainHealth.overall) }}
+            </span>
+          </div>
+          <p class="chain-health__summary">
+            {{ chainHealth?.overallSummary || t('chainHealth.loading') }}
+          </p>
+          <p v-if="chainHealth?.provider" class="chain-health__provider">
+            {{ chainHealth.provider.name }} · {{ chainHealth.provider.displayUrl }}
+          </p>
+        </div>
+        <div class="chain-health__actions">
+          <button class="chain-health__button" :disabled="chainLoading" @click="loadChainHealth(true)">
+            <IconRefreshCw :class="{ 'is-spinning': chainLoading }" />
+            {{ t('chainHealth.refresh') }}
+          </button>
+          <button class="chain-health__button" @click="chainExpanded = !chainExpanded">
+            <IconChevronDown :class="{ 'is-open': chainExpanded }" />
+            {{ t('chainHealth.details') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="chain-health__grid">
+        <article
+          v-for="layer in chainLayers"
+          :key="layer.key"
+          class="chain-layer"
+          :class="`chain-layer--${layer.data.status}`"
+        >
+          <div class="chain-layer__head">
+            <span class="chain-layer__dot" />
+            <strong>{{ layer.label }}</strong>
+            <span>{{ chainStatusLabel(layer.data.status) }}</span>
+          </div>
+          <p>{{ layer.data.summary }}</p>
+          <small v-if="layer.data.latencyMs != null">{{ layer.data.latencyMs }} ms</small>
+        </article>
+      </div>
+
+      <div v-if="chainHealth?.recommendations?.length" class="chain-health__recommendations">
+        <strong>{{ t('chainHealth.recommendations') }}</strong>
+        <ol>
+          <li v-for="item in chainHealth.recommendations" :key="item">{{ item }}</li>
+        </ol>
+      </div>
+
+      <div v-if="chainExpanded && chainHealth" class="chain-health__detail">
+        <div class="chain-health__facts">
+          <div v-for="layer in chainLayers" :key="`${layer.key}-facts`">
+            <strong>{{ layer.label }}</strong>
+            <code v-for="fact in layer.data.facts" :key="fact">{{ fact }}</code>
+          </div>
+        </div>
+        <div v-if="chainHealth.runtime.containers.length" class="chain-health__containers">
+          <strong>{{ t('chainHealth.containers') }}</strong>
+          <div
+            v-for="container in chainHealth.runtime.containers"
+            :key="container.id"
+            class="chain-container"
+            :class="{ 'is-target': container.target }"
+          >
+            <span>{{ container.service || container.name }}</span>
+            <span>{{ container.health || container.status }}</span>
+            <span v-if="container.cpu">{{ container.cpu }}</span>
+            <span v-if="container.memory">{{ container.memory }}</span>
+            <span v-if="container.restartCount">restart {{ container.restartCount }}</span>
+            <span v-if="container.oomKilled">OOM</span>
+          </div>
+        </div>
+        <div class="chain-health__privacy">
+          <strong>{{ t('chainHealth.privacy') }}</strong>
+          <span v-for="item in chainHealth.privacy" :key="item">{{ item }}</span>
+        </div>
+      </div>
+    </section>
 
     <!-- ③ 日志面板(标题行 + 分列) -->
     <div class="log-panel">
@@ -489,4 +612,128 @@ async function onClearLogs() {
 .log-msg {
   color: #d8dce4;
 }
+
+/* CAS-R33-CHAIN-HEALTH */
+.chain-health {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.chain-health--error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.chain-health--degraded { border-color: color-mix(in srgb, #f59e0b 45%, var(--border)); }
+.chain-health__head,
+.chain-health__title-row,
+.chain-health__actions,
+.chain-layer__head,
+.chain-container {
+  display: flex;
+  align-items: center;
+}
+.chain-health__head { justify-content: space-between; gap: var(--space-4); }
+.chain-health__title-row { gap: var(--space-2); }
+.chain-health__title-row h2 { margin: 0; font-size: var(--fs-lg); }
+.chain-health__pulse,
+.chain-layer__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: 0 0 auto;
+}
+.chain-health--ok .chain-health__pulse,
+.chain-layer--ok .chain-layer__dot { background: var(--success); }
+.chain-health--error .chain-health__pulse,
+.chain-layer--error .chain-layer__dot { background: var(--danger); }
+.chain-health--degraded .chain-health__pulse,
+.chain-layer--degraded .chain-layer__dot { background: #f59e0b; }
+.chain-health__overall {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.chain-health__summary,
+.chain-health__provider { margin: 5px 0 0; color: var(--text-secondary); }
+.chain-health__provider { font-family: var(--font-mono); font-size: var(--fs-xs); word-break: break-all; }
+.chain-health__actions { gap: var(--space-2); }
+.chain-health__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.chain-health__button svg { width: 15px; height: 15px; transition: transform .18s ease; }
+.chain-health__button svg.is-open { transform: rotate(180deg); }
+.chain-health__button svg.is-spinning { animation: chain-spin .8s linear infinite; }
+@keyframes chain-spin { to { transform: rotate(360deg); } }
+.chain-health__grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.chain-layer {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.chain-layer__head { gap: 6px; }
+.chain-layer__head strong { min-width: 0; flex: 1; }
+.chain-layer__head span:last-child { color: var(--text-muted); font-size: var(--fs-xs); }
+.chain-layer p { min-height: 38px; margin: 8px 0 0; color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.45; }
+.chain-layer small { color: var(--text-muted); font-family: var(--font-mono); }
+.chain-health__recommendations {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.chain-health__recommendations ol { margin: 7px 0 0 20px; padding: 0; color: var(--text-secondary); }
+.chain-health__recommendations li + li { margin-top: 5px; }
+.chain-health__detail {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.chain-health__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.chain-health__facts > div,
+.chain-health__privacy { display: flex; flex-direction: column; gap: 5px; }
+.chain-health__facts code {
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  white-space: normal;
+  word-break: break-word;
+}
+.chain-health__containers { display: grid; gap: 6px; }
+.chain-container {
+  gap: var(--space-3);
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.chain-container.is-target { border-color: var(--accent); }
+.chain-container span:first-child { flex: 1; color: var(--text); }
+.chain-health__privacy { color: var(--text-muted); font-size: var(--fs-xs); }
+@media (max-width: 980px) {
+  .chain-health__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chain-health__head { align-items: flex-start; flex-direction: column; }
+}
+
 </style>

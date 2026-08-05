@@ -1,0 +1,162 @@
+name: Materialize r33 Chain Health
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r33-chain-health
+    paths:
+      - 'frontend/**'
+      - 'src-tauri/**'
+      - 'scripts/**'
+      - 'docs/R33_CHAIN_HEALTH.md'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - '.github/workflows/materialize-r33-chain-health.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r32-no-lagging
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  materialize-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check r33 overlay syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/apply_r33_unified.py \
+            scripts/apply_r33_chain_health.py \
+            scripts/apply_r33_chain_health_replay_fix.py \
+            scripts/apply_r33_chain_health_hardening.py \
+            scripts/apply_r33_chain_health_inspect_privacy.py \
+            scripts/apply_r33_chain_health_state_privacy.py \
+            scripts/apply_r33_chain_health_label_privacy.py \
+            scripts/review_r33_chain_health.py
+
+      - name: Compose r24 through r33
+        run: python scripts/apply_r33_unified.py
+
+      - name: Check r33 identity and safety markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F -q 'compat_revision=33' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+33' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'CAS-R33-CHAIN-HEALTH' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q 'CAS-R33-CHAIN-HEALTH-PRIVACY' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q 'CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q 'CAS-R33-CHAIN-HEALTH-STATE-PROJECTION' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q 'CAS-R33-CHAIN-HEALTH-LABEL-PROJECTION' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q '/api/chain-health' src-tauri/src/admin/mod.rs
+          grep -F -q 'chain-health__grid' frontend/src/pages/ProxyPage.vue
+          grep -F -q 'CAS-NO-LAGGING-R32-MCP-EXIT-GUARD' src-tauri/resources/codex_no_lagging_janitor.ps1
+          grep -F -q 'CAS-R32-USAGE-CLICK-SORT' frontend/src/pages/UsagePage.vue
+          python scripts/review_r33_chain_health.py
+          git diff --check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build r33 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r33' frontend/dist
+          grep -R -F -q 'Chain Health' frontend/dist
+          grep -R -F -q '全链路健康' frontend/dist
+          grep -R -F -q 'No Lagging' frontend/dist
+
+      - name: Install Tauri Linux prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r33-chain-health-linux
+
+      - name: Compile and test chain health backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo check -p codex-app-transfer
+          cargo test -p codex-app-transfer chain_health -- --nocapture
+          python scripts/review_r33_chain_health.py
+          git diff --check
+
+      - name: Prove complete r33 replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --binary > "$RUNNER_TEMP/r33-first.diff"
+          python scripts/apply_r33_unified.py > "$RUNNER_TEMP/r33-second-replay.log" 2>&1 || {
+            tail -n 240 "$RUNNER_TEMP/r33-second-replay.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_r33_chain_health.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r33-second.diff"
+          if ! cmp -s "$RUNNER_TEMP/r33-first.diff" "$RUNNER_TEMP/r33-second.diff"; then
+            echo '::error::r33 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r33-first.diff" "$RUNNER_TEMP/r33-second.diff" || true
+            exit 1
+          fi
+
+      - name: Commit generated r33 source on push
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No generated source diff to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[r33-generated] materialize chain health center'
+          git push origin HEAD:sub2api-grok-compat-next-r33-chain-health

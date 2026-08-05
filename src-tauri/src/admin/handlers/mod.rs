@@ -13,6 +13,7 @@
 
 pub mod agents_md;
 pub mod antigravity_oauth;
+pub mod chain_health; // CAS-R33-CHAIN-HEALTH
 pub mod chrome;
 pub mod codex_sessions;
 pub mod common;

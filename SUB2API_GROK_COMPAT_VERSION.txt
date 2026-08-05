@@ -1,3 +1,3 @@
 official_base=2.4.5
-compat_revision=33
-app_version=2.4.5+33
+compat_revision=34
+app_version=2.4.5+34

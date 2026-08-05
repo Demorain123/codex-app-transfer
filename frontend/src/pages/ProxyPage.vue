@@ -8,6 +8,7 @@ import { t } from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 // CAS-R33-CHAIN-HEALTH
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 import { getChainHealth, type ChainHealthSnapshot, type ChainHealthStatus } from '@/api/chainHealth'
 import IconPlay from '~icons/lucide/play'
 import IconSquare from '~icons/lucide/square'
@@ -38,6 +39,8 @@ const chainLayers = computed(() => {
   if (!h) return []
   return [
     { key: 'codex', label: t('chainHealth.layer.codex'), data: h.codex },
+    { key: 'session', label: t('chainHealth.layer.session'), data: h.session },
+    { key: 'mcp', label: t('chainHealth.layer.mcp'), data: h.mcp },
     { key: 'transfer', label: t('chainHealth.layer.transfer'), data: h.transfer },
     { key: 'gateway', label: t('chainHealth.layer.gateway'), data: h.gateway },
     { key: 'runtime', label: t('chainHealth.layer.runtime'), data: h.runtime.layer },
@@ -259,6 +262,7 @@ async function onClearLogs() {
             <span v-if="container.cpu">{{ container.cpu }}</span>
             <span v-if="container.memory">{{ container.memory }}</span>
             <span v-if="container.restartCount">restart {{ container.restartCount }}</span>
+            <span v-if="container.restartDelta">recent +{{ container.restartDelta }}</span>
             <span v-if="container.oomKilled">OOM</span>
           </div>
         </div>

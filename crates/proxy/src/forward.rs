@@ -1308,6 +1308,25 @@ fn injects_workbuddy_source_headers(auth_scheme: &AuthScheme, base_url: &str) ->
             && base_url.contains(codex_app_transfer_gemini_oauth::workbuddy::WORKBUDDY_HOST))
 }
 
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH
+// Select a stable-but-non-reversible conversation correlation. Raw identity
+// header values never enter telemetry; the existing FNV helper emits 8 hex chars.
+fn request_lifecycle_correlation_r34(headers: &HeaderMap) -> String {
+    for name in [
+        "thread-id",
+        "x-session-id",
+        "session-id",
+        "session_id",
+        "x-client-request-id",
+    ] {
+        let fingerprint = sub2api_retry_runtime_diag_header_fingerprint(headers, name);
+        if fingerprint != "-" {
+            return format!("{name}:{fingerprint}");
+        }
+    }
+    "uncorrelated".to_owned()
+}
+
 pub async fn forward_handler(
     State(state): State<ProxyState>,
     req: Request,
@@ -1573,7 +1592,15 @@ pub async fn forward_handler(
 
     // 6/7. 构造 reqwest 请求 + 发送(抽到 `build_and_send_upstream`,
     // transparent retry 复用)。
-    let (initial_resp, mut outbound_headers_snapshot) = build_and_send_upstream(
+    // CAS-R34-RUNTIME-BEHAVIOR-HEALTH: start only after local diagnostic
+    // short-circuits have passed, so every record describes a real upstream attempt.
+    let lifecycle_id = telemetry.lifecycles.start(
+        request_lifecycle_correlation_r34(&parts.headers),
+        resolved.provider.id.clone(),
+        retry_runtime_diag_model.unwrap_or("<unknown>").to_owned(),
+    );
+    telemetry.lifecycles.mark_forwarded(lifecycle_id);
+    let (initial_resp, mut outbound_headers_snapshot) = match build_and_send_upstream(
         &state,
         &parts.method,
         &parts.headers,
@@ -1582,7 +1609,19 @@ pub async fn forward_handler(
         &plan.upstream_headers,
         &upstream_url,
     )
-    .await?;
+    .await
+    {
+        Ok(pair) => pair,
+        Err(error) => {
+            telemetry
+                .lifecycles
+                .mark_failed(lifecycle_id, "upstream_send");
+            return Err(error);
+        }
+    };
+    telemetry
+        .lifecycles
+        .mark_headers(lifecycle_id, initial_resp.status().as_u16());
 
     // ── 4xx transparent retry(orphan function_call 上下文重建)──
     // 上游 400 不能直接透传给 Codex.app —— 实测它收到 JSON error body 后期待
@@ -1854,14 +1893,25 @@ pub async fn forward_handler(
         upstream_stream
     };
 
-    let response_plan = adapter.transform_response_stream(
+    let response_plan = match adapter.transform_response_stream(
         status,
         upstream_headers,
         upstream_stream,
         &resolved.provider,
         &plan,
-    )?;
+    ) {
+        Ok(plan) => plan,
+        Err(error) => {
+            telemetry
+                .lifecycles
+                .mark_failed(lifecycle_id, "response_transform");
+            return Err(error.into());
+        }
+    };
     let success = response_plan.status.is_success();
+    telemetry
+        .lifecycles
+        .mark_headers(lifecycle_id, response_plan.status.as_u16());
     telemetry.stats.record(success);
     telemetry.logs.add(
         if success { "SUCCESS" } else { "ERROR" },
@@ -1900,6 +1950,9 @@ pub async fn forward_handler(
     } else {
         response_plan.stream
     };
+    let codex_stream: codex_app_transfer_adapters::ByteStream = Box::pin(
+        RequestLifecycleStreamR34::new(codex_stream, lifecycle_id, codex_status),
+    );
     Ok(builder.body(Body::from_stream(codex_stream))?)
 }
 
@@ -2506,6 +2559,72 @@ impl Drop for TracedStream {
                 // resp_buf 可能被 cap 截断;total_bytes 是 tee 累计真实全长 → 传它修正 truncated_bytes
                 write_trace_from_ctx(&ctx, &self.resp_buf, self.total_bytes);
             }
+        }
+    }
+}
+
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH-STREAM
+// Wrap the final proxy→Codex stream, not the raw upstream stream. This means the
+// lifecycle reflects what Codex can actually consume after adapter conversion.
+struct RequestLifecycleStreamR34 {
+    inner: codex_app_transfer_adapters::ByteStream,
+    id: u64,
+    status: u16,
+    bytes: u64,
+    first_event: bool,
+    finished: bool,
+}
+
+impl RequestLifecycleStreamR34 {
+    fn new(inner: codex_app_transfer_adapters::ByteStream, id: u64, status: u16) -> Self {
+        Self {
+            inner,
+            id,
+            status,
+            bytes: 0,
+            first_event: false,
+            finished: false,
+        }
+    }
+}
+
+impl Stream for RequestLifecycleStreamR34 {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.as_mut().get_mut();
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                if !this.first_event && !chunk.is_empty() {
+                    this.first_event = true;
+                    proxy_telemetry().lifecycles.mark_first_event(this.id);
+                }
+                this.bytes = this.bytes.saturating_add(chunk.len() as u64);
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(error))) => {
+                this.finished = true;
+                proxy_telemetry()
+                    .lifecycles
+                    .mark_failed(this.id, "response_stream");
+                Poll::Ready(Some(Err(error)))
+            }
+            Poll::Ready(None) => {
+                this.finished = true;
+                proxy_telemetry()
+                    .lifecycles
+                    .mark_completed(this.id, this.status, this.bytes);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for RequestLifecycleStreamR34 {
+    fn drop(&mut self) {
+        if !self.finished {
+            proxy_telemetry().lifecycles.mark_cancelled(self.id);
         }
     }
 }

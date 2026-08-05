@@ -465,30 +465,45 @@ fn observe_restart_delta_r34(id: &str, current: u64) -> u64 {
         "        codex,\n        session,\n        mcp,\n        transfer,",
         "serialize behavior layers",
     )
-    old_container = '''        containers.push(DockerContainerHealth {
-            target: target_prefixes
-'''
-    new_container = '''        let restart_count = value
-            .get("RestartCount")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let restart_delta = observe_restart_delta_r34(&id, restart_count);
-        containers.push(DockerContainerHealth {
-            target: target_prefixes
-'''
-    health = replace_once(health, old_container, new_container, "restart delta calculation")
-    health = replace_once(
-        health,
-        '''            restart_count: value
+    restart_delta_formatted_anchor = '''            restart_count: value
                 .get("RestartCount")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
-            cpu:''',
-        '''            restart_count,
-            restart_delta,
-            cpu:''',
-        "restart delta assignment",
-    )
+            cpu:'''
+    restart_delta_compact_anchor = '''            restart_count: value.get("RestartCount").and_then(Value::as_u64).unwrap_or(0),
+            cpu:'''
+    restart_delta_formatted_replacement = '''            restart_count: value
+                .get("RestartCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            restart_delta: observe_restart_delta_r34(
+                &id,
+                value
+                    .get("RestartCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            ),
+            cpu:'''
+    restart_delta_compact_replacement = '''            restart_count: value.get("RestartCount").and_then(Value::as_u64).unwrap_or(0),
+            restart_delta: observe_restart_delta_r34(
+                &id,
+                value.get("RestartCount").and_then(Value::as_u64).unwrap_or(0),
+            ),
+            cpu:'''
+    if restart_delta_formatted_anchor in health:
+        health = health.replace(
+            restart_delta_formatted_anchor,
+            restart_delta_formatted_replacement,
+            1,
+        )
+    elif restart_delta_compact_anchor in health:
+        health = health.replace(
+            restart_delta_compact_anchor,
+            restart_delta_compact_replacement,
+            1,
+        )
+    else:
+        raise SystemExit("r34 anchor missing: restart delta assignment (formatted or compact)")
     health = replace_once(
         health,
         '''    } else if containers.iter().any(|container| {

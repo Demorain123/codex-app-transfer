@@ -91,6 +91,7 @@ struct DockerContainerHealth {
     oom_killed: bool,
     exit_code: i64,
     restart_count: u64,
+    restart_delta: u64,
     cpu: Option<String>,
     memory: Option<String>,
     pids: Option<String>,
@@ -118,6 +119,8 @@ struct ChainHealthSnapshot {
     overall_summary: String,
     provider: Option<ProviderTarget>,
     codex: HealthLayer,
+    session: HealthLayer,
+    mcp: HealthLayer,
     transfer: HealthLayer,
     gateway: HealthLayer,
     runtime: RuntimeHealth,
@@ -142,6 +145,25 @@ static CACHE: OnceLock<Mutex<Option<CachedSnapshot>>> = OnceLock::new();
 
 fn cache() -> &'static Mutex<Option<CachedSnapshot>> {
     CACHE.get_or_init(|| Mutex::new(None))
+}
+
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH
+// Docker RestartCount is cumulative for the container lifetime. Keep an in-memory
+// baseline and alert only on an increase observed while Transfer is running.
+static DOCKER_RESTART_BASELINE_R34: OnceLock<std::sync::Mutex<HashMap<String, u64>>> =
+    OnceLock::new();
+
+fn observe_restart_delta_r34(id: &str, current: u64) -> u64 {
+    let store = DOCKER_RESTART_BASELINE_R34.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut store = store
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let delta = store
+        .get(id)
+        .map(|previous| current.saturating_sub(*previous))
+        .unwrap_or(0);
+    store.insert(id.to_owned(), current);
+    delta
 }
 
 pub async fn chain_health(
@@ -169,6 +191,8 @@ async fn build_snapshot(state: &AdminState) -> ChainHealthSnapshot {
     let cfg = load_registry().unwrap_or_else(|_| json!({}));
     let provider = active_provider(&cfg);
     let codex = codex_layer();
+    let session = session_layer();
+    let mcp = mcp_layer();
 
     let proxy_status = state.proxy_manager.status();
     let stats = proxy_telemetry().stats.snapshot();
@@ -228,8 +252,16 @@ async fn build_snapshot(state: &AdminState) -> ChainHealthSnapshot {
     };
 
     let upstream = passive_upstream_layer();
-    let recommendations = recommendations(&transfer, &gateway, &runtime, &upstream);
-    let overall = overall_status([&codex, &transfer, &gateway, &runtime.layer, &upstream]);
+    let recommendations = recommendations(&session, &mcp, &transfer, &gateway, &runtime, &upstream);
+    let overall = overall_status([
+        &codex,
+        &session,
+        &mcp,
+        &transfer,
+        &gateway,
+        &runtime.layer,
+        &upstream,
+    ]);
     let overall_summary = match overall.as_str() {
         "error" => "链路存在明确故障，展开建议可查看最可能的阻断层",
         "degraded" => "链路可用性下降或有请求等待，需要继续观察",
@@ -244,6 +276,8 @@ async fn build_snapshot(state: &AdminState) -> ChainHealthSnapshot {
         overall_summary,
         provider,
         codex,
+        session,
+        mcp,
         transfer,
         gateway,
         runtime,
@@ -254,6 +288,8 @@ async fn build_snapshot(state: &AdminState) -> ChainHealthSnapshot {
             "不读取 prompt、响应正文、SSH 命令、API Key 或 OAuth token".into(),
             "Docker 检查不读取容器环境变量，也不开放 Docker socket".into(),
             "命令与网络探针均有硬超时，不会无限等待".into(),
+            "会话关联只保存不可逆短指纹与阶段时间，不读取消息正文".into(),
+            "MCP 探针只检查当前 Codex 进程树中的候选 helper 名称与数量".into(),
         ],
     }
 }
@@ -705,6 +741,13 @@ async fn probe_local_runtime(target: &ProviderTarget, gateway: &HealthLayer) -> 
                 .get("RestartCount")
                 .and_then(Value::as_u64)
                 .unwrap_or(0),
+            restart_delta: observe_restart_delta_r34(
+                &id,
+                value
+                    .get("RestartCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            ),
             cpu: stat
                 .and_then(|v| v.get("CPUPerc"))
                 .and_then(Value::as_str)
@@ -736,11 +779,11 @@ async fn probe_local_runtime(target: &ProviderTarget, gateway: &HealthLayer) -> 
     } else if containers.iter().any(|container| {
         container.health.as_deref() == Some("starting")
             || !container.running
-            || container.restart_count > 0
+            || container.restart_delta > 0
     }) {
         level = "degraded";
         code = "docker_stack_degraded";
-        summary = "Docker 容器栈正在启动或存在历史重启";
+        summary = "Docker 容器栈正在启动或最近观测到新的容器重启";
     }
     let mut layer = HealthLayer::new(level, code, summary)
         .fact(format!("docker_server={server_version}"))
@@ -1002,6 +1045,378 @@ fn windows_process_rows() -> Vec<(u32, String)> {
     }
 }
 
+// CAS-R34-RUNTIME-BEHAVIOR-HEALTH-SESSION
+fn session_layer() -> HealthLayer {
+    let records = proxy_telemetry().lifecycles.snapshot();
+    if records.is_empty() {
+        return HealthLayer::new(
+            "idle",
+            "session_no_requests",
+            "尚无可用于判断会话 / Turn 行为的结构化请求证据",
+        )
+        .fact("mode=metadata-only-no-content");
+    }
+
+    let now = Local::now().timestamp_millis();
+    let recent_cutoff = now.saturating_sub(30 * 60 * 1000);
+    let recent: Vec<_> = records
+        .iter()
+        .filter(|record| record.accepted_at_ms >= recent_cutoff)
+        .collect();
+    let in_flight: Vec<_> = recent
+        .iter()
+        .copied()
+        .filter(|record| record.terminal.is_none())
+        .collect();
+    let completed = recent
+        .iter()
+        .filter(|record| record.terminal.as_deref() == Some("completed"))
+        .count();
+    let failed = recent
+        .iter()
+        .filter(|record| {
+            record
+                .terminal
+                .as_deref()
+                .is_some_and(|value| value.starts_with("failed:"))
+        })
+        .count();
+    let cancelled = recent
+        .iter()
+        .filter(|record| record.terminal.as_deref() == Some("cancelled"))
+        .count();
+
+    let mut longest_wait_seconds = 0u64;
+    let mut hard_stall = false;
+    let mut soft_stall = false;
+    for record in &in_flight {
+        let (anchor, hard_after, soft_after) = if let Some(first) = record.first_event_at_ms {
+            (first, 15 * 60, 5 * 60)
+        } else if let Some(headers) = record.headers_at_ms {
+            (headers, 90, 20)
+        } else {
+            (
+                record.forwarded_at_ms.unwrap_or(record.accepted_at_ms),
+                90,
+                20,
+            )
+        };
+        let age = now.saturating_sub(anchor).max(0) as u64 / 1000;
+        longest_wait_seconds = longest_wait_seconds.max(age);
+        hard_stall |= age >= hard_after;
+        soft_stall |= age >= soft_after;
+    }
+
+    let mut retry_recoveries = 0usize;
+    for current in recent
+        .iter()
+        .copied()
+        .filter(|record| record.terminal.as_deref() == Some("completed"))
+    {
+        let recovered = recent.iter().copied().any(|prior| {
+            if prior.id == current.id
+                || prior.accepted_at_ms >= current.accepted_at_ms
+                || prior.correlation != current.correlation
+                || prior.provider != current.provider
+                || prior.model != current.model
+            {
+                return false;
+            }
+            let gap = current.accepted_at_ms.saturating_sub(prior.accepted_at_ms);
+            if !(5_000..=180_000).contains(&gap) {
+                return false;
+            }
+            prior.terminal.as_deref() == Some("cancelled")
+                || prior
+                    .terminal
+                    .as_deref()
+                    .is_some_and(|value| value.starts_with("failed:"))
+                || (prior.headers_at_ms.is_none() && gap >= 20_000)
+        });
+        if recovered {
+            retry_recoveries += 1;
+        }
+    }
+
+    let (status, code, summary) = if hard_stall {
+        (
+            "error",
+            "session_turn_stalled",
+            "检测到请求在响应头、首事件或流收尾阶段长时间停滞",
+        )
+    } else if soft_stall {
+        (
+            "degraded",
+            "session_turn_waiting",
+            "检测到正在等待的会话 / Turn，需要继续观察",
+        )
+    } else if retry_recoveries > 0 {
+        (
+            "degraded",
+            "session_retry_recovered",
+            "检测到一次静默/失败请求后由后续重试恢复",
+        )
+    } else if failed > 0 || cancelled > 0 {
+        (
+            "degraded",
+            "session_recent_failure",
+            "最近 30 分钟存在失败或取消的 Turn",
+        )
+    } else {
+        (
+            "ok",
+            "session_behavior_healthy",
+            "最近结构化请求生命周期未发现明确会话异常",
+        )
+    };
+
+    HealthLayer::new(status, code, summary)
+        .latency((longest_wait_seconds > 0).then_some(longest_wait_seconds * 1000))
+        .fact(format!("recent_requests={}", recent.len()))
+        .fact(format!(
+            "in_flight={} completed={} failed={} cancelled={}",
+            in_flight.len(),
+            completed,
+            failed,
+            cancelled
+        ))
+        .fact(format!("retry_recoveries={retry_recoveries}"))
+        .fact("correlation=fingerprinted-no-prompt")
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone)]
+struct WindowsProcessTopologyR34 {
+    pid: u32,
+    parent_pid: u32,
+    name: String,
+}
+
+#[cfg(target_os = "windows")]
+fn windows_process_topology_r34() -> Vec<WindowsProcessTopologyR34> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return Vec::new();
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut rows = Vec::new();
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let len = entry
+                    .szExeFile
+                    .iter()
+                    .position(|value| *value == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                rows.push(WindowsProcessTopologyR34 {
+                    pid: entry.th32ProcessID,
+                    parent_pid: entry.th32ParentProcessID,
+                    name: String::from_utf16_lossy(&entry.szExeFile[..len]),
+                });
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snapshot);
+        rows
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn mcp_helper_candidate_r34(name: &str) -> bool {
+    let base = name.trim_end_matches(".exe").to_ascii_lowercase();
+    matches!(
+        base.as_str(),
+        "node"
+            | "node_repl"
+            | "python"
+            | "python3"
+            | "pythonw"
+            | "uv"
+            | "uvx"
+            | "npx"
+            | "deno"
+            | "bun"
+            | "dotnet"
+            | "java"
+    ) || [
+        "mcp",
+        "playwright",
+        "context7",
+        "tavily",
+        "chrome-devtools",
+        "contextweaver",
+        "grok-search",
+    ]
+    .iter()
+    .any(|needle| base.contains(needle))
+}
+
+#[cfg(target_os = "windows")]
+fn guard_recent_failures_r34() -> (usize, usize, Option<String>) {
+    use std::io::{Read, Seek, SeekFrom};
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return (0, 0, None);
+    };
+    let path = std::path::PathBuf::from(local)
+        .join("CodexMcpJanitorR32")
+        .join("events.jsonl");
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return (0, 0, None);
+    };
+    let len = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let cap = 128 * 1024u64;
+    if len > cap {
+        let _ = file.seek(SeekFrom::Start(len - cap));
+    }
+    let mut text = String::new();
+    if file.read_to_string(&mut text).is_err() {
+        return (0, 0, None);
+    }
+    let cutoff = Local::now().timestamp().saturating_sub(30 * 60);
+    let mut stop_failed = 0usize;
+    let mut inventory_failed = 0usize;
+    let mut last_cleanup = None;
+    for line in text.lines().rev().take(300) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let recent = value
+            .get("ts")
+            .and_then(Value::as_str)
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .is_some_and(|ts| ts.timestamp() >= cutoff);
+        if !recent {
+            continue;
+        }
+        match value.get("event").and_then(Value::as_str).unwrap_or("") {
+            "helper_stop_failed" => stop_failed += 1,
+            "inventory_failed" | "final_inventory_failed" => inventory_failed += 1,
+            "cleanup_complete" if last_cleanup.is_none() => {
+                let tracked = value.get("tracked").and_then(Value::as_u64).unwrap_or(0);
+                let survivors = value.get("survivors").and_then(Value::as_u64).unwrap_or(0);
+                let stopped = value.get("stopped").and_then(Value::as_u64).unwrap_or(0);
+                last_cleanup = Some(format!(
+                    "cleanup tracked={tracked} survivors={survivors} stopped={stopped}"
+                ));
+            }
+            _ => {}
+        }
+    }
+    (stop_failed, inventory_failed, last_cleanup)
+}
+
+fn mcp_layer() -> HealthLayer {
+    #[cfg(target_os = "windows")]
+    {
+        let rows = windows_process_topology_r34();
+        let by_id: HashMap<u32, &WindowsProcessTopologyR34> =
+            rows.iter().map(|row| (row.pid, row)).collect();
+        let roots: HashSet<u32> = rows
+            .iter()
+            .filter(|row| {
+                row.name.eq_ignore_ascii_case("chatgpt.exe")
+                    || row.name.eq_ignore_ascii_case("codex.exe")
+            })
+            .map(|row| row.pid)
+            .collect();
+
+        let mut names: HashMap<String, usize> = HashMap::new();
+        let mut helpers = 0usize;
+        for row in &rows {
+            if roots.contains(&row.pid) || !mcp_helper_candidate_r34(&row.name) {
+                continue;
+            }
+            let mut parent = row.parent_pid;
+            let mut owned = false;
+            let mut visited = HashSet::new();
+            for _ in 0..64 {
+                if roots.contains(&parent) {
+                    owned = true;
+                    break;
+                }
+                if parent == 0 || !visited.insert(parent) {
+                    break;
+                }
+                let Some(next) = by_id.get(&parent) else {
+                    break;
+                };
+                parent = next.parent_pid;
+            }
+            if owned {
+                helpers += 1;
+                *names.entry(row.name.to_ascii_lowercase()).or_default() += 1;
+            }
+        }
+        let max_duplicate = names.values().copied().max().unwrap_or(0);
+        let duplicate_name = names
+            .iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(name, count)| format!("{name}={count}"));
+        let (stop_failed, inventory_failed, last_cleanup) = guard_recent_failures_r34();
+
+        let (status, code, summary) = if helpers >= 64 {
+            (
+                "error",
+                "mcp_process_explosion",
+                "Codex generation 下的 MCP/helper 进程数量异常膨胀",
+            )
+        } else if helpers >= 24 || max_duplicate >= 12 || stop_failed > 0 {
+            (
+                "degraded",
+                "mcp_process_count_high",
+                "MCP/helper 数量、重复实例或清理失败需要关注",
+            )
+        } else if inventory_failed > 0 {
+            (
+                "degraded",
+                "mcp_guard_inventory_failed",
+                "MCP Exit Guard 最近无法完成一次进程拓扑盘点",
+            )
+        } else if roots.is_empty() {
+            (
+                "idle",
+                "mcp_codex_not_running",
+                "Codex 未运行，当前没有活动 generation 可检查",
+            )
+        } else {
+            (
+                "ok",
+                "mcp_generation_bounded",
+                "当前 Codex generation 的 MCP/helper 进程处于有界范围",
+            )
+        };
+        let mut layer = HealthLayer::new(status, code, summary)
+            .fact(format!("codex_roots={}", roots.len()))
+            .fact(format!("owned_helpers={helpers}"))
+            .fact(format!("max_duplicate={max_duplicate}"))
+            .fact(format!(
+                "guard_stop_failed={stop_failed} guard_inventory_failed={inventory_failed}"
+            ));
+        if let Some(duplicate) = duplicate_name {
+            layer = layer.fact(format!("largest_group={duplicate}"));
+        }
+        if let Some(cleanup) = last_cleanup {
+            layer = layer.fact(cleanup);
+        }
+        return layer;
+    }
+    #[cfg(not(target_os = "windows"))]
+    HealthLayer::new(
+        "unknown",
+        "mcp_probe_windows_only",
+        "当前版本仅在 Windows 提供 MCP 进程拓扑探针",
+    )
+}
+
 fn passive_upstream_layer() -> HealthLayer {
     let logs = proxy_telemetry().logs.get_all();
     let mut last_forward: Option<(usize, String)> = None;
@@ -1122,12 +1537,39 @@ fn age_seconds(hms: &str) -> Option<u64> {
 }
 
 fn recommendations(
+    session: &HealthLayer,
+    mcp: &HealthLayer,
     transfer: &HealthLayer,
     gateway: &HealthLayer,
     runtime: &RuntimeHealth,
     upstream: &HealthLayer,
 ) -> Vec<String> {
     let mut out = Vec::new();
+    match session.code.as_str() {
+        "session_turn_stalled" => out.push(
+            "会话 / Turn 已长期停滞：不要连续重复发送；先查看它停在响应头、首事件还是流收尾阶段。"
+                .into(),
+        ),
+        "session_retry_recovered" => out.push(
+            "检测到首次静默/失败后由重试恢复；保留该时间点的脱敏诊断包用于定位 Codex 状态竞态。"
+                .into(),
+        ),
+        _ => {}
+    }
+    match mcp.code.as_str() {
+        "mcp_process_explosion" => out.push(
+            "MCP/helper 进程已异常膨胀：暂停创建新子代理，完成当前工作后退出 Codex，让 Exit Guard 回收本 generation。"
+                .into(),
+        ),
+        "mcp_process_count_high" => out.push(
+            "MCP/helper 数量偏高：观察 owned_helpers 是否持续增长，并检查重复最多的 helper 组。"
+                .into(),
+        ),
+        "mcp_guard_inventory_failed" => out.push(
+            "MCP Exit Guard 最近盘点失败；检查其 events.jsonl 与 PowerShell/CIM 可用性。".into(),
+        ),
+        _ => {}
+    }
     match transfer.code.as_str() {
         "transfer_stopped" => out.push("先启动 Transfer 转发器，再测试 Codex 新会话。".into()),
         _ => {}
@@ -1143,7 +1585,7 @@ fn recommendations(
             "展开容器明细，优先处理 OOM、unhealthy、restarting 或非零退出的 Sub2API/Redis/PostgreSQL 服务。".into(),
         ),
         "docker_stack_degraded" => out.push(
-            "等待 health=starting 的容器就绪；若 RestartCount 持续增加，查看该容器日志。".into(),
+            "等待 health=starting 的容器就绪；若界面显示 recent restart 增加，再查看该容器日志。".into(),
         ),
         _ => {}
     }

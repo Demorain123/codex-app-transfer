@@ -22,6 +22,7 @@ cargo = CARGO.read_text(encoding="utf-8")
 required_handler = [
     "CAS-R33-CHAIN-HEALTH",
     "CAS-R33-CHAIN-HEALTH-PRIVACY",
+    "CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY",
     "CACHE_TTL",
     "DNS_TIMEOUT",
     "TCP_TIMEOUT",
@@ -38,6 +39,8 @@ required_handler = [
     "set_password(None)",
     "set_query(None)",
     "set_fragment(None)",
+    '"--format".to_owned()',
+    '"Labels":{{json .Config.Labels}}',
 ]
 for marker in required_handler:
     if marker not in handler:
@@ -57,6 +60,13 @@ for forbidden in [
 ]:
     if forbidden in handler:
         raise SystemExit(f"r33 automatic health handler contains forbidden behavior: {forbidden}")
+
+# The only inspect call must include the safe projection before container IDs.
+inspect_function = handler.split("async fn inspect_containers", 1)[1].split("async fn container_stats", 1)[0]
+if '"inspect".to_owned(),\n        "--format".to_owned()' not in inspect_function:
+    raise SystemExit("r33 Docker inspect is not field-projected")
+if "serde_json::from_str::<Vec<Value>>" in inspect_function:
+    raise SystemExit("r33 Docker inspect still expects an unprojected full array")
 
 if 'features = ["sync", "net", "process", "rt-multi-thread", "time"]' not in cargo:
     raise SystemExit("r33 tokio process feature missing")

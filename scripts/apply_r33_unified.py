@@ -26,6 +26,7 @@ run("scripts/apply_r33_chain_health.py")
 run("scripts/apply_r33_chain_health_hardening.py")
 run("scripts/apply_r33_chain_health_inspect_privacy.py")
 run("scripts/apply_r33_chain_health_state_privacy.py")
+run("scripts/apply_r33_chain_health_label_privacy.py")
 run("scripts/review_r33_chain_health.py")
 
 required = {
@@ -34,6 +35,7 @@ required = {
         "CAS-R33-CHAIN-HEALTH-PRIVACY",
         "CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY",
         "CAS-R33-CHAIN-HEALTH-STATE-PROJECTION",
+        "CAS-R33-CHAIN-HEALTH-LABEL-PROJECTION",
         "docker_daemon_timeout",
         "gateway_tcp_timeout",
         "upstream_headers_stalled",

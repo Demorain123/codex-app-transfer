@@ -46,6 +46,7 @@ jobs:
             scripts/apply_r33_chain_health.py \
             scripts/apply_r33_chain_health_hardening.py \
             scripts/apply_r33_chain_health_inspect_privacy.py \
+            scripts/apply_r33_chain_health_state_privacy.py \
             scripts/review_r33_chain_health.py
 
       - name: Compose r24 through r33
@@ -60,6 +61,7 @@ jobs:
           grep -F -q 'CAS-R33-CHAIN-HEALTH' src-tauri/src/admin/handlers/chain_health.rs
           grep -F -q 'CAS-R33-CHAIN-HEALTH-PRIVACY' src-tauri/src/admin/handlers/chain_health.rs
           grep -F -q 'CAS-R33-CHAIN-HEALTH-INSPECT-PRIVACY' src-tauri/src/admin/handlers/chain_health.rs
+          grep -F -q 'CAS-R33-CHAIN-HEALTH-STATE-PROJECTION' src-tauri/src/admin/handlers/chain_health.rs
           grep -F -q '/api/chain-health' src-tauri/src/admin/mod.rs
           grep -F -q 'chain-health__grid' frontend/src/pages/ProxyPage.vue
           grep -F -q 'CAS-NO-LAGGING-R32-MCP-EXIT-GUARD' src-tauri/resources/codex_no_lagging_janitor.ps1

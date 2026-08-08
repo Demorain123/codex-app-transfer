@@ -22,7 +22,7 @@ version = read("SUB2API_GROK_COMPAT_VERSION.txt")
 required = {
     "health": [
         "CAS-R36-SAFE-RECOVERY",
-        "chain_health_recover",
+        "recover_chain",
         "RECOVERY_COOLDOWN",
         "recovery_classification",
         "restart_gateway_container",
@@ -30,7 +30,7 @@ required = {
         "needs_real_request_verification",
         "start_proxy_for_provider_if_needed",
     ],
-    "router": ["/api/chain-health/recover", "chain_health_recover"],
+    "router": ["/api/chain-health/recover", "recover_chain"],
     "api": ["recoverChainHealth", "ChainRecoveryReport"],
     "page": ["onRecoverChain", "chainHealth.recover", "chainRecovery.needsRealRequestVerification"],
     "zh": ["尝试恢复", "需要下一次真实请求验证账号池 / 上游是否已经恢复"],
@@ -66,5 +66,7 @@ if '目标容器仍为 healthy/running，没有证据支持自动重启' not in 
     raise SystemExit("r36 healthy-container no-restart guard missing")
 if 'RECOVERY_COOLDOWN - elapsed' not in health:
     raise SystemExit("r36 restart-loop cooldown missing")
+if "chain_health_recover" in health or "chain_health_recover" in router:
+    raise SystemExit("r36 replay regression: recovery handler collides with r33 substring check")
 
 print("r36 safe recovery review: PASS")

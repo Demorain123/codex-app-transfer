@@ -65,17 +65,22 @@ require(
     "chainHealth.attribution",
     "chainHealth.diagnosis.summary",
 )
+# Keep the Windows replay review ASCII-tolerant: Git Bash/console encoding can
+# render the decorative middle dot differently even when the version itself is
+# correct. Validate the semantic version tokens independently instead.
 require(
     "frontend/src/i18n/zh.ts",
     MARKER,
-    "Sub2API Grok Compat r37 · v2.4.5+37",
+    "Sub2API Grok Compat r37",
+    "v2.4.5+37",
     '"chainHealth.layer.account": "账号 / 配额"',
     '"chainHealth.attribution": "故障归因"',
 )
 require(
     "frontend/src/i18n/en.ts",
     MARKER,
-    "Sub2API Grok Compat r37 · v2.4.5+37",
+    "Sub2API Grok Compat r37",
+    "v2.4.5+37",
     '"chainHealth.layer.account": "Account / quota"',
     '"chainHealth.attribution": "Fault attribution"',
 )

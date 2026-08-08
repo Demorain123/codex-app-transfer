@@ -20,7 +20,7 @@ if end < 0:
     raise SystemExit("r35 log privacy prep: old replace call not found")
 end += len(end_marker)
 
-replacement = r'''    diag_replacement = r'''fn log_upstream_error_diag(
+replacement = r"""    diag_replacement = r'''fn log_upstream_error_diag(
     telemetry: &crate::telemetry::ProxyTelemetry,
     status: StatusCode,
     upstream_url: &str,
@@ -56,7 +56,7 @@ replacement = r'''    diag_replacement = r'''fn log_upstream_error_diag(
         diag_replacement,
         "routine upstream error log privacy",
     )
-'''
+"""
 
 TARGET.write_text(body[:start] + replacement + body[end:], encoding="utf-8")
 print("r35 log privacy prep: PATCHED")

@@ -233,6 +233,11 @@ pub fn build_app_router(state: AdminState) -> Router {
             "/api/chain-health",
             get(handlers::chain_health::chain_health),
         )
+        // CAS-R36-SAFE-RECOVERY: explicit, rate-limited and non-destructive recovery.
+        .route(
+            "/api/chain-health/recover",
+            post(handlers::chain_health::recover_chain),
+        )
         // [MOC-169] 诊断流量查看器开关
         .route(
             "/api/trace-viewer/start",

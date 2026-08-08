@@ -108,7 +108,7 @@ struct ChainRecoveryReport {
 ) -> impl IntoResponse {
 '''
     recovery_handler = r'''// CAS-R36-SAFE-RECOVERY-HANDLER
-pub async fn chain_health_recover(State(state): State<AdminState>) -> impl IntoResponse {
+pub async fn recover_chain(State(state): State<AdminState>) -> impl IntoResponse {
     {
         let mut gate = recovery_last().lock().await;
         if let Some(previous) = *gate {
@@ -319,7 +319,7 @@ if MARKER not in body:
         // CAS-R36-SAFE-RECOVERY: explicit, rate-limited and non-destructive recovery.
         .route(
             "/api/chain-health/recover",
-            post(handlers::chain_health::chain_health_recover),
+            post(handlers::chain_health::recover_chain),
         )
 ''',
         "recovery route",
@@ -396,7 +396,7 @@ async function onRecoverChain() {
     const result = await recoverChainHealth()
     chainRecovery.value = result.recovery
     chainHealth.value = result.health
-    toast(t('chainHealth.recoveryComplete'), 'success')
+    toast(t('chainHealth.recoveryComplete'), 'info')
   } catch (e) {
     toast((e as Error).message || t('chainHealth.recoveryFailed'), 'error')
   } finally {
@@ -482,12 +482,12 @@ async function onRecoverChain() {
 for rel, anchor, insertion in [
     (
         "frontend/src/i18n/zh.ts",
-        "'chainHealth.refresh': '立即检查',",
+        "\"chainHealth.refresh\": '立即检查',",
         "'chainHealth.refresh': '立即检查',\n  'chainHealth.recover': '尝试恢复',\n  'chainHealth.recoveryComplete': '安全恢复动作已执行',\n  'chainHealth.recoveryFailed': '恢复动作失败',\n  'chainHealth.recoveryReport': '恢复结果',\n  'chainHealth.recoveryNeedsRequest': '需要下一次真实请求验证账号池 / 上游是否已经恢复。',",
     ),
     (
         "frontend/src/i18n/en.ts",
-        "'chainHealth.refresh': 'Check now',",
+        "\"chainHealth.refresh\": 'Check now',",
         "'chainHealth.refresh': 'Check now',\n  'chainHealth.recover': 'Try recovery',\n  'chainHealth.recoveryComplete': 'Safe recovery actions completed',\n  'chainHealth.recoveryFailed': 'Recovery action failed',\n  'chainHealth.recoveryReport': 'Recovery result',\n  'chainHealth.recoveryNeedsRequest': 'The next real request is required to verify account-pool/upstream recovery.',",
     ),
 ]:

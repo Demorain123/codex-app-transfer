@@ -1,5 +1,6 @@
 //! CAS-R33-CHAIN-HEALTH
 //! CAS-R35-REAL-UPSTREAM-HEALTH
+//! CAS-R36-SAFE-RECOVERY
 //!
 //! Privacy-bounded, non-destructive chain health diagnostics for the active Codex route.
 //! Automatic checks never send a model inference request and never read prompt text,
@@ -33,6 +34,8 @@ const TCP_TIMEOUT: Duration = Duration::from_secs(2);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(4);
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(2600);
 const MAX_CONTAINERS: usize = 12;
+const RECOVERY_COOLDOWN: Duration = Duration::from_secs(45);
+const RECOVERY_COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,6 +151,61 @@ fn cache() -> &'static Mutex<Option<CachedSnapshot>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
+// CAS-R36-SAFE-RECOVERY: explicit user-triggered recovery only. The cooldown
+// prevents repeated clicks or UI retries from turning a transient upstream fault
+// into a restart loop.
+static RECOVERY_LAST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+fn recovery_last() -> &'static Mutex<Option<Instant>> {
+    RECOVERY_LAST.get_or_init(|| Mutex::new(None))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryAction {
+    action: String,
+    status: String,
+    detail: String,
+}
+
+impl RecoveryAction {
+    fn performed(action: &str, detail: impl Into<String>) -> Self {
+        Self {
+            action: action.into(),
+            status: "performed".into(),
+            detail: detail.into(),
+        }
+    }
+
+    fn skipped(action: &str, detail: impl Into<String>) -> Self {
+        Self {
+            action: action.into(),
+            status: "skipped".into(),
+            detail: detail.into(),
+        }
+    }
+
+    fn failed(action: &str, detail: impl Into<String>) -> Self {
+        Self {
+            action: action.into(),
+            status: "failed".into(),
+            detail: detail.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChainRecoveryReport {
+    attempted_at: String,
+    classification: String,
+    actions: Vec<RecoveryAction>,
+    needs_real_request_verification: bool,
+    before_overall: String,
+    after_overall: String,
+    after_summary: String,
+}
+
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 // Docker RestartCount is cumulative for the container lifetime. Keep an in-memory
 // baseline and alert only on an increase observed while Transfer is running.
@@ -165,6 +223,210 @@ fn observe_restart_delta_r34(id: &str, current: u64) -> u64 {
         .unwrap_or(0);
     store.insert(id.to_owned(), current);
     delta
+}
+
+// CAS-R36-SAFE-RECOVERY-HANDLER
+pub async fn recover_chain(State(state): State<AdminState>) -> impl IntoResponse {
+    {
+        let mut gate = recovery_last().lock().await;
+        if let Some(previous) = *gate {
+            let elapsed = previous.elapsed();
+            if elapsed < RECOVERY_COOLDOWN {
+                let retry_after_ms = (RECOVERY_COOLDOWN - elapsed).as_millis() as u64;
+                return Json(json!({
+                    "success": false,
+                    "error": "recovery_cooldown",
+                    "retryAfterMs": retry_after_ms,
+                }));
+            }
+        }
+        *gate = Some(Instant::now());
+    }
+
+    let before = build_snapshot(&state).await;
+    let classification = recovery_classification(&before).to_owned();
+    let mut actions = Vec::new();
+    let mut needs_real_request_verification = false;
+
+    match classification.as_str() {
+        "transfer_stopped" => {
+            actions.push(recover_transfer(&state, &before, false).await);
+        }
+        "gateway_unreachable" | "docker_target_failed" => {
+            if let Some(target) = before.runtime.containers.iter().find(|item| item.target) {
+                // Restart only when there is concrete local evidence that the target
+                // container is not serving correctly. Healthy containers are never
+                // restarted merely because the model upstream returned 5xx.
+                let should_restart = !target.running
+                    || target.restarting
+                    || target.health.as_deref() == Some("unhealthy")
+                    || matches!(
+                        before.gateway.code.as_str(),
+                        "gateway_tcp_refused"
+                            | "gateway_http_connect_error"
+                            | "gateway_http_timeout"
+                    );
+                if should_restart {
+                    let result = run_command(
+                        "docker",
+                        &["restart".into(), target.id.clone()],
+                        RECOVERY_COMMAND_TIMEOUT,
+                    )
+                    .await;
+                    if matches!(result.kind, CommandKind::Ok) {
+                        actions.push(RecoveryAction::performed(
+                            "restart_gateway_container",
+                            format!("已重启目标容器 {}；未修改卷、数据库或账号配置", target.name),
+                        ));
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    } else {
+                        actions.push(RecoveryAction::failed(
+                            "restart_gateway_container",
+                            format!("Docker restart 失败: {}", result.stderr),
+                        ));
+                    }
+                } else {
+                    actions.push(RecoveryAction::skipped(
+                        "restart_gateway_container",
+                        "目标容器仍为 healthy/running，没有证据支持自动重启",
+                    ));
+                }
+            } else {
+                actions.push(RecoveryAction::skipped(
+                    "restart_gateway_container",
+                    "未识别到承载活动端口的本地容器",
+                ));
+            }
+            actions.push(recover_transfer(&state, &before, true).await);
+        }
+        "upstream_rate_limited" => {
+            actions.push(RecoveryAction::skipped(
+                "restart_gateway_container",
+                "429 属于上游/账号额度或冷却；重启健康容器通常无效，已避免制造重启循环",
+            ));
+            actions.push(RecoveryAction::skipped(
+                "retry_immediately",
+                "建议等待账号池冷却后再发真实请求；恢复器不会自动制造额外模型请求",
+            ));
+            needs_real_request_verification = true;
+        }
+        "upstream_backend_failure" => {
+            actions.push(recover_transfer(&state, &before, true).await);
+            actions.push(RecoveryAction::skipped(
+                "restart_healthy_sub2api",
+                "网关/容器健康且真实请求已到达上游；不自动重启 healthy Sub2API，避免版本/容器抖动。下一步应检查账号池、模型冷却和真实上游错误",
+            ));
+            needs_real_request_verification = true;
+        }
+        "healthy_or_no_evidence" => {
+            actions.push(RecoveryAction::skipped(
+                "no_mutation",
+                "当前没有足够故障证据，未执行重启或配置修改",
+            ));
+        }
+        _ => {
+            actions.push(RecoveryAction::skipped(
+                "no_safe_automatic_action",
+                "检测到异常，但没有足够证据支持安全自动修复；已保留现场等待日志分析",
+            ));
+        }
+    }
+
+    *cache().lock().await = None;
+    let after = build_snapshot(&state).await;
+    Json(json!({
+        "success": true,
+        "recovery": ChainRecoveryReport {
+            attempted_at: Local::now().to_rfc3339(),
+            classification,
+            actions,
+            needs_real_request_verification,
+            before_overall: before.overall,
+            after_overall: after.overall.clone(),
+            after_summary: after.overall_summary.clone(),
+        },
+        "health": after,
+    }))
+}
+
+fn recovery_classification(snapshot: &ChainHealthSnapshot) -> &'static str {
+    if snapshot.transfer.code == "transfer_stopped" {
+        return "transfer_stopped";
+    }
+    if snapshot.runtime.layer.code == "docker_stack_failed" {
+        return "docker_target_failed";
+    }
+    if matches!(
+        snapshot.gateway.code.as_str(),
+        "gateway_dns_failed"
+            | "gateway_dns_timeout"
+            | "gateway_dns_empty"
+            | "gateway_tcp_timeout"
+            | "gateway_tcp_refused"
+            | "gateway_http_timeout"
+            | "gateway_http_connect_error"
+            | "gateway_http_5xx"
+    ) {
+        return "gateway_unreachable";
+    }
+    if snapshot.upstream.code == "upstream_rate_limited" {
+        return "upstream_rate_limited";
+    }
+    if matches!(
+        snapshot.upstream.code.as_str(),
+        "upstream_bad_gateway"
+            | "upstream_service_unavailable"
+            | "upstream_gateway_timeout"
+            | "upstream_5xx"
+            | "upstream_transport_failed"
+    ) {
+        return "upstream_backend_failure";
+    }
+    if snapshot.overall == "ok" || snapshot.overall == "idle" || snapshot.overall == "unknown" {
+        return "healthy_or_no_evidence";
+    }
+    "no_safe_automatic_action"
+}
+
+async fn recover_transfer(
+    state: &AdminState,
+    snapshot: &ChainHealthSnapshot,
+    force_refresh: bool,
+) -> RecoveryAction {
+    let cfg = load_registry().unwrap_or_else(|_| json!({}));
+    let port = super::proxy::read_proxy_port(&cfg);
+    if force_refresh && state.proxy_manager.status().running {
+        state.proxy_manager.stop_silent();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    let result = if let Some(provider) = snapshot.provider.as_ref() {
+        super::proxy::start_proxy_for_provider_if_needed(&state.proxy_manager, port, &provider.id)
+            .await
+    } else {
+        super::proxy::start_proxy_if_needed(&state.proxy_manager, port).await
+    };
+    match result {
+        Ok(changed) => RecoveryAction::performed(
+            if force_refresh {
+                "refresh_transfer"
+            } else {
+                "start_transfer"
+            },
+            if changed {
+                format!("Transfer 已在端口 {port} 重新建立监听/解析器快照")
+            } else {
+                format!("Transfer 已在端口 {port} 正常运行，无需重复启动")
+            },
+        ),
+        Err(error) => RecoveryAction::failed(
+            if force_refresh {
+                "refresh_transfer"
+            } else {
+                "start_transfer"
+            },
+            compact_error(&error),
+        ),
+    }
 }
 
 pub async fn chain_health(

@@ -1,5 +1,6 @@
 // CAS-R33-CHAIN-HEALTH
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
+// CAS-R36-SAFE-RECOVERY
 import { api } from './http'
 
 export type ChainHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown' | 'idle'
@@ -75,4 +76,29 @@ export async function getChainHealth(force = false): Promise<ChainHealthSnapshot
     `/api/chain-health${query}`,
   )
   return result.health
+}
+
+
+export interface ChainRecoveryAction {
+  action: string
+  status: 'performed' | 'skipped' | 'failed'
+  detail: string
+}
+
+export interface ChainRecoveryReport {
+  attemptedAt: string
+  classification: string
+  actions: ChainRecoveryAction[]
+  needsRealRequestVerification: boolean
+  beforeOverall: ChainHealthStatus
+  afterOverall: ChainHealthStatus
+  afterSummary: string
+}
+
+export async function recoverChainHealth(): Promise<{ recovery: ChainRecoveryReport; health: ChainHealthSnapshot }> {
+  const result = await api<{ success: boolean; recovery: ChainRecoveryReport; health: ChainHealthSnapshot; error?: string; retryAfterMs?: number }>(
+    'POST',
+    '/api/chain-health/recover',
+  )
+  return { recovery: result.recovery, health: result.health }
 }

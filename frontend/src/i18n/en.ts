@@ -1,11 +1,17 @@
+// CAS-R36-SAFE-RECOVERY
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 // CAS-R35-REAL-UPSTREAM-HEALTH
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r35 · v2.4.5+35",
+  "compat.buildBadge": "Sub2API Grok Compat r36 · v2.4.5+36",
   "chainHealth.title": 'Chain Health',
   "chainHealth.loading": 'Collecting quota-free diagnostic evidence…',
-  "chainHealth.refresh": 'Check now',
+  'chainHealth.refresh': 'Check now',
+  'chainHealth.recover': 'Try recovery',
+  'chainHealth.recoveryComplete': 'Safe recovery actions completed',
+  'chainHealth.recoveryFailed': 'Recovery action failed',
+  'chainHealth.recoveryReport': 'Recovery result',
+  'chainHealth.recoveryNeedsRequest': 'The next real request is required to verify account-pool/upstream recovery.',
   "chainHealth.details": 'Details',
   "chainHealth.recommendations": 'Recommended actions',
   "chainHealth.containers": 'Docker / Compose containers',

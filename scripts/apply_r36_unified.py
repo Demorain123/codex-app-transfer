@@ -26,6 +26,7 @@ run("scripts/review_r35_real_upstream_health.py")
 
 REVISION.write_text("36\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
+run("scripts/apply_r36_i18n_prep.py")
 run("scripts/apply_r36_safe_recovery.py")
 run("scripts/review_r36_safe_recovery.py")
 

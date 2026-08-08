@@ -216,29 +216,15 @@ if MARKER not in forward:
 
     # Privacy hardening for routine proxy logs: preserve sizes and the upstream
     # error response preview, but never include a request-body/prompt preview.
-    old_diag = """    const REQ_MAX: usize = 2048;
-    const RESP_MAX: usize = 4096;
-    let req_snippet = bytes_preview(request_body, REQ_MAX);
-    let resp_snippet = bytes_preview(response_body, RESP_MAX);
-    let headers_dump = format_headers_redacted(outbound_headers);
-    telemetry.logs.add(
-        "ERROR",
-        format!(
-            "upstream error diag {} {}\\
-  → outbound headers: [{}]\\
-  → request body ({} bytes): {}\\
-  ← response body ({} bytes): {}",
-            status.as_u16(),
-            upstream_url,
-            headers_dump,
-            request_body.len(),
-            req_snippet,
-            response_body.len(),
-            resp_snippet,
-        ),
-    );
-"""
-    new_diag = """    // CAS-R35-REAL-UPSTREAM-HEALTH-LOG-PRIVACY
+    diag_replacement = r'''fn log_upstream_error_diag(
+    telemetry: &crate::telemetry::ProxyTelemetry,
+    status: StatusCode,
+    upstream_url: &str,
+    outbound_headers: &reqwest::header::HeaderMap,
+    request_body: &Bytes,
+    response_body: &Bytes,
+) {
+    // CAS-R35-REAL-UPSTREAM-HEALTH-LOG-PRIVACY
     // Error diagnostics often happen on the most sensitive requests. Keep only
     // request size; never persist prompt/tool/SSH contents in the routine log.
     const RESP_MAX: usize = 2048;
@@ -259,8 +245,13 @@ if MARKER not in forward:
             resp_snippet,
         ),
     );
-"""
-    forward = replace_once(forward, old_diag, new_diag, "routine upstream error log privacy")
+}'''
+    forward = replace_function(
+        forward,
+        "fn log_upstream_error_diag(",
+        diag_replacement,
+        "routine upstream error log privacy",
+    )
 
     # Put a stable marker close to the forward handler changes.
     forward = forward.replace(

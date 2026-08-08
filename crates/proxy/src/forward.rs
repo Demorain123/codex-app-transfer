@@ -1592,12 +1592,14 @@ pub async fn forward_handler(
 
     // 6/7. 构造 reqwest 请求 + 发送(抽到 `build_and_send_upstream`,
     // transparent retry 复用)。
+    // CAS-R35-REAL-UPSTREAM-HEALTH
     // CAS-R34-RUNTIME-BEHAVIOR-HEALTH: start only after local diagnostic
     // short-circuits have passed, so every record describes a real upstream attempt.
     let lifecycle_id = telemetry.lifecycles.start(
         request_lifecycle_correlation_r34(&parts.headers),
         resolved.provider.id.clone(),
         retry_runtime_diag_model.unwrap_or("<unknown>").to_owned(),
+        plan.body.len() as u64,
     );
     telemetry.lifecycles.mark_forwarded(lifecycle_id);
     let (initial_resp, mut outbound_headers_snapshot) = match build_and_send_upstream(
@@ -1879,6 +1881,22 @@ pub async fn forward_handler(
         (st, hs, stream)
     };
 
+    // CAS-R35-REAL-UPSTREAM-HEALTH: this is the FINAL raw provider result
+    // after any transparent retry. Record it before adapters can translate a JSON
+    // error into a client-facing HTTP 200 response.failed SSE.
+    telemetry
+        .lifecycles
+        .mark_headers(lifecycle_id, status.as_u16());
+    telemetry.stats.record(status.is_success());
+    telemetry.logs.add(
+        if status.is_success() {
+            "SUCCESS"
+        } else {
+            "ERROR"
+        },
+        format!("upstream status {}", status.as_u16()),
+    );
+
     // QoderCosy:上游 SSE 每帧是 `{headers, body, statusCodeValue, statusCode}` 信封,body 是
     // stringified OpenAI chat.completion.chunk(实测,非加密)。先 unwrap 成标准 OpenAI SSE,
     // 再交 openai_chat adapter 做 chat→responses 转换。
@@ -1911,16 +1929,17 @@ pub async fn forward_handler(
     let success = response_plan.status.is_success();
     telemetry
         .lifecycles
-        .mark_headers(lifecycle_id, response_plan.status.as_u16());
-    telemetry.stats.record(success);
+        .mark_client_status(lifecycle_id, response_plan.status.as_u16());
     telemetry.logs.add(
-        if success { "SUCCESS" } else { "ERROR" },
-        format!("upstream status {}", response_plan.status.as_u16()),
+        if success { "INFO" } else { "ERROR" },
+        format!("client response status {}", response_plan.status.as_u16()),
     );
     // CAS-SUBAGENT-FAILURE-CHAIN-R26-RESULT
+    // The failure-chain diagnostic must use the real provider result, not an
+    // adapter-generated HTTP 200 envelope.
     record_subagent_failure_chain_result_r26(
         subagent_failure_chain_ctx_r26.as_ref(),
-        response_plan.status.as_u16(),
+        status.as_u16(),
     );
 
     // 8. 把 ResponsePlan 还原成 axum Response
@@ -3880,20 +3899,23 @@ fn log_upstream_error_diag(
     request_body: &Bytes,
     response_body: &Bytes,
 ) {
-    const REQ_MAX: usize = 2048;
-    const RESP_MAX: usize = 4096;
-    let req_snippet = bytes_preview(request_body, REQ_MAX);
+    // CAS-R35-REAL-UPSTREAM-HEALTH-LOG-PRIVACY
+    // Error diagnostics often happen on the most sensitive requests. Keep only
+    // request size; never persist prompt/tool/SSH contents in the routine log.
+    const RESP_MAX: usize = 2048;
     let resp_snippet = bytes_preview(response_body, RESP_MAX);
     let headers_dump = format_headers_redacted(outbound_headers);
     telemetry.logs.add(
         "ERROR",
         format!(
-            "upstream error diag {} {}\n  → outbound headers: [{}]\n  → request body ({} bytes): {}\n  ← response body ({} bytes): {}",
+            "upstream error diag {} {}\\
+  → outbound headers: [{}]\\
+  → request body: <redacted> ({} bytes)\\
+  ← response body ({} bytes): {}",
             status.as_u16(),
             upstream_url,
             headers_dump,
             request_body.len(),
-            req_snippet,
             response_body.len(),
             resp_snippet,
         ),

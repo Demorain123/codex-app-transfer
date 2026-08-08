@@ -223,6 +223,14 @@ pub struct RequestLifecycleSnapshot {
     pub headers_at_ms: Option<i64>,
     pub first_event_at_ms: Option<i64>,
     pub completed_at_ms: Option<i64>,
+    // CAS-R35-REAL-UPSTREAM-HEALTH
+    // `raw_upstream_status` is the final HTTP status returned by the actual
+    // provider/gateway before adapter conversion. `client_status` is what
+    // Codex receives after conversion (which may legitimately be 200 for a
+    // response.failed SSE). Keeping both prevents 503 -> 200 diagnostic loss.
+    pub raw_upstream_status: Option<u16>,
+    pub client_status: Option<u16>,
+    pub request_bytes: u64,
     pub status: Option<u16>,
     pub bytes: u64,
     pub terminal: Option<String>,
@@ -255,6 +263,7 @@ impl RequestLifecycleTracker {
         correlation: impl Into<String>,
         provider: impl Into<String>,
         model: impl Into<String>,
+        request_bytes: u64,
     ) -> u64 {
         let id = self
             .next_id
@@ -273,6 +282,9 @@ impl RequestLifecycleTracker {
             headers_at_ms: None,
             first_event_at_ms: None,
             completed_at_ms: None,
+            raw_upstream_status: None,
+            client_status: None,
+            request_bytes,
             status: None,
             bytes: 0,
             terminal: None,
@@ -296,6 +308,15 @@ impl RequestLifecycleTracker {
     pub fn mark_headers(&self, id: u64, status: u16) {
         self.update(id, |record| {
             record.headers_at_ms.get_or_insert_with(Self::now_ms);
+            record.raw_upstream_status = Some(status);
+        });
+    }
+
+    pub fn mark_client_status(&self, id: u64, status: u16) {
+        self.update(id, |record| {
+            record.client_status = Some(status);
+            // Keep legacy `status` as the client-facing value for old
+            // diagnostic consumers; r35 health uses raw_upstream_status.
             record.status = Some(status);
         });
     }
@@ -310,9 +331,17 @@ impl RequestLifecycleTracker {
         self.update(id, |record| {
             if record.terminal.is_none() {
                 record.completed_at_ms = Some(Self::now_ms());
+                record.client_status = Some(status);
                 record.status = Some(status);
                 record.bytes = bytes;
-                record.terminal = Some("completed".to_owned());
+                record.terminal = Some(
+                    if record.raw_upstream_status.is_some_and(|raw| raw >= 400) {
+                        "upstream_error"
+                    } else {
+                        "completed"
+                    }
+                    .to_owned(),
+                );
             }
         });
     }

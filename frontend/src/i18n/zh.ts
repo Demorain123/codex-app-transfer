@@ -1,7 +1,8 @@
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
+// CAS-R35-REAL-UPSTREAM-HEALTH
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r34 · v2.4.5+34",
+  "compat.buildBadge": "Sub2API Grok Compat r35 · v2.4.5+35",
   "chainHealth.title": '全链路健康',
   "chainHealth.loading": '正在收集无额度诊断证据…',
   "chainHealth.refresh": '立即检查',
@@ -16,7 +17,7 @@ export default {
   "chainHealth.layer.transfer": 'Transfer',
   "chainHealth.layer.gateway": '网关',
   "chainHealth.layer.runtime": '运行环境',
-  "chainHealth.layer.upstream": '上游(被动)',
+  "chainHealth.layer.upstream": '账号池 / 上游（被动）',
   "chainHealth.status.ok": '正常',
   "chainHealth.status.degraded": '降级',
   "chainHealth.status.error": '故障',

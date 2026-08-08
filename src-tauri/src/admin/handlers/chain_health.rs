@@ -1,4 +1,5 @@
 //! CAS-R33-CHAIN-HEALTH
+//! CAS-R35-REAL-UPSTREAM-HEALTH
 //!
 //! Privacy-bounded, non-destructive chain health diagnostics for the active Codex route.
 //! Automatic checks never send a model inference request and never read prompt text,
@@ -1078,7 +1079,7 @@ fn session_layer() -> HealthLayer {
             record
                 .terminal
                 .as_deref()
-                .is_some_and(|value| value.starts_with("failed:"))
+                .is_some_and(|value| value.starts_with("failed:") || value == "upstream_error")
         })
         .count();
     let cancelled = recent
@@ -1181,6 +1182,25 @@ fn session_layer() -> HealthLayer {
             cancelled
         ))
         .fact(format!("retry_recoveries={retry_recoveries}"))
+        .fact(
+            recent
+                .last()
+                .map(|record| {
+                    format!(
+                        "last_raw_status={} last_client_status={} request_bytes={}",
+                        record
+                            .raw_upstream_status
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "-".into()),
+                        record
+                            .client_status
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "-".into()),
+                        record.request_bytes
+                    )
+                })
+                .unwrap_or_else(|| "last_raw_status=- last_client_status=- request_bytes=0".into()),
+        )
         .fact("correlation=fingerprinted-no-prompt")
 }
 
@@ -1320,14 +1340,27 @@ fn mcp_layer() -> HealthLayer {
         let rows = windows_process_topology_r34();
         let by_id: HashMap<u32, &WindowsProcessTopologyR34> =
             rows.iter().map(|row| (row.pid, row)).collect();
-        let roots: HashSet<u32> = rows
+        let codex_roots: HashSet<u32> = rows
             .iter()
-            .filter(|row| {
-                row.name.eq_ignore_ascii_case("chatgpt.exe")
-                    || row.name.eq_ignore_ascii_case("codex.exe")
-            })
+            .filter(|row| row.name.eq_ignore_ascii_case("codex.exe"))
             .map(|row| row.pid)
             .collect();
+        let roots: HashSet<u32> = if !codex_roots.is_empty() {
+            codex_roots
+        } else {
+            let chatgpt_ids: HashSet<u32> = rows
+                .iter()
+                .filter(|row| row.name.eq_ignore_ascii_case("chatgpt.exe"))
+                .map(|row| row.pid)
+                .collect();
+            rows.iter()
+                .filter(|row| {
+                    row.name.eq_ignore_ascii_case("chatgpt.exe")
+                        && !chatgpt_ids.contains(&row.parent_pid)
+                })
+                .map(|row| row.pid)
+                .collect()
+        };
 
         let mut names: HashMap<String, usize> = HashMap::new();
         let mut helpers = 0usize;
@@ -1418,105 +1451,195 @@ fn mcp_layer() -> HealthLayer {
 }
 
 fn passive_upstream_layer() -> HealthLayer {
-    let logs = proxy_telemetry().logs.get_all();
-    let mut last_forward: Option<(usize, String)> = None;
-    let mut last_status: Option<(usize, String, u16)> = None;
-    let mut last_timing: Option<(usize, String)> = None;
-    let mut last_error: Option<(usize, String)> = None;
-    for (index, entry) in logs.iter().enumerate() {
-        let message = entry.message.as_str();
-        if message.contains("forwarding →") || message.contains("forwarding ->") {
-            last_forward = Some((index, entry.time.clone()));
-        }
-        if let Some(code) = parse_upstream_status(message) {
-            last_status = Some((index, entry.time.clone(), code));
-        }
-        if message.starts_with("upstream timing ") {
-            last_timing = Some((index, entry.time.clone()));
-        }
-        if entry.level.eq_ignore_ascii_case("error")
-            && (message.contains("upstream") || message.contains("request"))
-        {
-            last_error = Some((index, compact_error(message)));
-        }
-    }
-
-    let Some((forward_index, forward_time)) = last_forward else {
+    let records = proxy_telemetry().lifecycles.snapshot();
+    let Some(latest) = records.last() else {
         return HealthLayer::new(
             "idle",
             "upstream_no_requests",
-            "尚无可用于判断上游的真实请求证据",
+            "尚无可用于判断账号池 / 上游的真实请求证据",
         )
         .fact("mode=passive-no-inference");
     };
-    let age = age_seconds(&forward_time).unwrap_or(0);
-    let status_index = last_status.as_ref().map(|item| item.0).unwrap_or(0);
-    let timing_index = last_timing.as_ref().map(|item| item.0).unwrap_or(0);
-    if forward_index > status_index {
-        let level = if age >= 90 {
-            "error"
-        } else if age >= 20 {
-            "degraded"
-        } else {
-            "ok"
-        };
-        let code = if age >= 90 {
-            "upstream_headers_stalled"
-        } else {
-            "upstream_waiting_headers"
-        };
-        return HealthLayer::new(level, code, "请求已转发，但尚未收到网关/上游响应头")
-            .latency(Some(age.saturating_mul(1000)))
-            .fact(format!("waiting_seconds={age}"))
-            .fact("evidence=proxy-log-order-best-effort");
-    }
-    if status_index > timing_index {
-        return HealthLayer::new(
-            "ok",
-            "upstream_streaming",
-            "已收到响应头，流式响应仍在进行或尚未记录收尾",
-        )
-        .latency(Some(age.saturating_mul(1000)))
-        .fact("evidence=proxy-log-order-best-effort");
-    }
-    if let Some((error_index, error)) = last_error {
-        if error_index > timing_index {
-            return HealthLayer::new(
-                "error",
-                "upstream_recent_error",
-                "最近一次请求在 Transfer/上游阶段失败",
-            )
-            .fact(format!("error={error}"));
+
+    let now_ms = Local::now().timestamp_millis();
+    let age_ms = now_ms.saturating_sub(latest.accepted_at_ms).max(0) as u64;
+    let raw = latest.raw_upstream_status;
+    let client = latest.client_status;
+
+    // Correlate reconnect/retry attempts by the existing non-reversible request
+    // fingerprint. Do not inspect prompt text or raw thread/session identifiers.
+    let window_start = latest.accepted_at_ms.saturating_sub(15 * 60 * 1000);
+    let mut failure_streak = 0usize;
+    let mut cumulative_request_bytes = 0u64;
+    let mut failure_sequence = Vec::new();
+    for record in records.iter().rev() {
+        if record.accepted_at_ms < window_start
+            || record.correlation != latest.correlation
+            || record.provider != latest.provider
+            || record.model != latest.model
+        {
+            continue;
+        }
+        match record.raw_upstream_status {
+            Some(status) if status >= 400 => {
+                failure_streak += 1;
+                cumulative_request_bytes =
+                    cumulative_request_bytes.saturating_add(record.request_bytes);
+                failure_sequence.push(status.to_string());
+            }
+            Some(_) if failure_streak > 0 => break,
+            _ => {}
+        }
+        if failure_streak >= 12 {
+            break;
         }
     }
-    if let Some((_, _, status)) = last_status {
-        let (level, code, summary) = match status {
-            401 | 403 => (
-                "degraded",
-                "upstream_auth_error",
-                "最近请求到达上游，但鉴权失败",
-            ),
-            429 => (
-                "degraded",
-                "upstream_rate_limited",
-                "最近请求被限流或账号配额不足",
-            ),
-            500..=599 => ("error", "upstream_5xx", "最近请求收到网关/上游 5xx"),
-            _ => (
+    failure_sequence.reverse();
+
+    let base_facts = |mut layer: HealthLayer| {
+        layer = layer
+            .fact(format!(
+                "provider={} model={}",
+                latest.provider, latest.model
+            ))
+            .fact(format!(
+                "raw_status={} client_status={}",
+                raw.map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
+                client.map(|v| v.to_string()).unwrap_or_else(|| "-".into())
+            ))
+            .fact(format!("request_bytes={}", latest.request_bytes))
+            .fact(format!("failure_streak={failure_streak}"))
+            .fact(format!("retry_upload_bytes={cumulative_request_bytes}"))
+            .fact(format!(
+                "failure_sequence={}",
+                if failure_sequence.is_empty() {
+                    "-".into()
+                } else {
+                    failure_sequence.join(">")
+                }
+            ))
+            .fact("evidence=structured-request-lifecycle");
+        layer
+    };
+
+    if let Some(status) = raw {
+        if status >= 400 {
+            let (level, code, summary) = match status {
+                401 | 403 => (
+                    "error",
+                    "upstream_auth_error",
+                    "最近真实请求到达账号池 / 上游，但鉴权或权限失败",
+                ),
+                429 => (
+                    "error",
+                    "upstream_rate_limited",
+                    "最近真实请求被账号池 / 上游限流或无可用额度",
+                ),
+                502 => (
+                    "error",
+                    "upstream_bad_gateway",
+                    "Sub2API 已接收请求，但其后端账号 / 上游返回 502",
+                ),
+                503 => (
+                    "error",
+                    "upstream_service_unavailable",
+                    "Sub2API 已接收请求，但账号池 / 最终上游暂时不可用（503）",
+                ),
+                504 => (
+                    "error",
+                    "upstream_gateway_timeout",
+                    "Sub2API 已接收请求，但等待账号 / 最终上游超时（504）",
+                ),
+                500..=599 => (
+                    "error",
+                    "upstream_5xx",
+                    "最近真实请求在网关后端 / 最终上游阶段失败",
+                ),
+                _ => (
+                    "degraded",
+                    "upstream_http_error",
+                    "最近真实请求收到非成功 HTTP 状态",
+                ),
+            };
+            return base_facts(HealthLayer::new(level, code, summary).latency(Some(age_ms)));
+        }
+    }
+
+    if latest.terminal.is_none() {
+        if latest.raw_upstream_status.is_none() {
+            let since_forward = latest
+                .forwarded_at_ms
+                .map(|value| now_ms.saturating_sub(value).max(0) as u64)
+                .unwrap_or(age_ms);
+            let level = if since_forward >= 90_000 {
+                "error"
+            } else if since_forward >= 20_000 {
+                "degraded"
+            } else {
+                "ok"
+            };
+            let code = if since_forward >= 90_000 {
+                "upstream_headers_stalled"
+            } else {
+                "upstream_waiting_headers"
+            };
+            return base_facts(
+                HealthLayer::new(level, code, "请求已转发，但尚未收到真实上游响应头")
+                    .latency(Some(since_forward)),
+            );
+        }
+        if latest.first_event_at_ms.is_none() {
+            return base_facts(
+                HealthLayer::new(
+                    "degraded",
+                    "upstream_waiting_first_event",
+                    "真实上游已返回成功响应头，但尚未向 Codex 输出首个流事件",
+                )
+                .latency(Some(age_ms)),
+            );
+        }
+        return base_facts(
+            HealthLayer::new(
+                "ok",
+                "upstream_streaming",
+                "真实上游已成功响应，当前流仍在进行",
+            )
+            .latency(Some(age_ms)),
+        );
+    }
+
+    match latest.terminal.as_deref() {
+        Some("completed") => base_facts(
+            HealthLayer::new(
                 "ok",
                 "upstream_recent_complete",
-                "最近请求已获得响应并记录收尾时间",
-            ),
-        };
-        return HealthLayer::new(level, code, summary)
-            .fact(format!("http_status={status}"))
-            .fact("mode=passive-no-inference");
+                "最近真实请求已从账号池 / 上游成功完成",
+            )
+            .latency(Some(age_ms)),
+        ),
+        Some("cancelled") => base_facts(
+            HealthLayer::new(
+                "degraded",
+                "upstream_client_cancelled",
+                "最近请求在客户端消费完成前被取消",
+            )
+            .latency(Some(age_ms)),
+        ),
+        Some(value) if value.starts_with("failed:") => base_facts(
+            HealthLayer::new(
+                "error",
+                "upstream_transport_failed",
+                "最近请求在 Transfer 到上游的传输 / 转换阶段失败",
+            )
+            .fact(format!("terminal={value}"))
+            .latency(Some(age_ms)),
+        ),
+        _ => base_facts(HealthLayer::new(
+            "unknown",
+            "upstream_evidence_incomplete",
+            "真实请求已有结构化证据，但终止状态尚不能分类",
+        )),
     }
-    HealthLayer::new(
-        "unknown",
-        "upstream_evidence_incomplete",
-        "检测到转发记录，但上游证据不完整",
-    )
 }
 
 fn parse_upstream_status(message: &str) -> Option<u16> {
@@ -1611,8 +1734,12 @@ fn recommendations(
             "请求转发后 90 秒仍无响应头：不要连续重复发送；先检查网关/Docker，再取消或重启失效请求。".into(),
         ),
         "upstream_auth_error" => out.push("最近真实请求鉴权失败，需要重新登录或更换有效账号。".into()),
-        "upstream_rate_limited" => out.push("最近真实请求被限流，检查账号配额与网关调度策略。".into()),
-        "upstream_5xx" => out.push("最近真实请求收到 5xx，可结合网关日志确认是网关还是最终上游。".into()),
+        "upstream_rate_limited" => out.push(
+            "最近真实请求收到 429：先检查 Sub2API 当前分组的可用账号、额度/冷却和账号池重试策略；不要让 Codex 高频连续重试。".into(),
+        ),
+        "upstream_bad_gateway" | "upstream_service_unavailable" | "upstream_gateway_timeout" | "upstream_5xx" => out.push(
+            "本机 Transfer、8113 和 Docker 可正常时，5xx 表示故障已在 Sub2API 后端账号池/真正上游；优先检查账号可用数、冷却/封禁、上游错误和 Sub2API 版本。".into(),
+        ),
         _ => {}
     }
     if out.is_empty() {

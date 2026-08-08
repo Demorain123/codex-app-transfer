@@ -1,0 +1,176 @@
+name: Test r36 Safe Recovery Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r36-safe-recovery
+    paths:
+      - 'crates/**'
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'scripts/**'
+      - 'docs/R36_SAFE_RECOVERY.md'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - 'Cargo.lock'
+      - '.github/workflows/test-r36-windows-package.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r35-real-upstream-health
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package-r36-windows:
+    runs-on: windows-latest
+    timeout-minutes: 145
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compose r24 through r36
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_r36_unified.py scripts/apply_r36_safe_recovery.py scripts/review_r36_safe_recovery.py
+          python scripts/apply_r36_unified.py
+          grep -F -q 'compat_revision=36' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+36' SUB2API_GROK_COMPAT_VERSION.txt
+          python scripts/review_r36_safe_recovery.py
+
+      - name: Resolve package version
+        id: compat-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          BASE_VERSION="${APP_VERSION%%+*}"
+          REVISION="${APP_VERSION#*+}"
+          test "$REVISION" = '36'
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=${BASE_VERSION}-r${REVISION}" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r36-safe-recovery-windows-package
+
+      - name: Normalize and prove replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r36-first.diff"
+          python scripts/apply_r36_unified.py > "$RUNNER_TEMP/r36-second.log" 2>&1 || {
+            tail -n 300 "$RUNNER_TEMP/r36-second.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_r36_safe_recovery.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r36-second.diff"
+          cmp -s "$RUNNER_TEMP/r36-first.diff" "$RUNNER_TEMP/r36-second.diff"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Recheck No Lagging launcher
+        run: node scripts/test_no_micro_launcher.mjs
+
+      - name: Compile r36 Windows app
+        run: cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Test health and inherited regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p codex-app-transfer chain_health --target x86_64-pc-windows-msvc -- --nocapture
+          cargo test -p codex-app-transfer proxy_lifecycle_r27 --target x86_64-pc-windows-msvc -- --nocapture
+          cargo test -p codex-app-transfer hybrid_direct --target x86_64-pc-windows-msvc -- --nocapture
+          cargo test -p codex-app-transfer-proxy telemetry --target x86_64-pc-windows-msvc -- --nocapture
+          cargo test -p codex-app-transfer-adapters --lib -- --nocapture
+
+      - name: Build and verify frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r36' frontend/dist
+          grep -R -F -q '尝试恢复' frontend/dist
+
+      - name: Cache cargo-tauri
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: Build NSIS and MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage r36 bundles
+        shell: bash
+        env:
+          SAFE_VERSION: ${{ steps.compat-version.outputs.safe_version }}
+          APP_VERSION: ${{ steps.compat-version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          BDIR="target/x86_64-pc-windows-msvc/release/bundle"
+          mkdir -p staging
+          shopt -s nullglob
+          for f in "$BDIR"/nsis/*-setup.exe; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
+          done
+          for f in "$BDIR"/msi/*.msi; do
+            cp "$f" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
+          done
+          cat > staging/BUILD-INFO.txt <<EOF
+          app_version=${APP_VERSION}
+          compat_revision=36
+          git_commit=$(git rev-parse HEAD)
+          composer=scripts/apply_r36_unified.py
+          feature=safe-chain-recovery
+          privacy=no-model-probe-no-secrets-no-volume-mutation
+          EOF
+          files=(staging/*)
+          if (( ${#files[@]} < 3 )); then exit 1; fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-${{ steps.compat-version.outputs.safe_version }}-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

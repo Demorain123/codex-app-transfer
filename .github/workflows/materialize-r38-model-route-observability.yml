@@ -44,7 +44,9 @@ jobs:
           python -m py_compile \
             scripts/apply_r38_unified.py \
             scripts/apply_r38_proxy_observability.py \
+            scripts/apply_r38_health_prep.py \
             scripts/apply_r38_health_model_routes.py \
+            scripts/apply_r38_health_codegen_fix.py \
             scripts/apply_r38_frontend_model_routes.py \
             scripts/review_r38_model_route_observability.py
           python scripts/apply_r38_unified.py

@@ -10,7 +10,7 @@ text = path.read_text(encoding="utf-8")
 # This deliberately mirrors the inherited r37 behavior and only repairs formatting/
 # replay drift so the r38 replacement remains exact and reviewable.
 start_marker = "    let overall = overall_status([\n"
-end_marker = "    // CAS-R37-SNAPSHOT-PREP\n"
+end_marker = "// CAS-R37-SNAPSHOT-PREP"
 start = text.find(start_marker)
 end = text.find(end_marker, start + 1) if start >= 0 else -1
 if start < 0 or end < 0 or end <= start:

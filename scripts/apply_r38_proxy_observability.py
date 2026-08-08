@@ -24,7 +24,6 @@ def replace_once(body: str, old: str, new: str, label: str) -> str:
     return body.replace(old, new, 1)
 
 
-# Proxy lifecycle: add privacy-bounded request-shape metadata.
 rel = "crates/proxy/src/telemetry.rs"
 body = load(rel)
 if MARKER not in body:
@@ -71,7 +70,6 @@ if MARKER not in body:
     save(rel, body)
 
 
-# Forwarder: typed ignore-unknown projection; prompt/content fields are not stored.
 rel = "crates/proxy/src/forward.rs"
 body = load(rel)
 if MARKER not in body:
@@ -107,6 +105,8 @@ struct RequestInputR38 {
     kind: String,
     #[serde(default)]
     tools: Vec<RequestToolR38>,
+    #[serde(default)]
+    content: Vec<RequestInputR38>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -144,6 +144,18 @@ fn collect_tool_names_r38(tool: &RequestToolR38, namespace: Option<&str>, names:
     }
 }
 
+fn collect_input_shape_r38(item: &RequestInputR38, names: &mut Vec<String>, image_count: &mut u32) {
+    if item.kind == "input_image" {
+        *image_count = image_count.saturating_add(1);
+    }
+    for tool in &item.tools {
+        collect_tool_names_r38(tool, None, names);
+    }
+    for child in &item.content {
+        collect_input_shape_r38(child, names, image_count);
+    }
+}
+
 fn request_shape_r38(headers: &HeaderMap, body: &[u8]) -> RequestShapeR38 {
     let request_kind = headers
         .get("x-codex-turn-metadata")
@@ -161,12 +173,7 @@ fn request_shape_r38(headers: &HeaderMap, body: &[u8]) -> RequestShapeR38 {
     }
     let mut input_image_count = 0u32;
     for item in &envelope.input {
-        if item.kind == "input_image" {
-            input_image_count = input_image_count.saturating_add(1);
-        }
-        for tool in &item.tools {
-            collect_tool_names_r38(tool, None, &mut names);
-        }
+        collect_input_shape_r38(item, &mut names, &mut input_image_count);
     }
     let mut counts = std::collections::BTreeMap::<String, u32>::new();
     for name in &names {

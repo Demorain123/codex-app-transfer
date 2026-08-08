@@ -9,6 +9,7 @@ import { useToast } from '@/composables/useToast'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 // CAS-R33-CHAIN-HEALTH
 // CAS-R36-SAFE-RECOVERY
+// CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 import {
   getChainHealth,
@@ -54,6 +55,7 @@ const chainLayers = computed(() => {
     { key: 'transfer', label: t('chainHealth.layer.transfer'), data: h.transfer },
     { key: 'gateway', label: t('chainHealth.layer.gateway'), data: h.gateway },
     { key: 'runtime', label: t('chainHealth.layer.runtime'), data: h.runtime.layer },
+    { key: 'account', label: t('chainHealth.layer.account'), data: h.account },
     { key: 'upstream', label: t('chainHealth.layer.upstream'), data: h.upstream },
   ]
 })
@@ -232,6 +234,9 @@ async function onClearLogs() {
           <p v-if="chainHealth?.provider" class="chain-health__provider">
             {{ chainHealth.provider.name }} · {{ chainHealth.provider.displayUrl }}
           </p>
+          <p v-if="chainHealth?.diagnosis" class="chain-health__provider">
+            {{ t('chainHealth.attribution') }}：{{ chainHealth.diagnosis.summary }}
+          </p>
         </div>
         <div class="chain-health__actions">
           <button
@@ -293,6 +298,11 @@ async function onClearLogs() {
 
       <div v-if="chainExpanded && chainHealth" class="chain-health__detail">
         <div class="chain-health__facts">
+          <div>
+            <strong>{{ t('chainHealth.attribution') }}</strong>
+            <code>code={{ chainHealth.diagnosis.code }}</code>
+            <code v-for="fact in chainHealth.diagnosis.facts" :key="`diagnosis-${fact}`">{{ fact }}</code>
+          </div>
           <div v-for="layer in chainLayers" :key="`${layer.key}-facts`">
             <strong>{{ layer.label }}</strong>
             <code v-for="fact in layer.data.facts" :key="fact">{{ fact }}</code>

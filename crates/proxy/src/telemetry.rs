@@ -207,6 +207,7 @@ impl LogBuffer {
 }
 
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
+// CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD
 // Privacy-bounded request lifecycle telemetry. Records only stage timestamps,
 // provider/model labels and fingerprinted correlation supplied by forward.rs.
 // Prompt/response bodies, tool arguments, raw thread/session IDs and credentials
@@ -231,6 +232,14 @@ pub struct RequestLifecycleSnapshot {
     pub raw_upstream_status: Option<u16>,
     pub client_status: Option<u16>,
     pub request_bytes: u64,
+    // CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD
+    // Quota metadata is copied only from standard x-codex response headers.
+    // Account identity, when present, is already an irreversible 8-char fingerprint.
+    pub quota_primary_used_percent: Option<f32>,
+    pub quota_secondary_used_percent: Option<f32>,
+    pub quota_primary_reset_after_seconds: Option<u64>,
+    pub quota_secondary_reset_after_seconds: Option<u64>,
+    pub quota_account_fingerprint: Option<String>,
     pub status: Option<u16>,
     pub bytes: u64,
     pub terminal: Option<String>,
@@ -285,6 +294,11 @@ impl RequestLifecycleTracker {
             raw_upstream_status: None,
             client_status: None,
             request_bytes,
+            quota_primary_used_percent: None,
+            quota_secondary_used_percent: None,
+            quota_primary_reset_after_seconds: None,
+            quota_secondary_reset_after_seconds: None,
+            quota_account_fingerprint: None,
             status: None,
             bytes: 0,
             terminal: None,
@@ -309,6 +323,36 @@ impl RequestLifecycleTracker {
         self.update(id, |record| {
             record.headers_at_ms.get_or_insert_with(Self::now_ms);
             record.raw_upstream_status = Some(status);
+        });
+    }
+
+    // CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD: update quota metadata without
+    // storing raw response headers, cookies, account e-mails or bearer credentials.
+    pub fn mark_quota(
+        &self,
+        id: u64,
+        primary_used_percent: Option<f32>,
+        secondary_used_percent: Option<f32>,
+        primary_reset_after_seconds: Option<u64>,
+        secondary_reset_after_seconds: Option<u64>,
+        account_fingerprint: Option<String>,
+    ) {
+        self.update(id, |record| {
+            if primary_used_percent.is_some() {
+                record.quota_primary_used_percent = primary_used_percent;
+            }
+            if secondary_used_percent.is_some() {
+                record.quota_secondary_used_percent = secondary_used_percent;
+            }
+            if primary_reset_after_seconds.is_some() {
+                record.quota_primary_reset_after_seconds = primary_reset_after_seconds;
+            }
+            if secondary_reset_after_seconds.is_some() {
+                record.quota_secondary_reset_after_seconds = secondary_reset_after_seconds;
+            }
+            if account_fingerprint.is_some() {
+                record.quota_account_fingerprint = account_fingerprint;
+            }
         });
     }
 

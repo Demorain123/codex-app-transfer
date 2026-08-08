@@ -1887,6 +1887,39 @@ pub async fn forward_handler(
     telemetry
         .lifecycles
         .mark_headers(lifecycle_id, status.as_u16());
+    // CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD
+    // OpenAI Codex exposes 5h/weekly plan usage through x-codex-* headers.
+    // Sub2API may or may not preserve them. Capture only numeric quota metadata
+    // plus an irreversible account fingerprint when the header is available.
+    let quota_primary_used_percent = upstream_headers
+        .get("x-codex-primary-used-percent")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<f32>().ok());
+    let quota_secondary_used_percent = upstream_headers
+        .get("x-codex-secondary-used-percent")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<f32>().ok());
+    let quota_primary_reset_after_seconds = upstream_headers
+        .get("x-codex-primary-reset-after-seconds")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let quota_secondary_reset_after_seconds = upstream_headers
+        .get("x-codex-secondary-reset-after-seconds")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let quota_account_fingerprint = {
+        let fp =
+            sub2api_retry_runtime_diag_header_fingerprint(&upstream_headers, "x-codex-user-id");
+        (fp != "-").then_some(fp)
+    };
+    telemetry.lifecycles.mark_quota(
+        lifecycle_id,
+        quota_primary_used_percent,
+        quota_secondary_used_percent,
+        quota_primary_reset_after_seconds,
+        quota_secondary_reset_after_seconds,
+        quota_account_fingerprint,
+    );
     telemetry.stats.record(status.is_success());
     telemetry.logs.add(
         if status.is_success() {

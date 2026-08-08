@@ -1,9 +1,10 @@
 // CAS-R36-SAFE-RECOVERY
+// CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 // CAS-R35-REAL-UPSTREAM-HEALTH
 // Auto-extracted from legacy frontend/js/i18n.js (Stage 2). 勿手改, 改 key 走原 i18n 流程或后续 stage 整理。
 export default {
-  "compat.buildBadge": "Sub2API Grok Compat r36 · v2.4.5+36",
+  "compat.buildBadge": "Sub2API Grok Compat r37 · v2.4.5+37",
   "chainHealth.title": 'Chain Health',
   "chainHealth.loading": 'Collecting quota-free diagnostic evidence…',
   'chainHealth.refresh': 'Check now',
@@ -23,6 +24,8 @@ export default {
   "chainHealth.layer.transfer": 'Transfer',
   "chainHealth.layer.gateway": 'Gateway',
   "chainHealth.layer.runtime": 'Runtime',
+  "chainHealth.layer.account": "Account / quota",
+  "chainHealth.attribution": "Fault attribution",
   "chainHealth.layer.upstream": 'Account pool / Upstream (passive)',
   "chainHealth.status.ok": 'Healthy',
   "chainHealth.status.degraded": 'Degraded',

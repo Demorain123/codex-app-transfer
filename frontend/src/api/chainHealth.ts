@@ -1,6 +1,7 @@
 // CAS-R33-CHAIN-HEALTH
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
 // CAS-R36-SAFE-RECOVERY
+// CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD
 import { api } from './http'
 
 export type ChainHealthStatus = 'ok' | 'degraded' | 'error' | 'unknown' | 'idle'
@@ -64,7 +65,9 @@ export interface ChainHealthSnapshot {
   transfer: ChainHealthLayer
   gateway: ChainHealthLayer
   runtime: ChainRuntimeHealth
+  account: ChainHealthLayer
   upstream: ChainHealthLayer
+  diagnosis: ChainHealthLayer
   recommendations: string[]
   privacy: string[]
 }

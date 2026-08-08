@@ -28,17 +28,18 @@ REVISION.write_text("36\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_r36_i18n_prep.py")
 run("scripts/apply_r36_toast_prep.py")
+run("scripts/apply_r36_replay_prep.py")
 run("scripts/apply_r36_safe_recovery.py")
 run("scripts/review_r36_safe_recovery.py")
 
 required = {
     "src-tauri/src/admin/handlers/chain_health.rs": [
         "CAS-R36-SAFE-RECOVERY",
-        "chain_health_recover",
+        "recover_chain",
         "RECOVERY_COOLDOWN",
         "restart_healthy_sub2api",
     ],
-    "src-tauri/src/admin/mod.rs": ["/api/chain-health/recover"],
+    "src-tauri/src/admin/mod.rs": ["/api/chain-health/recover", "recover_chain"],
     "frontend/src/api/chainHealth.ts": ["recoverChainHealth"],
     "frontend/src/pages/ProxyPage.vue": ["onRecoverChain", "chainHealth.recover"],
 }

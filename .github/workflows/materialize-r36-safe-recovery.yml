@@ -1,0 +1,126 @@
+name: Materialize r36 Safe Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sub2api-grok-compat-next-r36-safe-recovery
+    paths:
+      - 'crates/**'
+      - 'frontend/**'
+      - 'src-tauri/**'
+      - 'scripts/**'
+      - 'docs/R36_SAFE_RECOVERY.md'
+      - 'SUB2API_GROK_COMPAT_REVISION.txt'
+      - 'SUB2API_GROK_COMPAT_VERSION.txt'
+      - '.github/workflows/materialize-r36-safe-recovery.yml'
+  pull_request:
+    branches:
+      - sub2api-grok-compat-next-r35-real-upstream-health
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  materialize-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compose r24 through r36
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/apply_r36_unified.py scripts/apply_r36_safe_recovery.py scripts/review_r36_safe_recovery.py
+          python scripts/apply_r36_unified.py
+          grep -F -q 'compat_revision=36' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+36' SUB2API_GROK_COMPAT_VERSION.txt
+          python scripts/review_r36_safe_recovery.py
+          git diff --check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build r36 frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r36' frontend/dist
+          grep -R -F -q '尝试恢复' frontend/dist
+
+      - name: Install Tauri Linux prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev libgtk-3-dev \
+            librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r36-safe-recovery-linux
+
+      - name: Compile and test r36 backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo check -p codex-app-transfer
+          cargo test -p codex-app-transfer chain_health -- --nocapture
+          cargo test -p codex-app-transfer-proxy telemetry -- --nocapture
+          python scripts/review_r36_safe_recovery.py
+          git diff --check
+
+      - name: Prove r36 replay idempotence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --binary > "$RUNNER_TEMP/r36-first.diff"
+          python scripts/apply_r36_unified.py > "$RUNNER_TEMP/r36-second.log" 2>&1 || {
+            tail -n 300 "$RUNNER_TEMP/r36-second.log"
+            exit 1
+          }
+          cargo fmt --all
+          python scripts/review_r36_safe_recovery.py
+          git diff --check
+          git diff --binary > "$RUNNER_TEMP/r36-second.diff"
+          cmp -s "$RUNNER_TEMP/r36-first.diff" "$RUNNER_TEMP/r36-second.diff" || {
+            echo '::error::r36 complete overlay is not idempotent after rustfmt'
+            diff -u "$RUNNER_TEMP/r36-first.diff" "$RUNNER_TEMP/r36-second.diff" || true
+            exit 1
+          }
+
+      - name: Commit generated r36 source on push
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m '[r36-generated] materialize safe recovery'
+          git push origin HEAD:sub2api-grok-compat-next-r36-safe-recovery

@@ -27,6 +27,7 @@ run("scripts/review_r36_safe_recovery.py")
 REVISION.write_text("37\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_r37_snapshot_prep.py")
+run("scripts/apply_r37_i18n_prep.py")
 run("scripts/apply_r37_fault_attribution_quota_guard.py")
 run("scripts/review_r37_fault_attribution_quota_guard.py")
 

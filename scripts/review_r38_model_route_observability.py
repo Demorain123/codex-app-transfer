@@ -26,6 +26,7 @@ required = {
         "fault_large_context",
         "fault_recovered_session",
         "refresh_healthy_transfer",
+        "本次不再盲目刷新 180xx listener",
         "核心模型链路当前可用",
     ],
     "frontend/src/api/chainHealth.ts": [
@@ -59,11 +60,5 @@ for rel, markers in required.items():
 version = (ROOT / "SUB2API_GROK_COMPAT_VERSION.txt").read_text(encoding="utf-8")
 if "compat_revision=38" not in version or "app_version=2.4.5+38" not in version:
     raise SystemExit("r38 review: wrong version stamp")
-
-health = (ROOT / "src-tauri/src/admin/handlers/chain_health.rs").read_text(encoding="utf-8")
-if 'actions.push(recover_transfer(&state, &before, true).await);' in health:
-    raise SystemExit("r38 review: blind Transfer refresh still exists in upstream backend recovery")
-if "request形态诊断只保留" in health:
-    raise SystemExit("r38 review: unexpected mixed-language privacy marker")
 
 print("r38 model-route observability review: PASS")

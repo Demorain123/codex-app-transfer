@@ -22,6 +22,18 @@ function Invoke-Checked {
     }
 }
 
+function Download-Once {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$OutFile,
+        [Parameter(Mandatory)][string]$Label
+    )
+    if (-not (Test-Path -LiteralPath $OutFile -PathType Leaf)) {
+        Write-Host "Downloading $Label to V: (one-time)..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $repoRoot.StartsWith('V:\', [StringComparison]::OrdinalIgnoreCase)) {
     throw "r39 local package policy requires the repository on physical V:. Current: $repoRoot"
@@ -38,7 +50,8 @@ $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:RUSTUP_TOOLCHAIN = 'stable'
 $bootstrapDir = Join-Path $cacheRoot 'bootstrap'
-foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP, $bootstrapDir)) {
+$toolsRoot = Join-Path $cacheRoot 'tools'
+foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP, $bootstrapDir, $toolsRoot)) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
@@ -49,18 +62,67 @@ $localRustup = Join-Path $localCargoBin 'rustup.exe'
 $rustupInit = Join-Path $bootstrapDir 'rustup-init-x86_64.exe'
 
 if (-not (Test-Path -LiteralPath $localRustup -PathType Leaf)) {
-    if (-not (Test-Path -LiteralPath $rustupInit -PathType Leaf)) {
-        Write-Host "Downloading official rustup-init.exe to V: (one-time)..." -ForegroundColor Yellow
-        Invoke-WebRequest -Uri 'https://win.rustup.rs/x86_64' -OutFile $rustupInit -UseBasicParsing
-    }
+    Download-Once 'https://win.rustup.rs/x86_64' $rustupInit 'official rustup-init.exe'
     Write-Host "Bootstrapping V:-local rustup proxies (one-time)..." -ForegroundColor Yellow
-    Invoke-Checked $rustupInit '-y' '--no-modify-path' '--profile' 'minimal' '--default-toolchain' 'none' '--default-host' $target
+    $env:RUSTUP_INIT_SKIP_PATH_CHECK = 'yes'
+    try {
+        Invoke-Checked $rustupInit '-y' '--no-modify-path' '--profile' 'minimal' '--default-toolchain' 'none' '--default-host' $target
+    } finally {
+        Remove-Item Env:RUSTUP_INIT_SKIP_PATH_CHECK -ErrorAction SilentlyContinue
+    }
 }
 if (-not (Test-Path -LiteralPath $localRustup -PathType Leaf)) {
     throw "V:-local rustup bootstrap did not create $localRustup"
 }
 $env:PATH = $localCargoBin + ';' + $env:PATH
 Invoke-Checked $localRustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
+
+# Packaging must use the exact same V:-resident native toolchain as the fast gate.
+$cmakeVersion = '4.4.2'
+$ninjaVersion = '1.13.2'
+$nasmVersion = '3.02'
+
+$cmakeZip = Join-Path $bootstrapDir "cmake-$cmakeVersion-windows-x86_64.zip"
+$cmakeRoot = Join-Path $toolsRoot "cmake-$cmakeVersion-windows-x86_64"
+$cmakeExe = Join-Path $cmakeRoot 'bin\cmake.exe'
+if (-not (Test-Path -LiteralPath $cmakeExe -PathType Leaf)) {
+    Download-Once "https://github.com/Kitware/CMake/releases/download/v$cmakeVersion/cmake-$cmakeVersion-windows-x86_64.zip" $cmakeZip "CMake $cmakeVersion portable ZIP"
+    Expand-Archive -LiteralPath $cmakeZip -DestinationPath $toolsRoot -Force
+}
+if (-not (Test-Path -LiteralPath $cmakeExe -PathType Leaf)) {
+    throw "Portable CMake bootstrap failed: $cmakeExe"
+}
+
+$ninjaZip = Join-Path $bootstrapDir "ninja-$ninjaVersion-win.zip"
+$ninjaRoot = Join-Path $toolsRoot "ninja-$ninjaVersion-win"
+$ninjaExe = Join-Path $ninjaRoot 'ninja.exe'
+if (-not (Test-Path -LiteralPath $ninjaExe -PathType Leaf)) {
+    Download-Once "https://github.com/ninja-build/ninja/releases/download/v$ninjaVersion/ninja-win.zip" $ninjaZip "Ninja $ninjaVersion portable ZIP"
+    New-Item -ItemType Directory -Force -Path $ninjaRoot | Out-Null
+    Expand-Archive -LiteralPath $ninjaZip -DestinationPath $ninjaRoot -Force
+}
+if (-not (Test-Path -LiteralPath $ninjaExe -PathType Leaf)) {
+    throw "Portable Ninja bootstrap failed: $ninjaExe"
+}
+
+$nasmZip = Join-Path $bootstrapDir "nasm-$nasmVersion-win64.zip"
+$nasmRoot = Join-Path $toolsRoot "nasm-$nasmVersion-win64"
+$nasmExe = Get-ChildItem -LiteralPath $nasmRoot -Filter 'nasm.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $nasmExe) {
+    Download-Once "https://www.nasm.us/pub/nasm/releasebuilds/$nasmVersion/win64/nasm-$nasmVersion-win64.zip" $nasmZip "NASM $nasmVersion portable ZIP"
+    New-Item -ItemType Directory -Force -Path $nasmRoot | Out-Null
+    Expand-Archive -LiteralPath $nasmZip -DestinationPath $nasmRoot -Force
+    $nasmExe = Get-ChildItem -LiteralPath $nasmRoot -Filter 'nasm.exe' -File -Recurse | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $nasmExe -or -not (Test-Path -LiteralPath $nasmExe -PathType Leaf)) {
+    throw "Portable NASM bootstrap failed under $nasmRoot"
+}
+
+$env:PATH = $localCargoBin + ';' + (Split-Path -Parent $cmakeExe) + ';' + (Split-Path -Parent $ninjaExe) + ';' + (Split-Path -Parent $nasmExe) + ';' + $env:PATH
+$env:CMAKE_GENERATOR = 'Ninja'
+$env:ASM_NASM = $nasmExe
+Remove-Item Env:CMAKE_GENERATOR_PLATFORM -ErrorAction SilentlyContinue
+Remove-Item Env:CMAKE_GENERATOR_TOOLSET -ErrorAction SilentlyContinue
 
 if (-not $SkipFastGate) {
     Write-Host "`nRunning local r39 fast gate before packaging..." -ForegroundColor Green
@@ -70,8 +132,6 @@ if (-not $SkipFastGate) {
     }
 } else {
     Invoke-Checked python 'scripts/apply_r39_unified.py'
-    # Match the release workflow's generated-source normalization even when the
-    # caller deliberately skips the heavier fast gate.
     Invoke-Checked cargo 'fmt' '--all'
     Invoke-Checked git 'diff' '--check'
     Invoke-Checked cargo 'fmt' '--all' '--' '--check'
@@ -148,6 +208,9 @@ $manifest = [ordered]@{
     cargoTargetDir = $env:CARGO_TARGET_DIR
     rustupHome = $env:RUSTUP_HOME
     cargoHome = $env:CARGO_HOME
+    cmake = $cmakeExe
+    ninja = $ninjaExe
+    nasm = $nasmExe
     bundles = $bundles
     files = @($copied | ForEach-Object {
         $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_

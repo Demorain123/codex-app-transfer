@@ -13,6 +13,7 @@ chain = CHAIN.read_text(encoding="utf-8")
 
 required_proxy = [
     "CAS-R39-PROXY-OWNER-THREAD",
+    "CAS-R39-OWNER-THREAD-STATE-GUARD",
     "cas-proxy-owner-",
     "new_current_thread()",
     "owner_thread_joined",
@@ -21,6 +22,8 @@ required_proxy = [
     "server_future_dropped",
     "owner_runtime_shutdown_complete",
     "owner_thread_exit",
+    "finished_owner_generation_detected",
+    "owner.is_finished()",
     "port_release_verified",
     "listener_residue_detected",
     "CAS-R39-PROXY-OWNER-THREAD-TESTS",

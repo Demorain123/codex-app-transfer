@@ -36,15 +36,18 @@ if (-not $repoRoot.StartsWith('V:\', [StringComparison]::OrdinalIgnoreCase)) {
 # CAS-R39-V-DRIVE-LOCAL-BUILD
 $cacheRoot = 'V:\Codex-App-Transfer-DevCache'
 $env:CARGO_HOME = Join-Path $cacheRoot 'cargo-home'
+$env:RUSTUP_HOME = Join-Path $cacheRoot 'rustup-home'
 $env:CARGO_TARGET_DIR = Join-Path $cacheRoot 'target\r39'
 $env:npm_config_cache = Join-Path $cacheRoot 'npm-cache'
 $env:NPM_CONFIG_CACHE = $env:npm_config_cache
 $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:CODEX_APP_TRANSFER_LOCAL_BUILD = 'r39'
+$env:RUSTUP_TOOLCHAIN = 'stable'
 
 foreach ($dir in @(
     $env:CARGO_HOME,
+    $env:RUSTUP_HOME,
     $env:CARGO_TARGET_DIR,
     $env:npm_config_cache,
     $env:TEMP
@@ -61,6 +64,7 @@ $target = 'x86_64-pc-windows-msvc'
 Write-Host 'Codex App Transfer r39 - LOCAL FAST gate' -ForegroundColor Green
 Write-Host "Repo         : $repoRoot"
 Write-Host "Cargo home   : $env:CARGO_HOME"
+Write-Host "Rustup home  : $env:RUSTUP_HOME"
 Write-Host "Cargo target : $env:CARGO_TARGET_DIR"
 Write-Host "npm cache    : $env:npm_config_cache"
 Write-Host "TEMP/TMP     : $env:TEMP"
@@ -68,12 +72,29 @@ Write-Host 'Policy       : no automatic port switching; fixed-port lifecycle reg
 
 Require-Command git
 Require-Command python
-Require-Command cargo
-Require-Command rustc
 Require-Command rustup
 if ($Frontend) {
     Require-Command node
     Require-Command npm
+}
+
+# libsqlite3-sys 0.38.x uses cfg_select!, which is stable from Rust 1.95.
+# Mirror GitHub Actions' `dtolnay/rust-toolchain@stable`, but install/cache the
+# toolchain under V: so local iteration neither depends on an older global
+# toolchain nor consumes C: for Rust toolchains.
+Write-Host "`n[0/5] Ensure current stable Rust toolchain on V:" -ForegroundColor Green
+Invoke-Checked rustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
+$rustcVersion = (& rustup run stable rustc --version).Trim()
+$cargoVersion = (& rustup run stable cargo --version).Trim()
+Write-Host "Rust          : $rustcVersion"
+Write-Host "Cargo         : $cargoVersion"
+if ($rustcVersion -notmatch '^rustc\s+(\d+)\.(\d+)\.(\d+)') {
+    throw "Unable to parse rustc version: $rustcVersion"
+}
+$rustMajor = [int]$Matches[1]
+$rustMinor = [int]$Matches[2]
+if ($rustMajor -lt 1 -or ($rustMajor -eq 1 -and $rustMinor -lt 95)) {
+    throw "Rust 1.95+ is required by the resolved dependency set; active stable is $rustcVersion"
 }
 
 Write-Host "`n[1/5] Materialize r39 overlays" -ForegroundColor Green
@@ -118,4 +139,4 @@ $versionPath = Join-Path $repoRoot 'SUB2API_GROK_COMPAT_VERSION.txt'
 $version = if (Test-Path $versionPath) { Get-Content $versionPath -Raw -Encoding UTF8 } else { '<missing>' }
 Write-Host "`nLOCAL FAST PASS" -ForegroundColor Green
 Write-Host $version.Trim()
-Write-Host 'All project build/cache/temp outputs for this run are rooted on V:.' -ForegroundColor Green
+Write-Host 'All project build/cache/temp/toolchain outputs for this run are rooted on V:.' -ForegroundColor Green

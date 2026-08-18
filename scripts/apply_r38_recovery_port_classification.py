@@ -9,31 +9,32 @@ ZH = ROOT / "frontend/src/i18n/zh.ts"
 EN = ROOT / "frontend/src/i18n/en.ts"
 MARKER = "CAS-R38-RECOVERY-PORT-CLASSIFICATION"
 
+
+def replace_once(body: str, old: str, new: str, label: str) -> str:
+    count = body.count(old)
+    if count != 1:
+        raise SystemExit(f"r38 recovery classification: {label} anchor count={count}, expected 1")
+    return body.replace(old, new, 1)
+
+
 body = CHAIN.read_text(encoding="utf-8")
 if MARKER not in body:
-    # Transfer health: distinguish truly stopped from live foreign owner and dead/stale owner.
-    old = '''    let transfer = if proxy_status.running {
-        let port = proxy_status
-            .addr
-            .as_deref()
-            .and_then(|value| value.rsplit(':').next())
-            .unwrap_or("unknown");
-        HealthLayer::new("ok", "transfer_listening", "Transfer 本地转发器正在监听")
-            .fact(format!("listener={port}"))
-            .fact(format!(
-                "requests={} success={} failed={}",
-                stats.total, stats.success, stats.failed
-            ))
-            .fact(format!(
-                "active_provider={}",
-                proxy_status.active_provider.as_deref().unwrap_or("none")
-            ))
-    } else {
-        HealthLayer::new("error", "transfer_stopped", "Transfer 本地转发器未运行")
-            .fact(format!("requests={} failed={}", stats.total, stats.failed))
-    };
-'''
-    new = '''    // CAS-R38-RECOVERY-PORT-CLASSIFICATION
+    # The r37 chain-health composer may normalize whitespace around this section, so replace
+    # the full transfer layer by semantic boundaries instead of a huge whitespace-sensitive literal.
+    start_token = "    let proxy_status = state.proxy_manager.status();\n"
+    end_token = "\n    let gateway = match provider.as_ref() {\n"
+    start = body.find(start_token)
+    if start < 0:
+        raise SystemExit("r38 recovery classification: proxy_status boundary missing")
+    end = body.find(end_token, start)
+    if end < 0:
+        raise SystemExit("r38 recovery classification: gateway boundary missing")
+    old_segment = body[start:end]
+    if "let transfer = if proxy_status.running" not in old_segment:
+        raise SystemExit("r38 recovery classification: transfer layer semantic anchor missing")
+    new_segment = '''    let proxy_status = state.proxy_manager.status();
+    let stats = proxy_telemetry().stats.snapshot();
+    // CAS-R38-RECOVERY-PORT-CLASSIFICATION
     let configured_transfer_port = super::proxy::read_proxy_port(&cfg);
     let transfer = if proxy_status.running {
         let port = proxy_status
@@ -94,16 +95,16 @@ if MARKER not in body:
         }
     };
 '''
-    if old not in body:
-        raise SystemExit("r38 recovery classification: transfer layer anchor missing")
-    body = body.replace(old, new, 1)
+    body = body[:start] + new_segment + body[end:]
 
-    old = '''fn recovery_classification(snapshot: &ChainHealthSnapshot) -> &'static str {
+    body = replace_once(
+        body,
+        '''fn recovery_classification(snapshot: &ChainHealthSnapshot) -> &'static str {
     if snapshot.transfer.code == "transfer_stopped" {
         return "transfer_stopped";
     }
-'''
-    new = '''fn recovery_classification(snapshot: &ChainHealthSnapshot) -> &'static str {
+''',
+        '''fn recovery_classification(snapshot: &ChainHealthSnapshot) -> &'static str {
     if snapshot.transfer.code == "transfer_port_occupied_live" {
         return "transfer_port_occupied_live";
     }
@@ -113,21 +114,22 @@ if MARKER not in body:
     if snapshot.transfer.code == "transfer_stopped" {
         return "transfer_stopped";
     }
-'''
-    if old not in body:
-        raise SystemExit("r38 recovery classification: recovery_classification anchor missing")
-    body = body.replace(old, new, 1)
+''',
+        "recovery_classification",
+    )
 
-    old = '''    match classification.as_str() {
+    body = replace_once(
+        body,
+        '''    match classification.as_str() {
         "transfer_stopped" => {
             actions.push(recover_transfer(&state, &before, false).await);
         }
-'''
-    new = '''    match classification.as_str() {
+''',
+        '''    match classification.as_str() {
         "transfer_port_occupied_live" => {
             actions.push(RecoveryAction::skipped(
                 "preserve_live_port_owner",
-                "18089/配置端口由仍存活的其他进程占用；恢复器不会自动杀进程、改端口或用 SO_REUSEADDR 绕过所有权冲突",
+                "配置端口由仍存活的其他进程占用；恢复器不会自动杀进程、改端口或用 SO_REUSEADDR 绕过所有权冲突",
             ));
         }
         "transfer_port_stale_owner" => {
@@ -139,18 +141,18 @@ if MARKER not in body:
         "transfer_stopped" => {
             actions.push(recover_transfer(&state, &before, false).await);
         }
-'''
-    if old not in body:
-        raise SystemExit("r38 recovery classification: match anchor missing")
-    body = body.replace(old, new, 1)
+''',
+        "recovery match",
+    )
 
-    # r38 stop() is release-verified; use it rather than blind stop_silent + 150ms sleep.
-    old = '''    if force_refresh && state.proxy_manager.status().running {
+    body = replace_once(
+        body,
+        '''    if force_refresh && state.proxy_manager.status().running {
         state.proxy_manager.stop_silent();
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
-'''
-    new = '''    if force_refresh && state.proxy_manager.status().running {
+''',
+        '''    if force_refresh && state.proxy_manager.status().running {
         if let Err(error) = state.proxy_manager.stop() {
             return RecoveryAction::failed(
                 "stop_transfer_verified",
@@ -158,18 +160,18 @@ if MARKER not in body:
             );
         }
     }
-'''
-    if old not in body:
-        raise SystemExit("r38 recovery classification: blind recovery stop anchor missing")
-    body = body.replace(old, new, 1)
+''',
+        "verified recovery stop",
+    )
 
-    # Recommendations make owner classification visible without forcing user into logs.
-    old = '''    match transfer.code.as_str() {
+    body = replace_once(
+        body,
+        '''    match transfer.code.as_str() {
         "transfer_stopped" => out.push("先启动 Transfer 转发器，再测试 Codex 新会话。".into()),
         _ => {}
     }
-'''
-    new = '''    match transfer.code.as_str() {
+''',
+        '''    match transfer.code.as_str() {
         "transfer_port_occupied_live" => out.push(
             "配置端口由仍存活进程占用：展开 Transfer 明细查看 owner PID/进程；不要自动杀进程或换端口掩盖根因。".into(),
         ),
@@ -179,34 +181,35 @@ if MARKER not in body:
         "transfer_stopped" => out.push("先启动 Transfer 转发器，再测试 Codex 新会话。".into()),
         _ => {}
     }
-'''
-    if old not in body:
-        raise SystemExit("r38 recovery classification: recommendation anchor missing")
-    body = body.replace(old, new, 1)
+''',
+        "transfer recommendations",
+    )
     CHAIN.write_text(body, encoding="utf-8")
 
-# Frontend: local in-flight guard already exists; make progress explicit instead of leaving the label unchanged.
+# Frontend: the existing boolean is already a duplicate-click lock; make the stage visible.
 body = PAGE.read_text(encoding="utf-8")
 if "chainHealth.recovering" not in body:
-    old = '''            {{ t('chainHealth.recover') }}
-'''
-    new = '''            {{ chainRecovering ? t('chainHealth.recovering') : t('chainHealth.recover') }}
-'''
-    if old not in body:
-        raise SystemExit("r38 recovery classification: recovery label anchor missing")
-    body = body.replace(old, new, 1)
+    body = replace_once(
+        body,
+        "            {{ t('chainHealth.recover') }}\n",
+        "            {{ chainRecovering ? t('chainHealth.recovering') : t('chainHealth.recover') }}\n",
+        "recovery button label",
+    )
     PAGE.write_text(body, encoding="utf-8")
 
-for path, key, value in (
-    (ZH, '"chainHealth.recover": \'尝试恢复\',\n', '"chainHealth.recovering": \'恢复处理中…\',\n'),
-    (EN, '"chainHealth.recover": \'Try recovery\',\n', '"chainHealth.recovering": \'Recovery in progress…\',\n'),
-):
+for path, english in ((ZH, False), (EN, True)):
     text = path.read_text(encoding="utf-8")
-    if "chainHealth.recovering" not in text:
-        if key not in text:
-            raise SystemExit(f"r38 recovery classification: i18n anchor missing in {path.name}")
-        text = text.replace(key, key + "  " + value, 1)
-        path.write_text(text, encoding="utf-8")
+    if "chainHealth.recovering" in text:
+        continue
+    old = '  "chainHealth.recover": \'Try recovery\',\n' if english else '  "chainHealth.recover": \'尝试恢复\',\n'
+    new = old + (
+        '  "chainHealth.recovering": \'Recovery in progress…\',\n'
+        if english
+        else '  "chainHealth.recovering": \'恢复处理中…\',\n'
+    )
+    if old not in text:
+        raise SystemExit(f"r38 recovery classification: i18n anchor missing in {path.name}")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 checks = {
     CHAIN: [

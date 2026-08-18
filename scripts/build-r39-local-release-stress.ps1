@@ -95,7 +95,48 @@ if (-not (Test-Path -LiteralPath $cargoExe -PathType Leaf)) {
 
 if (-not $SkipStress) {
     Write-Host "`n[release 3/5] r39 same-port owner-thread stress tests (100 generations, Release CRT)" -ForegroundColor Green
-    Invoke-Checked $cargoExe 'test' '-p' 'codex-app-transfer' 'proxy_lifecycle_r39' '--release' '--target' $target '--' '--nocapture'
+    Write-Host 'The release test target must remain a console subsystem so libtest output is observable.' -ForegroundColor DarkGray
+
+    $stressLog = Join-Path $env:TEMP 'r39-release-stress-last.log'
+    Remove-Item -LiteralPath $stressLog -Force -ErrorAction SilentlyContinue
+    $stressArgs = @(
+        'test',
+        '-p', 'codex-app-transfer',
+        'proxy_lifecycle_r39',
+        '--release',
+        '--target', $target,
+        '--',
+        '--nocapture',
+        '--test-threads=1'
+    )
+    Write-Host "`n> $cargoExe $($stressArgs -join ' ')" -ForegroundColor Cyan
+    & $cargoExe @stressArgs 2>&1 | Tee-Object -FilePath $stressLog
+    $stressExit = $LASTEXITCODE
+    if ($stressExit -ne 0) {
+        throw "Release lifecycle stress failed ($stressExit). Transcript: $stressLog"
+    }
+
+    if (-not (Test-Path -LiteralPath $stressLog -PathType Leaf)) {
+        throw "Release lifecycle stress produced no transcript: $stressLog"
+    }
+    $stressText = Get-Content -LiteralPath $stressLog -Raw -Encoding UTF8
+    $expectedTests = @(
+        'proxy_lifecycle_r39_owner_thread_join_rebind_100_generations',
+        'proxy_lifecycle_r39_owner_thread_is_the_teardown_barrier'
+    )
+    foreach ($expected in $expectedTests) {
+        if ($stressText -notmatch [regex]::Escape($expected)) {
+            throw "Release lifecycle stress did not visibly execute expected test: $expected. Transcript: $stressLog"
+        }
+    }
+    if ($stressText -notmatch '(?m)^running\s+2\s+tests\s*$') {
+        throw "Release lifecycle stress did not report 'running 2 tests'. Transcript: $stressLog"
+    }
+    if ($stressText -notmatch 'test result:\s+ok\.\s+2 passed;\s+0 failed;') {
+        throw "Release lifecycle stress did not prove 2 passed / 0 failed. Transcript: $stressLog"
+    }
+    Write-Host "Release lifecycle proof: PASS (2/2 tests visible, 100-generation test included)" -ForegroundColor Green
+    Write-Host "Stress transcript : $stressLog" -ForegroundColor DarkGray
 } else {
     Write-Host "`n[release 3/5] Stress tests skipped by request" -ForegroundColor Yellow
 }
@@ -108,4 +149,4 @@ if (-not $SkipCargoCheck) {
 }
 
 Write-Host "`nR39 RELEASE-CRT LIFECYCLE VALIDATION PASS" -ForegroundColor Green
-Write-Host 'If the 100-generation test passed, the next step is to fold the proven VsDevCmd/Bindgen setup and Release-CRT stress policy into the normal fast/package gates.' -ForegroundColor Green
+Write-Host 'The pass is accepted only after observable libtest proof confirms both r39 lifecycle tests ran and passed.' -ForegroundColor Green

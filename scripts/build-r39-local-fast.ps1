@@ -79,7 +79,12 @@ if ($Frontend) {
 Write-Host "`n[1/5] Materialize r39 overlays" -ForegroundColor Green
 Invoke-Checked python 'scripts/apply_r39_unified.py'
 
-Write-Host "`n[2/5] Rust formatting gate" -ForegroundColor Green
+# The release workflow intentionally normalizes generated Rust after replay because
+# several historical overlay generators predate current rustfmt output. Local builds
+# must mirror that exact policy instead of failing on formatting-only diffs.
+Write-Host "`n[2/5] Normalize generated Rust + formatting/whitespace gate" -ForegroundColor Green
+Invoke-Checked cargo 'fmt' '--all'
+Invoke-Checked git 'diff' '--check'
 Invoke-Checked cargo 'fmt' '--all' '--' '--check'
 
 if (-not $SkipStress) {

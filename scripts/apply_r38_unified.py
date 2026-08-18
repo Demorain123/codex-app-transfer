@@ -32,10 +32,17 @@ run("scripts/apply_r38_i18n_prep.py")
 run("scripts/apply_r38_proxy_lifecycle_hardening.py")
 run("scripts/review_r38_proxy_lifecycle_hardening.py")
 
-# Slice B: Codex Desktop Usage injector compatibility + user-visible diagnostics.
+# Slice B: native Windows owner attribution and safe recovery classification.
+run("scripts/apply_r38_windows_port_owner.py")
+run("scripts/apply_r38_recovery_port_classification.py")
+
+# Slice C: Codex Desktop Usage injector compatibility + user-visible diagnostics.
 run("scripts/apply_r38_codex_usage_injector_core.py")
 run("scripts/apply_r38_codex_usage_status_ui.py")
 run("scripts/review_r38_codex_usage_injector_compat.py")
+
+# Slice D: lifecycle regression/stress tests materialized into proxy_runner.rs.
+run("scripts/apply_r38_proxy_stress_tests.py")
 
 required = {
     "src-tauri/src/proxy_runner.rs": [
@@ -44,6 +51,19 @@ required = {
         "port_release_verified",
         "duplicate_start_rejected",
         "bootstrap_cancelled_by_stop",
+        "CAS-R38-WINDOWS-TCP-OWNER",
+        "CAS-R38-PROXY-STRESS-TESTS",
+    ],
+    "src-tauri/src/windows_tcp_owner.rs": [
+        "CAS-R38-WINDOWS-TCP-OWNER",
+        "GetExtendedTcpTable",
+        "TCP_TABLE_OWNER_PID_LISTENER",
+    ],
+    "src-tauri/src/admin/handlers/chain_health.rs": [
+        "CAS-R38-RECOVERY-PORT-CLASSIFICATION",
+        "transfer_port_occupied_live",
+        "transfer_port_stale_owner",
+        "stop_transfer_verified",
     ],
     "src-tauri/src/codex_quota_injector.rs": [
         "CAS-R38-CODEX-USAGE-INJECTOR-COMPAT",
@@ -57,13 +77,16 @@ required = {
         "CAS-R38-CODEX-USAGE-STATUS-UI",
         "codexQuotaStatusDescription",
     ],
+    "frontend/src/pages/ProxyPage.vue": ["chainHealth.recovering"],
     "frontend/src/i18n/zh.ts": [
         "Sub2API Grok Compat r38 · v2.4.5+38",
         "settings.codexQuotaStatusHealthy",
+        "chainHealth.recovering",
     ],
     "frontend/src/i18n/en.ts": [
         "Sub2API Grok Compat r38 · v2.4.5+38",
         "settings.codexQuotaStatusHealthy",
+        "chainHealth.recovering",
     ],
 }
 for rel, markers in required.items():
@@ -76,4 +99,4 @@ version = VERSION.read_text(encoding="utf-8")
 if "compat_revision=38" not in version or "app_version=2.4.5+38" not in version:
     raise SystemExit("r38 visible/package version stamp missing after composition")
 
-print("r38 unified composition: COMPLETE (r37 preserved + proxy lifecycle + Codex Usage injector hardening)")
+print("r38 unified composition: COMPLETE (r37 preserved + lifecycle + native owner/recovery + Usage compatibility + stress tests)")

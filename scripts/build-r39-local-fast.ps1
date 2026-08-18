@@ -52,6 +52,7 @@ $env:RUSTUP_HOME = Join-Path $cacheRoot 'rustup-home'
 $env:CARGO_TARGET_DIR = Join-Path $cacheRoot 'target\r39'
 $env:npm_config_cache = Join-Path $cacheRoot 'npm-cache'
 $env:NPM_CONFIG_CACHE = $env:npm_config_cache
+$env:PIP_CACHE_DIR = Join-Path $cacheRoot 'pip-cache'
 $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:CODEX_APP_TRANSFER_LOCAL_BUILD = 'r39'
@@ -64,6 +65,7 @@ foreach ($dir in @(
     $env:RUSTUP_HOME,
     $env:CARGO_TARGET_DIR,
     $env:npm_config_cache,
+    $env:PIP_CACHE_DIR,
     $env:TEMP,
     $bootstrapDir,
     $toolsRoot
@@ -83,6 +85,7 @@ Write-Host "Cargo home   : $env:CARGO_HOME"
 Write-Host "Rustup home  : $env:RUSTUP_HOME"
 Write-Host "Cargo target : $env:CARGO_TARGET_DIR"
 Write-Host "npm cache    : $env:npm_config_cache"
+Write-Host "pip cache    : $env:PIP_CACHE_DIR"
 Write-Host "TEMP/TMP     : $env:TEMP"
 Write-Host 'Policy       : no automatic port switching; fixed-port lifecycle regression'
 
@@ -189,6 +192,28 @@ Write-Host "CMake        : $cmakeExe"
 Write-Host "Ninja        : $ninjaExe"
 Write-Host "NASM         : $nasmExe"
 Write-Host "CMake gen.   : $env:CMAKE_GENERATOR"
+
+# boring-sys2 always generates its FFI surface with rust-bindgen. Bindgen needs
+# a loadable libclang, but downloading the full ~800 MB LLVM developer archive
+# just for libclang is unnecessary. Use the PyPI libclang wheel, which bundles a
+# statically-linked Windows libclang shared library, and install it into V: only.
+Write-Host "`n[0c/5] Ensure V:-local libclang for bindgen:" -ForegroundColor Green
+$libclangVersion = '18.1.1'
+$libclangRoot = Join-Path $toolsRoot "libclang-$libclangVersion"
+$libclangDll = Get-ChildItem -LiteralPath $libclangRoot -Filter 'libclang.dll' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $libclangDll) {
+    New-Item -ItemType Directory -Force -Path $libclangRoot | Out-Null
+    Invoke-Checked python '-m' 'pip' 'install' '--disable-pip-version-check' '--no-deps' '--target' $libclangRoot "libclang==$libclangVersion"
+    $libclangDll = Get-ChildItem -LiteralPath $libclangRoot -Filter 'libclang.dll' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $libclangDll -or -not (Test-Path -LiteralPath $libclangDll -PathType Leaf)) {
+    throw "V:-local libclang bootstrap failed under $libclangRoot"
+}
+$libclangBin = Split-Path -Parent $libclangDll
+$env:LIBCLANG_PATH = $libclangBin
+$env:PATH = $libclangBin + ';' + $env:PATH
+Write-Host "libclang     : $libclangDll"
+Write-Host "LIBCLANG_PATH: $env:LIBCLANG_PATH"
 
 Require-Command cargo
 Require-Command rustc

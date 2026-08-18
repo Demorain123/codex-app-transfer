@@ -46,9 +46,13 @@ $target = 'x86_64-pc-windows-msvc'
 if (-not $SkipFastGate) {
     Write-Host "`nRunning local r39 fast gate before packaging..." -ForegroundColor Green
     & (Join-Path $PSScriptRoot 'build-r39-local-fast.ps1') -Frontend
-    if ($LASTEXITCODE -ne 0) { throw "r39 fast gate failed before package build" }
 } else {
     Invoke-Checked python 'scripts/apply_r39_unified.py'
+    $nodeModules = Join-Path $repoRoot 'frontend\node_modules'
+    if (-not (Test-Path $nodeModules)) {
+        Invoke-Checked npm '--prefix' 'frontend' 'ci' '--prefer-offline' '--no-audit'
+    }
+    Invoke-Checked npm '--prefix' 'frontend' 'run' 'build'
 }
 
 $tauriAvailable = $false

@@ -25,10 +25,18 @@ def run(rel: str) -> None:
 # outer shell: proxy ownership/teardown, bind-busy policy, stronger same-port stress.
 run("scripts/apply_r38_unified.py")
 
+# r38 replaces proxy_runner's lifecycle prefix wholesale while preserving the r25 MCP
+# auth behavior. Restore its idempotency marker before the revision stamper replays r25,
+# otherwise the already-upgraded import is mistaken for an old-tree anchor.
+run("scripts/apply_r39_r25_replay_marker_prep.py")
+
 REVISION.write_text("39\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 
 run("scripts/apply_r39_proxy_owner_thread.py")
+# r39 also replaces that same prefix; preserve the inherited r25 marker for future
+# revision replays/r40 composition as well.
+run("scripts/apply_r39_r25_replay_marker_prep.py")
 run("scripts/apply_r39_owner_thread_state_guard.py")
 run("scripts/apply_r39_bind_busy_policy.py")
 run("scripts/apply_r39_proxy_owner_thread_tests.py")
@@ -36,6 +44,7 @@ run("scripts/review_r39_proxy_owner_thread.py")
 
 required = {
     "src-tauri/src/proxy_runner.rs": [
+        "CAS-APPS-MCP-AUTH-R25-WIRE",
         "CAS-R39-PROXY-OWNER-THREAD",
         "CAS-R39-OWNER-THREAD-STATE-GUARD",
         "cas-proxy-owner-",
@@ -97,5 +106,5 @@ if "compat_revision=39" not in version or "app_version=2.4.5+39" not in version:
 
 print(
     "r39 unified composition: COMPLETE "
-    "(r38 preserved + single owner-thread proxy + dead-generation guard + non-retryable bind-busy + 100x same-port stress)"
+    "(r38 preserved + r25 replay-safe marker + single owner-thread proxy + dead-generation guard + non-retryable bind-busy + 100x same-port stress)"
 )

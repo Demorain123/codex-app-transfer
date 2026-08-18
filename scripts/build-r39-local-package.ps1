@@ -48,6 +48,11 @@ if (-not $SkipFastGate) {
     & (Join-Path $PSScriptRoot 'build-r39-local-fast.ps1') -Frontend
 } else {
     Invoke-Checked python 'scripts/apply_r39_unified.py'
+    # Match the release workflow's generated-source normalization even when the
+    # caller deliberately skips the heavier fast gate.
+    Invoke-Checked cargo 'fmt' '--all'
+    Invoke-Checked git 'diff' '--check'
+    Invoke-Checked cargo 'fmt' '--all' '--' '--check'
     $nodeModules = Join-Path $repoRoot 'frontend\node_modules'
     if (-not (Test-Path $nodeModules)) {
         Invoke-Checked npm '--prefix' 'frontend' 'ci' '--prefer-offline' '--no-audit'

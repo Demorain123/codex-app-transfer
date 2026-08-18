@@ -34,20 +34,42 @@ Write-Host 'Phase A: reuse the proven Bindgen/MSVC probe and materialize/format 
 # stages off here because BoringSSL Debug uses the Debug DLL CRT (/MDd), while
 # the Rust test executable is linked against the non-debug DLL CRT (/MD).
 #
-# A release-profile cargo build also executes src-tauri/build.rs. That build
-# script intentionally rejects the debug fallback frontend/dist placeholder, so
-# release validation must always build the real frontend first. Do this through
-# the existing fast gate so node_modules and the V:-resident npm cache are reused.
+# Do NOT ask the fast gate to build the frontend here. On Windows/PowerShell an
+# unqualified `npm` can resolve through a shim/function before the native npm.cmd
+# launcher. Keep the probe focused on Rust/MSVC/Bindgen, then invoke npm.cmd by
+# its resolved application path below.
 $probeArgs = @{
     SkipStress = $true
     SkipCargoCheck = $true
-    Frontend = $true
 }
 
 $probe = Join-Path $PSScriptRoot 'build-r39-local-fast-bindgen-probe.ps1'
 & $probe @probeArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
+}
+
+Write-Host "`n[release 2b/5] Build real frontend with native npm.cmd" -ForegroundColor Green
+$npmCommand = Get-Command 'npm.cmd' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $npmCommand) {
+    throw 'npm.cmd was not found as a native application on PATH. Install/repair Node.js npm before release validation.'
+}
+$npmCmd = $npmCommand.Source
+Write-Host "npm.cmd      : $npmCmd"
+Invoke-Checked $npmCmd '--version'
+
+$frontendDir = Join-Path $repoRoot 'frontend'
+$nodeModules = Join-Path $frontendDir 'node_modules'
+Push-Location $frontendDir
+try {
+    if (-not (Test-Path -LiteralPath $nodeModules -PathType Container)) {
+        Invoke-Checked $npmCmd 'ci' '--prefer-offline' '--no-audit'
+    } else {
+        Write-Host 'Reusing existing frontend/node_modules; skipping npm ci.' -ForegroundColor DarkGray
+    }
+    Invoke-Checked $npmCmd 'run' 'build'
+} finally {
+    Pop-Location
 }
 
 # Fail before the expensive release Rust build if the frontend prerequisite was

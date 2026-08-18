@@ -37,22 +37,37 @@ $env:NPM_CONFIG_CACHE = $env:npm_config_cache
 $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:RUSTUP_TOOLCHAIN = 'stable'
-$env:PATH = (Join-Path $env:CARGO_HOME 'bin') + ';' + $env:PATH
-foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP)) {
+$bootstrapDir = Join-Path $cacheRoot 'bootstrap'
+foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP, $bootstrapDir)) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
 Set-Location $repoRoot
 $target = 'x86_64-pc-windows-msvc'
+$localCargoBin = Join-Path $env:CARGO_HOME 'bin'
+$localRustup = Join-Path $localCargoBin 'rustup.exe'
+$rustupInit = Join-Path $bootstrapDir 'rustup-init-x86_64.exe'
 
-# Keep packaging reproducible with the same current stable toolchain used by the
-# local fast gate and GitHub Actions. The V:-resident rustup home makes this a
-# one-time download in normal iteration rather than repeated C:-drive churn.
-Invoke-Checked rustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
+if (-not (Test-Path -LiteralPath $localRustup -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $rustupInit -PathType Leaf)) {
+        Write-Host "Downloading official rustup-init.exe to V: (one-time)..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri 'https://win.rustup.rs/x86_64' -OutFile $rustupInit -UseBasicParsing
+    }
+    Write-Host "Bootstrapping V:-local rustup proxies (one-time)..." -ForegroundColor Yellow
+    Invoke-Checked $rustupInit '-y' '--no-modify-path' '--profile' 'minimal' '--default-toolchain' 'none' '--default-host' $target
+}
+if (-not (Test-Path -LiteralPath $localRustup -PathType Leaf)) {
+    throw "V:-local rustup bootstrap did not create $localRustup"
+}
+$env:PATH = $localCargoBin + ';' + $env:PATH
+Invoke-Checked $localRustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
 
 if (-not $SkipFastGate) {
     Write-Host "`nRunning local r39 fast gate before packaging..." -ForegroundColor Green
     & (Join-Path $PSScriptRoot 'build-r39-local-fast.ps1') -Frontend
+    if ($LASTEXITCODE -ne 0) {
+        throw "r39 local fast gate failed with exit code $LASTEXITCODE"
+    }
 } else {
     Invoke-Checked python 'scripts/apply_r39_unified.py'
     # Match the release workflow's generated-source normalization even when the
@@ -132,6 +147,7 @@ $manifest = [ordered]@{
     builtAt = (Get-Date).ToString('o')
     cargoTargetDir = $env:CARGO_TARGET_DIR
     rustupHome = $env:RUSTUP_HOME
+    cargoHome = $env:CARGO_HOME
     bundles = $bundles
     files = @($copied | ForEach-Object {
         $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_

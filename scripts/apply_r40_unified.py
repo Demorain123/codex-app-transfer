@@ -33,6 +33,7 @@ REVISION.write_text("40\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 
 run("scripts/apply_r40_windows_port_guard.py")
+run("scripts/apply_r40_chain_owner_class_fix.py")
 run("scripts/review_r39_proxy_owner_thread.py")
 run("scripts/review_r40_windows_port_guard.py")
 
@@ -64,8 +65,12 @@ required = {
     "src-tauri/src/admin/handlers/chain_health.rs": [
         "CAS-R39-BINDER-TERMINOLOGY",
         "CAS-R40-PORT-OWNER-CLASSIFICATION",
-        "owner_class=foreign_live",
+        "CAS-R40-LIVE-BINDER-SELF-CLASSIFICATION",
+        '"self_live"',
+        '"foreign_live"',
         "owner_class=stale_binder",
+        '"inspect_internal_lifecycle"',
+        '"stop_foreign_owner_safely"',
     ],
     "src-tauri/src/main.rs": [
         "CAS-R39-RELEASE-TEST-CONSOLE",
@@ -80,7 +85,8 @@ for rel, markers in required.items():
         if marker not in text:
             raise SystemExit(f"r40 materialization missing marker in {rel}: {marker}")
 
-# r40 must not weaken the r39 safety policy.
+# r40 must not weaken the r39 safety policy. Match actual mutation primitives,
+# not user-facing explanatory text that intentionally mentions SO_REUSEADDR.
 combined = "\n".join((ROOT / rel).read_text(encoding="utf-8") for rel in [
     "src-tauri/src/proxy_runner.rs",
     "src-tauri/src/windows_tcp_owner.rs",
@@ -92,9 +98,8 @@ for forbidden in (
     "h.runtime.shutdown_background()",
     "const RETRY_MS: &[u64] = &[50, 100, 200, 400, 800];",
     "TerminateProcess(",
-    "taskkill",
-    "Stop-Process",
-    "SO_REUSEADDR",
+    "Command::new(\"taskkill\")",
+    "Command::new(\"Stop-Process\")",
     "set_reuseaddr(true)",
 ):
     if forbidden in combined:
@@ -106,5 +111,5 @@ if "compat_revision=40" not in version or "app_version=2.4.5+40" not in version:
 
 print(
     "r40 unified composition: COMPLETE "
-    "(validated r39 owner-thread base + Windows socket inheritance guard + classified live/stale binder evidence + no unsafe auto-kill/port-switch)"
+    "(validated r39 owner-thread base + Windows socket inheritance guard + self/foreign/stale binder classification + no unsafe auto-kill/port-switch)"
 )

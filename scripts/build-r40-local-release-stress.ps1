@@ -61,9 +61,28 @@ $target = 'x86_64-pc-windows-msvc'
 Write-Host 'Codex App Transfer r40 - Windows Port Guard release validation' -ForegroundColor Green
 Write-Host 'Base: validated r39 owner-thread lifecycle; r40 adds handle-inheritance hardening + owner classification.'
 
-# Reuse the already-proven V:-local Rust/MSVC/SDK/libclang setup. The r39 probe
-# materializes r39 first; r40 is intentionally an outer overlay applied immediately
-# afterwards. Environment variables set by the invoked script remain process-scoped.
+# Compose overlays only from a clean tracked tree. Refuse to erase pre-existing user
+# edits. The historical r39 environment probe below temporarily materializes r39 as
+# part of its build gate; after it has established the process-scoped native toolchain
+# environment, discard only those known probe-generated tracked mutations and return
+# to this exact r40 HEAD before materializing r40 once.
+$trackedDirtyBefore = @(& git status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0) {
+    throw 'Unable to inspect Git working-tree state before r40 validation.'
+}
+if ($trackedDirtyBefore.Count -gt 0) {
+    throw "r40 validation requires a clean tracked working tree before the environment probe. Preserve any edits you need, then run 'git reset --hard HEAD'."
+}
+$cleanHead = (& git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cleanHead)) {
+    throw 'Unable to resolve the clean r40 HEAD commit.'
+}
+Write-Host "Clean baseline : $cleanHead" -ForegroundColor DarkGray
+
+# Reuse the already-proven V:-local Rust/MSVC/SDK/libclang setup. This older probe
+# necessarily invokes the r39 fast gate, so it modifies tracked source files. The
+# environment variables it establishes are process-scoped and remain available after
+# the invoked script returns; the source mutations must not be replayed into r40.
 $probe = Join-Path $PSScriptRoot 'build-r39-local-fast-bindgen-probe.ps1'
 & $probe -SkipStress -SkipCargoCheck
 if ($LASTEXITCODE -ne 0) {
@@ -78,7 +97,22 @@ if (-not (Test-Path -LiteralPath $cargoExe -PathType Leaf)) {
     throw "V:-local cargo.exe was not found: $cargoExe"
 }
 
-Write-Host "`n[r40 1/6] Materialize r40 overlays" -ForegroundColor Green
+Write-Host "`n[r40 0b/6] Restore clean r40 source baseline after environment probe" -ForegroundColor Green
+Invoke-Checked git 'reset' '--hard' $cleanHead
+$headAfterReset = (& git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headAfterReset -ne $cleanHead) {
+    throw "r40 baseline restore did not return to expected HEAD $cleanHead (actual: $headAfterReset)"
+}
+$trackedDirtyAfter = @(& git status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0) {
+    throw 'Unable to verify Git working-tree state after r40 baseline restore.'
+}
+if ($trackedDirtyAfter.Count -gt 0) {
+    throw 'r40 baseline restore left tracked changes behind; refusing to compose on a partially materialized tree.'
+}
+Write-Host 'r40 source baseline: CLEAN (probe environment retained, probe source mutations discarded)' -ForegroundColor Green
+
+Write-Host "`n[r40 1/6] Materialize r40 overlays exactly once" -ForegroundColor Green
 Invoke-Checked python 'scripts/apply_r40_unified.py'
 
 Write-Host "`n[r40 2/6] Normalize generated Rust + formatting/whitespace gate" -ForegroundColor Green
@@ -155,4 +189,4 @@ if (-not $SkipCargoCheck) {
 $version = Get-Content (Join-Path $repoRoot 'SUB2API_GROK_COMPAT_VERSION.txt') -Raw -Encoding UTF8
 Write-Host "`nR40 WINDOWS PORT GUARD VALIDATION PASS" -ForegroundColor Green
 Write-Host $version.Trim()
-Write-Host 'Acceptance requires: r39 100-generation lifecycle 2/2 + r40 Windows port guard 2/2 + cargo check.' -ForegroundColor Green
+Write-Host 'Acceptance requires: clean single-pass composition + r39 100-generation lifecycle 2/2 + r40 Windows port guard 2/2 + cargo check.' -ForegroundColor Green

@@ -36,8 +36,11 @@ runner = require(
     "lifecycle_r39_rapid_same_port_restart_loop",
     "lifecycle_r39_external_listener_is_never_reused_or_killed",
 )
-if "shutdown_background()" in runner:
-    raise SystemExit("r39 review: proxy_runner still treats shutdown_background as lifecycle control")
+# The inherited r37/r38 header comment mentions shutdown_background() while
+# explaining the old design. Reject only an executable method call, not that
+# historical comment text.
+if ".shutdown_background(" in runner:
+    raise SystemExit("r39 review: proxy_runner still calls shutdown_background as lifecycle control")
 if "set_reuseaddr" in runner or "SO_REUSEADDR" in runner or "SO_LINGER" in runner:
     raise SystemExit("r39 review: forbidden socket-reuse/linger workaround detected in proxy_runner")
 

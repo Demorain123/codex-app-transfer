@@ -40,6 +40,9 @@ run("scripts/apply_r39_r25_replay_marker_prep.py")
 run("scripts/apply_r39_owner_thread_state_guard.py")
 run("scripts/apply_r39_bind_busy_policy.py")
 run("scripts/apply_r39_proxy_owner_thread_tests.py")
+# Release tests must remain attached to the console so libtest output is visible and
+# auditable. Production release binaries still use the Windows GUI subsystem.
+run("scripts/apply_r39_release_test_console.py")
 run("scripts/review_r39_proxy_owner_thread.py")
 
 required = {
@@ -56,6 +59,10 @@ required = {
         "listener_residue_detected",
         "CAS-R39-PROXY-OWNER-THREAD-TESTS",
         "proxy_lifecycle_r39_owner_thread_join_rebind_100_generations",
+    ],
+    "src-tauri/src/main.rs": [
+        "CAS-R39-RELEASE-TEST-CONSOLE",
+        'cfg_attr(all(not(debug_assertions), not(test)), windows_subsystem = "windows")',
     ],
     "src-tauri/src/admin/handlers/proxy.rs": [
         "CAS-R39-BIND-BUSY-NONRETRYABLE",
@@ -96,6 +103,10 @@ for forbidden in (
     if forbidden in proxy_prefix:
         raise SystemExit(f"r39 materialization retained forbidden lifecycle pattern: {forbidden}")
 
+main = (ROOT / "src-tauri/src/main.rs").read_text(encoding="utf-8")
+if '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]' in main:
+    raise SystemExit("r39 materialization retained release-test console-detaching cfg_attr")
+
 handler = (ROOT / "src-tauri/src/admin/handlers/proxy.rs").read_text(encoding="utf-8")
 if "const RETRY_MS: &[u64] = &[50, 100, 200, 400, 800];" in handler:
     raise SystemExit("r39 materialization retained blind address-in-use retry schedule")
@@ -106,5 +117,5 @@ if "compat_revision=39" not in version or "app_version=2.4.5+39" not in version:
 
 print(
     "r39 unified composition: COMPLETE "
-    "(r38 preserved + r25 replay-safe marker + single owner-thread proxy + dead-generation guard + non-retryable bind-busy + 100x same-port stress)"
+    "(r38 preserved + r25 replay-safe marker + single owner-thread proxy + dead-generation guard + non-retryable bind-busy + auditable release-console 100x same-port stress)"
 )

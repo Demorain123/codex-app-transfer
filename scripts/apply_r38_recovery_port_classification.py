@@ -197,15 +197,17 @@ if "chainHealth.recovering" not in body:
     )
     PAGE.write_text(body, encoding="utf-8")
 
+# r36's replayed i18n overlay intentionally writes the chain-health recovery keys with
+# single-quoted JS keys/values, so match that generated form rather than the base-file style.
 for path, english in ((ZH, False), (EN, True)):
     text = path.read_text(encoding="utf-8")
     if "chainHealth.recovering" in text:
         continue
-    old = '  "chainHealth.recover": \'Try recovery\',\n' if english else '  "chainHealth.recover": \'尝试恢复\',\n'
+    old = "  'chainHealth.recover': 'Try recovery',\n" if english else "  'chainHealth.recover': '尝试恢复',\n"
     new = old + (
-        '  "chainHealth.recovering": \'Recovery in progress…\',\n'
+        "  'chainHealth.recovering': 'Recovery in progress…',\n"
         if english
-        else '  "chainHealth.recovering": \'恢复处理中…\',\n'
+        else "  'chainHealth.recovering': '恢复处理中…',\n"
     )
     if old not in text:
         raise SystemExit(f"r38 recovery classification: i18n anchor missing in {path.name}")

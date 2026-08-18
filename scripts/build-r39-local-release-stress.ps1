@@ -33,12 +33,15 @@ Write-Host 'Phase A: reuse the proven Bindgen/MSVC probe and materialize/format 
 # supplies BINDGEN_EXTRA_CLANG_ARGS. Force the old debug-profile stress/check
 # stages off here because BoringSSL Debug uses the Debug DLL CRT (/MDd), while
 # the Rust test executable is linked against the non-debug DLL CRT (/MD).
+#
+# A release-profile cargo build also executes src-tauri/build.rs. That build
+# script intentionally rejects the debug fallback frontend/dist placeholder, so
+# release validation must always build the real frontend first. Do this through
+# the existing fast gate so node_modules and the V:-resident npm cache are reused.
 $probeArgs = @{
     SkipStress = $true
     SkipCargoCheck = $true
-}
-if ($Frontend) {
-    $probeArgs['Frontend'] = $true
+    Frontend = $true
 }
 
 $probe = Join-Path $PSScriptRoot 'build-r39-local-fast-bindgen-probe.ps1'
@@ -46,6 +49,19 @@ $probe = Join-Path $PSScriptRoot 'build-r39-local-fast-bindgen-probe.ps1'
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
+
+# Fail before the expensive release Rust build if the frontend prerequisite was
+# not actually produced. This mirrors the release guard in src-tauri/build.rs,
+# but catches the problem immediately instead of after native dependencies build.
+$frontendIndex = Join-Path $repoRoot 'frontend\dist\index.html'
+if (-not (Test-Path -LiteralPath $frontendIndex -PathType Leaf)) {
+    throw "Release frontend preflight failed: $frontendIndex was not generated."
+}
+$frontendIndexText = Get-Content -LiteralPath $frontendIndex -Raw -Encoding UTF8
+if ($frontendIndexText -match 'dev placeholder|Frontend not built|前端未构建') {
+    throw 'Release frontend preflight failed: frontend/dist/index.html is still the debug placeholder.'
+}
+Write-Host "Release frontend: PASS ($frontendIndex)" -ForegroundColor Green
 
 if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) {
     throw 'CARGO_HOME is empty after the r39 probe.'

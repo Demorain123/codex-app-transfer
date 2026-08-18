@@ -29,6 +29,7 @@ REVISION.write_text("39\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 
 run("scripts/apply_r39_proxy_owner_thread.py")
+run("scripts/apply_r39_owner_thread_state_guard.py")
 run("scripts/apply_r39_bind_busy_policy.py")
 run("scripts/apply_r39_proxy_owner_thread_tests.py")
 run("scripts/review_r39_proxy_owner_thread.py")
@@ -36,10 +37,12 @@ run("scripts/review_r39_proxy_owner_thread.py")
 required = {
     "src-tauri/src/proxy_runner.rs": [
         "CAS-R39-PROXY-OWNER-THREAD",
+        "CAS-R39-OWNER-THREAD-STATE-GUARD",
         "cas-proxy-owner-",
         "owner_thread_joined",
         "shutdown_signal_received",
         "owner_runtime_shutdown_complete",
+        "finished_owner_generation_detected",
         "port_release_verified",
         "listener_residue_detected",
         "CAS-R39-PROXY-OWNER-THREAD-TESTS",
@@ -94,5 +97,5 @@ if "compat_revision=39" not in version or "app_version=2.4.5+39" not in version:
 
 print(
     "r39 unified composition: COMPLETE "
-    "(r38 preserved + single owner-thread proxy + non-retryable bind-busy + 100x same-port stress)"
+    "(r38 preserved + single owner-thread proxy + dead-generation guard + non-retryable bind-busy + 100x same-port stress)"
 )

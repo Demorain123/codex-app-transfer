@@ -51,7 +51,7 @@ function Invoke-CargoProof {
     if ($text -notmatch ("test result:\s+ok\.\s+{0} passed;\s+0 failed;" -f $ExpectedCount)) {
         throw "$Label did not prove $ExpectedCount passed / 0 failed. Transcript: $Transcript"
     }
-    Write-Host "$Label: PASS ($ExpectedCount/$ExpectedCount visible)" -ForegroundColor Green
+    Write-Host "${Label}: PASS ($ExpectedCount/$ExpectedCount visible)" -ForegroundColor Green
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

@@ -27,21 +27,28 @@ if (-not $repoRoot.StartsWith('V:\', [StringComparison]::OrdinalIgnoreCase)) {
     throw "r39 local package policy requires the repository on physical V:. Current: $repoRoot"
 }
 
-# Keep every project-generated cache/build/temp/package byte on V:.
+# Keep every project-generated cache/build/temp/package/toolchain byte on V:.
 $cacheRoot = 'V:\Codex-App-Transfer-DevCache'
 $env:CARGO_HOME = Join-Path $cacheRoot 'cargo-home'
+$env:RUSTUP_HOME = Join-Path $cacheRoot 'rustup-home'
 $env:CARGO_TARGET_DIR = Join-Path $cacheRoot 'target\r39'
 $env:npm_config_cache = Join-Path $cacheRoot 'npm-cache'
 $env:NPM_CONFIG_CACHE = $env:npm_config_cache
 $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
+$env:RUSTUP_TOOLCHAIN = 'stable'
 $env:PATH = (Join-Path $env:CARGO_HOME 'bin') + ';' + $env:PATH
-foreach ($dir in @($env:CARGO_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP)) {
+foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP)) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
 Set-Location $repoRoot
 $target = 'x86_64-pc-windows-msvc'
+
+# Keep packaging reproducible with the same current stable toolchain used by the
+# local fast gate and GitHub Actions. The V:-resident rustup home makes this a
+# one-time download in normal iteration rather than repeated C:-drive churn.
+Invoke-Checked rustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
 
 if (-not $SkipFastGate) {
     Write-Host "`nRunning local r39 fast gate before packaging..." -ForegroundColor Green
@@ -124,6 +131,7 @@ $manifest = [ordered]@{
     commit = (git rev-parse HEAD).Trim()
     builtAt = (Get-Date).ToString('o')
     cargoTargetDir = $env:CARGO_TARGET_DIR
+    rustupHome = $env:RUSTUP_HOME
     bundles = $bundles
     files = @($copied | ForEach-Object {
         $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_

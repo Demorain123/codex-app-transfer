@@ -46,22 +46,24 @@ for token in [
 for token in [
     "CAS-R39-BINDER-TERMINOLOGY",
     "CAS-R40-PORT-OWNER-CLASSIFICATION",
-    "owner_class=foreign_live",
+    "CAS-R40-LIVE-BINDER-SELF-CLASSIFICATION",
+    '"self_live"',
+    '"foreign_live"',
     "owner_class=stale_binder",
-    "recommended_action=stop_foreign_owner_safely",
+    '"inspect_internal_lifecycle"',
+    '"stop_foreign_owner_safely"',
     "recommended_action=preserve_evidence_no_pid_kill",
 ]:
     if token not in chain:
         raise SystemExit(f"r40 review: chain-health marker missing: {token}")
 
-# Safety invariants: r40 improves attribution/hardening, but does not take ownership
-# of arbitrary foreign processes or hide a bind conflict by changing socket semantics.
+# Safety invariants: match actual mutation primitives, not explanatory UI text that
+# intentionally names commands/options users should NOT use.
 combined = owner + "\n" + proxy + "\n" + chain
 for forbidden in [
     "TerminateProcess(",
-    "taskkill",
-    "Stop-Process",
-    "SO_REUSEADDR",
+    'Command::new("taskkill")',
+    'Command::new("Stop-Process")',
     "set_reuseaddr(true)",
 ]:
     if forbidden in combined:

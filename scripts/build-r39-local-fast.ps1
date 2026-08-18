@@ -97,8 +97,13 @@ if (-not $SkipCargoCheck) {
 }
 
 if ($Frontend) {
-    Write-Host "`n[5/5] Frontend install/build" -ForegroundColor Green
-    Invoke-Checked npm '--prefix' 'frontend' 'ci'
+    Write-Host "`n[5/5] Frontend build (reuse V: node_modules/cache when possible)" -ForegroundColor Green
+    $nodeModules = Join-Path $repoRoot 'frontend\node_modules'
+    if (-not (Test-Path $nodeModules)) {
+        Invoke-Checked npm '--prefix' 'frontend' 'ci' '--prefer-offline' '--no-audit'
+    } else {
+        Write-Host "Reusing existing V:\...\frontend\node_modules; skipping npm ci." -ForegroundColor DarkGray
+    }
     Invoke-Checked npm '--prefix' 'frontend' 'run' 'build'
 } else {
     Write-Host "`n[5/5] Frontend skipped (use -Frontend when UI changed)" -ForegroundColor DarkGray

@@ -46,12 +46,13 @@ $env:RUSTUP_HOME = Join-Path $cacheRoot 'rustup-home'
 $env:CARGO_TARGET_DIR = Join-Path $cacheRoot 'target\r39'
 $env:npm_config_cache = Join-Path $cacheRoot 'npm-cache'
 $env:NPM_CONFIG_CACHE = $env:npm_config_cache
+$env:PIP_CACHE_DIR = Join-Path $cacheRoot 'pip-cache'
 $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:RUSTUP_TOOLCHAIN = 'stable'
 $bootstrapDir = Join-Path $cacheRoot 'bootstrap'
 $toolsRoot = Join-Path $cacheRoot 'tools'
-foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:TEMP, $bootstrapDir, $toolsRoot)) {
+foreach ($dir in @($env:CARGO_HOME, $env:RUSTUP_HOME, $env:CARGO_TARGET_DIR, $env:npm_config_cache, $env:PIP_CACHE_DIR, $env:TEMP, $bootstrapDir, $toolsRoot)) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
@@ -123,6 +124,24 @@ $env:CMAKE_GENERATOR = 'Ninja'
 $env:ASM_NASM = $nasmExe
 Remove-Item Env:CMAKE_GENERATOR_PLATFORM -ErrorAction SilentlyContinue
 Remove-Item Env:CMAKE_GENERATOR_TOOLSET -ErrorAction SilentlyContinue
+
+# boring-sys2 uses rust-bindgen at build time, so packaging needs a loadable
+# libclang too. Keep only the compact libclang wheel on V: instead of installing
+# the full LLVM toolchain onto C:.
+$libclangVersion = '18.1.1'
+$libclangRoot = Join-Path $toolsRoot "libclang-$libclangVersion"
+$libclangDll = Get-ChildItem -LiteralPath $libclangRoot -Filter 'libclang.dll' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $libclangDll) {
+    New-Item -ItemType Directory -Force -Path $libclangRoot | Out-Null
+    Invoke-Checked python '-m' 'pip' 'install' '--disable-pip-version-check' '--no-deps' '--target' $libclangRoot "libclang==$libclangVersion"
+    $libclangDll = Get-ChildItem -LiteralPath $libclangRoot -Filter 'libclang.dll' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $libclangDll -or -not (Test-Path -LiteralPath $libclangDll -PathType Leaf)) {
+    throw "V:-local libclang bootstrap failed under $libclangRoot"
+}
+$libclangBin = Split-Path -Parent $libclangDll
+$env:LIBCLANG_PATH = $libclangBin
+$env:PATH = $libclangBin + ';' + $env:PATH
 
 if (-not $SkipFastGate) {
     Write-Host "`nRunning local r39 fast gate before packaging..." -ForegroundColor Green
@@ -211,6 +230,7 @@ $manifest = [ordered]@{
     cmake = $cmakeExe
     ninja = $ninjaExe
     nasm = $nasmExe
+    libclang = $libclangDll
     bundles = $bundles
     files = @($copied | ForEach-Object {
         $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_

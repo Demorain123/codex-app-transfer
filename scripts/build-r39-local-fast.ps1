@@ -44,22 +44,24 @@ $env:TEMP = Join-Path $cacheRoot 'tmp'
 $env:TMP = $env:TEMP
 $env:CODEX_APP_TRANSFER_LOCAL_BUILD = 'r39'
 $env:RUSTUP_TOOLCHAIN = 'stable'
+$bootstrapDir = Join-Path $cacheRoot 'bootstrap'
 
 foreach ($dir in @(
     $env:CARGO_HOME,
     $env:RUSTUP_HOME,
     $env:CARGO_TARGET_DIR,
     $env:npm_config_cache,
-    $env:TEMP
+    $env:TEMP,
+    $bootstrapDir
 )) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
-# cargo-installed helper binaries for this project live on V as well.
-$env:PATH = (Join-Path $env:CARGO_HOME 'bin') + ';' + $env:PATH
-
 Set-Location $repoRoot
 $target = 'x86_64-pc-windows-msvc'
+$localCargoBin = Join-Path $env:CARGO_HOME 'bin'
+$localRustup = Join-Path $localCargoBin 'rustup.exe'
+$rustupInit = Join-Path $bootstrapDir 'rustup-init-x86_64.exe'
 
 Write-Host 'Codex App Transfer r39 - LOCAL FAST gate' -ForegroundColor Green
 Write-Host "Repo         : $repoRoot"
@@ -72,22 +74,38 @@ Write-Host 'Policy       : no automatic port switching; fixed-port lifecycle reg
 
 Require-Command git
 Require-Command python
-Require-Command rustup
 if ($Frontend) {
     Require-Command node
     Require-Command npm
 }
 
-# libsqlite3-sys 0.38.x uses cfg_select!, which is stable from Rust 1.95.
-# Mirror GitHub Actions' `dtolnay/rust-toolchain@stable`, but install/cache the
-# toolchain under V: so local iteration neither depends on an older global
-# toolchain nor consumes C: for Rust toolchains.
-Write-Host "`n[0/5] Ensure current stable Rust toolchain on V:" -ForegroundColor Green
-Invoke-Checked rustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
-$rustcVersion = (& rustup run stable rustc --version).Trim()
-$cargoVersion = (& rustup run stable cargo --version).Trim()
+# A global rustup proxy cannot safely be reused after CARGO_HOME is redirected:
+# rustup verifies that its own proxy installation lives under CARGO_HOME/bin.
+# Bootstrap a dedicated rustup installation directly into V: instead. This is
+# the supported rustup model: set CARGO_HOME/RUSTUP_HOME before rustup-init and
+# use --no-modify-path so the machine-wide PATH remains untouched.
+Write-Host "`n[0/5] Ensure self-contained stable Rust toolchain on V:" -ForegroundColor Green
+if (-not (Test-Path -LiteralPath $localRustup -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $rustupInit -PathType Leaf)) {
+        Write-Host "Downloading official rustup-init.exe to V: (one-time)..." -ForegroundColor Yellow
+        Invoke-WebRequest -Uri 'https://win.rustup.rs/x86_64' -OutFile $rustupInit -UseBasicParsing
+    }
+    Write-Host "Bootstrapping V:-local rustup proxies (one-time)..." -ForegroundColor Yellow
+    Invoke-Checked $rustupInit '-y' '--no-modify-path' '--profile' 'minimal' '--default-toolchain' 'none' '--default-host' $target
+}
+if (-not (Test-Path -LiteralPath $localRustup -PathType Leaf)) {
+    throw "V:-local rustup bootstrap did not create $localRustup"
+}
+
+# Put the V:-local rustup proxies first only for this build process.
+$env:PATH = $localCargoBin + ';' + $env:PATH
+Invoke-Checked $localRustup 'toolchain' 'install' 'stable' '--profile' 'minimal' '--component' 'rustfmt' '--target' $target
+
+$rustcVersion = (& $localRustup run stable rustc --version).Trim()
+$cargoVersion = (& $localRustup run stable cargo --version).Trim()
 Write-Host "Rust          : $rustcVersion"
 Write-Host "Cargo         : $cargoVersion"
+Write-Host "Rustup proxy  : $localRustup"
 if ($rustcVersion -notmatch '^rustc\s+(\d+)\.(\d+)\.(\d+)') {
     throw "Unable to parse rustc version: $rustcVersion"
 }
@@ -96,6 +114,9 @@ $rustMinor = [int]$Matches[2]
 if ($rustMajor -lt 1 -or ($rustMajor -eq 1 -and $rustMinor -lt 95)) {
     throw "Rust 1.95+ is required by the resolved dependency set; active stable is $rustcVersion"
 }
+
+Require-Command cargo
+Require-Command rustc
 
 Write-Host "`n[1/5] Materialize r39 overlays" -ForegroundColor Green
 Invoke-Checked python 'scripts/apply_r39_unified.py'

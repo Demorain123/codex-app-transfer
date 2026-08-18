@@ -11,6 +11,8 @@ owner = OWNER.read_text(encoding="utf-8")
 proxy = PROXY.read_text(encoding="utf-8")
 chain = CHAIN.read_text(encoding="utf-8")
 
+# windows_tcp_owner.rs builds the recommendation as a format field plus a match arm;
+# do not require a fully concatenated literal that never exists in Rust source.
 for token in [
     "CAS-R40-WINDOWS-PORT-GUARD",
     "GetHandleInformation",
@@ -18,11 +20,10 @@ for token in [
     "HANDLE_FLAG_INHERIT",
     "harden_socket_inheritance",
     "owner_class=",
-    "foreign_live",
-    "self_live",
-    "stale_binder",
-    "recommended_action=stop_foreign_owner_safely",
-    "recommended_action=preserve_evidence_no_pid_kill",
+    "recommended_action={}",
+    '"foreign_live" => "stop_foreign_owner_safely"',
+    '"self_live" => "inspect_internal_lifecycle"',
+    '"stale_binder" => "preserve_evidence_no_pid_kill"',
     "windows_port_guard_r40_clears_inherit_bit",
     "windows_port_guard_r40_classifies_foreign_and_stale_binders",
 ]:
@@ -43,6 +44,8 @@ for token in [
     if token not in proxy:
         raise SystemExit(f"r40 review: proxy marker missing: {token}")
 
+# Chain Health emits concrete user-facing facts, so complete action literals are
+# appropriate here.
 for token in [
     "CAS-R39-BINDER-TERMINOLOGY",
     "CAS-R40-PORT-OWNER-CLASSIFICATION",

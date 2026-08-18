@@ -24,6 +24,7 @@ run("scripts/review_r38_model_route_observability.py")
 REVISION.write_text("39\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_r39_proxy_lifecycle_reliability.py")
+run("scripts/apply_r39_lifecycle_singleflight_followup.py")
 run("scripts/review_r39_proxy_lifecycle_reliability.py")
 
 version = VERSION.read_text(encoding="utf-8")

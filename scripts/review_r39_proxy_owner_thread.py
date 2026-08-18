@@ -4,10 +4,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROXY = ROOT / "src-tauri/src/proxy_runner.rs"
+MAIN = ROOT / "src-tauri/src/main.rs"
 HANDLER = ROOT / "src-tauri/src/admin/handlers/proxy.rs"
 CHAIN = ROOT / "src-tauri/src/admin/handlers/chain_health.rs"
 
 proxy = PROXY.read_text(encoding="utf-8")
+main = MAIN.read_text(encoding="utf-8")
 handler = HANDLER.read_text(encoding="utf-8")
 chain = CHAIN.read_text(encoding="utf-8")
 
@@ -33,6 +35,15 @@ required_proxy = [
 for token in required_proxy:
     if token not in proxy:
         raise SystemExit(f"r39 review: proxy marker missing: {token}")
+
+for token in [
+    "CAS-R39-RELEASE-TEST-CONSOLE",
+    'cfg_attr(all(not(debug_assertions), not(test)), windows_subsystem = "windows")',
+]:
+    if token not in main:
+        raise SystemExit(f"r39 review: release-test console marker missing: {token}")
+if '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]' in main:
+    raise SystemExit("r39 review: release tests would still detach from the console")
 
 prefix = proxy.split("struct ResolverSnapshot {", 1)[0]
 for forbidden in [

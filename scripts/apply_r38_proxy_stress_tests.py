@@ -11,13 +11,12 @@ if MARKER in body:
     print("r38 proxy stress tests: already applied")
     raise SystemExit(0)
 
-# Append a test module after the materialized proxy source. These tests exercise the exact
-# Tokio/axum graceful-shutdown + same-port rebind primitive used by r38 without requiring
-# a real provider registry or network request.
+# Module name intentionally retains `proxy_lifecycle_r27`: the existing Windows CI already runs
+# `cargo test ... proxy_lifecycle_r27`, so r38 stress coverage is exercised without a workflow-only fork.
 tests = r'''
 
 #[cfg(test)]
-mod proxy_lifecycle_r38_tests {
+mod proxy_lifecycle_r27_r38_tests {
     // CAS-R38-PROXY-STRESS-TESTS
     use super::*;
     use std::sync::atomic::Ordering;
@@ -94,6 +93,23 @@ mod proxy_lifecycle_r38_tests {
         manager.stop_silent();
         assert!(!manager.status().running);
     }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn proxy_lifecycle_r38_native_owner_attribution_matches_current_pid() {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("owner fixture listener");
+        let port = listener.local_addr().expect("owner fixture addr").port();
+        let mut owner = None;
+        for _ in 0..20 {
+            owner = crate::windows_tcp_owner::listener_owner(port).expect("owner query");
+            if owner.is_some() { break; }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let owner = owner.expect("native owner table must contain fixture listener");
+        assert_eq!(owner.pid, std::process::id());
+        assert!(owner.process_alive);
+        drop(listener);
+    }
 }
 '''
 body += tests
@@ -101,10 +117,12 @@ PATH.write_text(body, encoding="utf-8")
 
 for token in (
     MARKER,
+    "proxy_lifecycle_r27_r38_tests",
     "proxy_lifecycle_r38_same_port_rebind_50_generations",
     "proxy_lifecycle_r38_external_owner_is_not_bypassed",
     "proxy_lifecycle_r38_duplicate_start_rejected_before_bootstrap",
     "proxy_lifecycle_r38_double_silent_stop_is_idempotent",
+    "proxy_lifecycle_r38_native_owner_attribution_matches_current_pid",
 ):
     if token not in body:
         raise SystemExit(f"r38 proxy stress test marker missing: {token}")

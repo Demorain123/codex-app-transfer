@@ -130,7 +130,7 @@ $clangArgs = [System.Collections.Generic.List[string]]::new()
 $clangArgs.Add('--target=x86_64-pc-windows-msvc')
 foreach ($dir in $includeDirs) {
     $clangPath = $dir.Replace('\', '/')
-    $clangArgs.Add(('-I"{0}"' -f $clangPath))
+    $clangArgs.Add(('-I"{0}"' -f $clangPath).Replace('\"', '"'))
 }
 $env:BINDGEN_EXTRA_CLANG_ARGS = $clangArgs -join ' '
 

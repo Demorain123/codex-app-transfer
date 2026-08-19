@@ -24,13 +24,15 @@ def run(rel: str) -> None:
 # r41 deliberately keeps the fully validated r40 socket guard and owner
 # classification. It changes only the user-triggered recovery semantics for a
 # live foreign owner: clicking Try repair may release that owner after revalidation.
+# apply_r40_unified.py already runs the r40 no-auto-kill review BEFORE r41 adds its
+# explicit user-triggered termination primitive. Do not rerun that older review
+# afterward, because its contract intentionally forbids any TerminateProcess use.
 run("scripts/apply_r40_unified.py")
 run("scripts/apply_r39_r25_replay_marker_prep.py")
 REVISION.write_text("41\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/apply_r41_explicit_port_repair.py")
 run("scripts/review_r39_proxy_owner_thread.py")
-run("scripts/review_r40_windows_port_guard.py")
 run("scripts/review_r41_explicit_port_repair.py")
 
 required = {

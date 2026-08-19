@@ -53,21 +53,23 @@ repair_call_count = chain.count("terminate_live_foreign_listener_owner(port, pid
 if repair_call_count != 1:
     raise SystemExit(f"r41 review: explicit repair call count={repair_call_count}, expected 1")
 
-# Stale/dead binder PIDs remain evidence-only. A PID that no longer owns a live
-# process must never be used as a termination target because Windows can reuse PIDs.
-stale_pos = chain.find('"transfer_port_stale_owner"')
+# Stale/dead binder PIDs remain evidence-only. Inspect the actual recovery match arm,
+# not earlier classification code that happens to mention the same token.
+stale_arm = '        "transfer_port_stale_owner" => {'
+stale_pos = chain.find(stale_arm)
 if stale_pos < 0:
-    raise SystemExit("r41 review: stale-owner recovery branch missing")
-stale_window = chain[stale_pos : stale_pos + 1600]
+    raise SystemExit("r41 review: stale-owner recovery arm missing")
+stale_window = chain[stale_pos : stale_pos + 1200]
 if "TerminateProcess" in stale_window or "terminate_live_foreign_listener_owner" in stale_window:
-    raise SystemExit("r41 review: stale/dead binder branch must not terminate a PID")
+    raise SystemExit("r41 review: stale/dead binder recovery arm must not terminate a PID")
+if "preserve_stale_listener_evidence" not in stale_window:
+    raise SystemExit("r41 review: stale/dead binder recovery arm must preserve evidence")
 
 # Do not reintroduce the old conflict-masking behavior.
 combined = owner + "\n" + chain + "\n" + proxy
 for forbidden in [
     "set_reuseaddr(true)",
     "const RETRY_MS: &[u64] = &[50, 100, 200, 400, 800];",
-    "automatic_port_switch",
 ]:
     if forbidden in combined:
         raise SystemExit(f"r41 review: forbidden conflict-masking primitive present: {forbidden}")

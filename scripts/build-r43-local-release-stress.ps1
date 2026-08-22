@@ -36,6 +36,27 @@ function Resolve-PythonRunner {
     if (Test-PythonRunner -Command 'py' -Prefix @('-3')) {
         return [pscustomobject]@{ Command = 'py'; Prefix = @('-3') }
     }
+
+    # A stale PythonCore registration can make `py -3` fail even when another
+    # PEP 514 runtime provider is healthy. Enumerate and execute-probe every
+    # launcher-advertised tag instead of trusting registration metadata alone.
+    try {
+        if (Get-Command 'py' -ErrorAction Stop) {
+            $launcherLines = @(& py --list 2>$null)
+            foreach ($line in $launcherLines) {
+                if ([string]$line -match '^\s*-V:([^\s*]+)') {
+                    $tag = $Matches[1]
+                    $prefix = @("-V:$tag")
+                    if (Test-PythonRunner -Command 'py' -Prefix $prefix) {
+                        return [pscustomobject]@{ Command = 'py'; Prefix = $prefix }
+                    }
+                }
+            }
+        }
+    } catch {
+        # Continue to PATH/filesystem discovery below.
+    }
+
     foreach ($name in @('python','python3')) {
         if (Test-PythonRunner -Command $name) {
             return [pscustomobject]@{ Command = $name; Prefix = @() }
@@ -67,8 +88,8 @@ function Resolve-PythonRunner {
 
 function Invoke-Python {
     param([Parameter(Mandatory)][string]$Script)
-    $args = @($script:PythonRunner.Prefix) + @($Script)
-    Invoke-Checked $script:PythonRunner.Command @args
+    $runnerArgs = @($script:PythonRunner.Prefix) + @($Script)
+    Invoke-Checked -Command $script:PythonRunner.Command -Arguments $runnerArgs
 }
 
 function Invoke-CargoProof {

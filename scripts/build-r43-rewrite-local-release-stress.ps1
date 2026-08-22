@@ -100,6 +100,33 @@ function Invoke-Python {
     if ($LASTEXITCODE -ne 0) { throw "Python stage failed ($LASTEXITCODE): $Script" }
 }
 
+function Install-LegacyPythonShim {
+    param([Parameter(Mandatory)]$Runner)
+
+    # r39-r42 predate the Python-runner resolver and invoke a literal `python`.
+    # Bridge only this build process to the exact interpreter already verified above.
+    $shimDir = 'V:\Codex-App-Transfer-DevCache\python-shim-r43'
+    New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
+    $shimPath = Join-Path $shimDir 'python.cmd'
+
+    $resolved = Get-Command $Runner.Command -ErrorAction Stop
+    $runnerPath = [string]$resolved.Source
+    if ([string]::IsNullOrWhiteSpace($runnerPath)) { $runnerPath = [string]$Runner.Command }
+    $escapedPath = $runnerPath.Replace('"', '""')
+    $prefixText = (@($Runner.Prefix) | ForEach-Object { '"' + ([string]$_).Replace('"', '""') + '"' }) -join ' '
+    $commandLine = if ([string]::IsNullOrWhiteSpace($prefixText)) {
+        '"{0}" %*' -f $escapedPath
+    } else {
+        '"{0}" {1} %*' -f $escapedPath, $prefixText
+    }
+    @('@echo off', $commandLine) | Set-Content -LiteralPath $shimPath -Encoding ASCII
+
+    $env:PATH = $shimDir + ';' + $env:PATH
+    Write-Host "Legacy python shim: $shimPath" -ForegroundColor DarkGray
+    & python -c 'import sys; print("Legacy python bridge:", sys.executable, sys.version.split()[0])'
+    if ($LASTEXITCODE -ne 0) { throw 'Legacy python compatibility shim did not execute successfully.' }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
 $target = 'x86_64-pc-windows-msvc'
@@ -109,6 +136,7 @@ $pythonDisplay = @($script:PythonRunner.Command) + @($script:PythonRunner.Prefix
 Write-Host 'Codex App Transfer r43 REWRITE - Health + Compact Transition + MCP' -ForegroundColor Green
 Write-Host 'Architecture: verified r42 base + one r43 health transform; runtime/Exit-Guard changes live in their source templates.'
 Write-Host "Python runner: $($pythonDisplay -join ' ')" -ForegroundColor DarkGray
+Install-LegacyPythonShim -Runner $script:PythonRunner
 
 $dirtyBefore = @(& git status --porcelain)
 if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect Git working tree.' }

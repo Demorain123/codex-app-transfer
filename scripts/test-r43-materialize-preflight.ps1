@@ -33,13 +33,16 @@ Write-Host "Baseline: $head" -ForegroundColor DarkGray
 Write-Host 'This gate intentionally skips MSVC setup, Cargo build, legacy stress, frontend, and real-account tests.' -ForegroundColor DarkGray
 
 try {
-    Write-Host "`n[1/3] Materialize r43 exactly once" -ForegroundColor Green
+    Write-Host "`n[1/4] Materialize r43 exactly once" -ForegroundColor Green
     Invoke-Checked python 'scripts/apply_r43_unified.py'
 
-    Write-Host "`n[2/3] Static r43 review" -ForegroundColor Green
+    Write-Host "`n[2/4] Canonical runtime-classifier structure review" -ForegroundColor Green
+    Invoke-Checked python 'scripts/review_r43_runtime_classifier_canonical.py'
+
+    Write-Host "`n[3/4] Static r43 review" -ForegroundColor Green
     Invoke-Checked python 'scripts/review_r43_health_mcp_hardening.py'
 
-    Write-Host "`n[3/3] Version/invariant smoke" -ForegroundColor Green
+    Write-Host "`n[4/4] Version/invariant smoke" -ForegroundColor Green
     $version = Get-Content (Join-Path $repoRoot 'SUB2API_GROK_COMPAT_VERSION.txt') -Raw -Encoding UTF8
     if ($version -notmatch 'compat_revision=43' -or $version -notmatch 'app_version=2\.4\.5\+43') {
         throw 'r43 version stamp mismatch'

@@ -94,9 +94,9 @@ function Resolve-PythonRunner {
 
 function Invoke-Python {
     param([Parameter(Mandatory)][string]$Script)
-    $args = @($script:PythonRunner.Prefix) + @($Script)
-    Write-Host "`n> $($script:PythonRunner.Command) $($args -join ' ')" -ForegroundColor Cyan
-    & $script:PythonRunner.Command @args
+    $runnerArgs = @($script:PythonRunner.Prefix) + @($Script)
+    Write-Host "`n> $($script:PythonRunner.Command) $($runnerArgs -join ' ')" -ForegroundColor Cyan
+    & $script:PythonRunner.Command @runnerArgs
     if ($LASTEXITCODE -ne 0) { throw "Python stage failed ($LASTEXITCODE): $Script" }
 }
 

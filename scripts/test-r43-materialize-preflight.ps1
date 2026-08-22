@@ -18,6 +18,87 @@ function Invoke-Checked {
     }
 }
 
+function Test-PythonRunner {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [string[]]$Prefix = @()
+    )
+
+    try {
+        $resolved = Get-Command $Command -ErrorAction Stop
+        $source = [string]$resolved.Source
+        if ($source -and $source -like "$env:LOCALAPPDATA\Microsoft\WindowsApps\*") {
+            return $false
+        }
+
+        & $Command @Prefix -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Resolve-PythonRunner {
+    if ($env:PYTHON) {
+        if (Test-PythonRunner -Command $env:PYTHON) {
+            return [pscustomobject]@{ Command = $env:PYTHON; Prefix = @() }
+        }
+    }
+
+    # On Windows the Python launcher is more reliable than a bare `python`
+    # because `python.exe` can be a Microsoft Store App Execution Alias.
+    if (Test-PythonRunner -Command 'py' -Prefix @('-3')) {
+        return [pscustomobject]@{ Command = 'py'; Prefix = @('-3') }
+    }
+
+    foreach ($name in @('python', 'python3')) {
+        if (Test-PythonRunner -Command $name) {
+            return [pscustomobject]@{ Command = $name; Prefix = @() }
+        }
+    }
+
+    # Last-resort discovery for normal per-user / system CPython installs that
+    # exist but are not on PATH. Do not inspect command lines or user files.
+    $roots = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)}
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($root in $roots) {
+        $candidates = @()
+        if ($root -like '*Programs\Python') {
+            $candidates = @(Get-ChildItem -Path $root -Filter python.exe -File -Recurse -Depth 2 -ErrorAction SilentlyContinue)
+        }
+        else {
+            $candidates = @(Get-ChildItem -Path $root -Directory -Filter 'Python*' -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName 'python.exe' } |
+                Where-Object { Test-Path $_ } |
+                ForEach-Object { Get-Item $_ })
+        }
+
+        foreach ($candidate in ($candidates | Sort-Object FullName -Descending)) {
+            if (Test-PythonRunner -Command $candidate.FullName) {
+                return [pscustomobject]@{ Command = $candidate.FullName; Prefix = @() }
+            }
+        }
+    }
+
+    throw @'
+No working Python 3 runtime was found.
+The Microsoft Store python.exe App Execution Alias is intentionally ignored.
+Quick checks: `py -3 --version` and `Get-Command python,py -All`.
+Install/expose Python 3, or set $env:PYTHON to a real python.exe path, then rerun this preflight.
+'@
+}
+
+function Invoke-Python {
+    param([Parameter(Mandatory)][string]$Script)
+    $args = @($script:PythonRunner.Prefix) + @($Script)
+    Invoke-Checked $script:PythonRunner.Command @args
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
 
@@ -28,19 +109,23 @@ if ($dirty.Count -gt 0) {
 }
 
 $head = (& git rev-parse HEAD).Trim()
+$script:PythonRunner = Resolve-PythonRunner
+$pythonDisplay = @($script:PythonRunner.Command) + @($script:PythonRunner.Prefix)
+
 Write-Host 'Codex App Transfer r43 - materializer preflight only' -ForegroundColor Green
 Write-Host "Baseline: $head" -ForegroundColor DarkGray
+Write-Host "Python runner: $($pythonDisplay -join ' ')" -ForegroundColor DarkGray
 Write-Host 'This gate intentionally skips MSVC setup, Cargo build, legacy stress, frontend, and real-account tests.' -ForegroundColor DarkGray
 
 try {
     Write-Host "`n[1/4] Materialize r43 exactly once" -ForegroundColor Green
-    Invoke-Checked python 'scripts/apply_r43_unified.py'
+    Invoke-Python 'scripts/apply_r43_unified.py'
 
     Write-Host "`n[2/4] Canonical runtime-classifier structure review" -ForegroundColor Green
-    Invoke-Checked python 'scripts/review_r43_runtime_classifier_canonical.py'
+    Invoke-Python 'scripts/review_r43_runtime_classifier_canonical.py'
 
     Write-Host "`n[3/4] Static r43 review" -ForegroundColor Green
-    Invoke-Checked python 'scripts/review_r43_health_mcp_hardening.py'
+    Invoke-Python 'scripts/review_r43_health_mcp_hardening.py'
 
     Write-Host "`n[4/4] Version/invariant smoke" -ForegroundColor Green
     $version = Get-Content (Join-Path $repoRoot 'SUB2API_GROK_COMPAT_VERSION.txt') -Raw -Encoding UTF8

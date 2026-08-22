@@ -14,8 +14,8 @@ FN_DECL = re.compile(
 )
 
 
-def _matching_brace(text: str, opening: int) -> int:
-    """Return one-past the function body brace, ignoring Rust strings/comments."""
+def matching_brace(text: str, opening: int) -> int:
+    """Return one-past the matching Rust body brace, ignoring strings/comments."""
     depth = 0
     block_depth = 0
     raw_hashes = 0
@@ -97,65 +97,83 @@ def _matching_brace(text: str, opening: int) -> int:
                 continue
             i += 1
 
-    raise SystemExit("r43 runtime classifier repair: classify() closing brace missing")
+    raise SystemExit("r43 runtime classifier repair: closing brace missing")
 
 
-def locate_function_span(text: str, name: str) -> tuple[int, int]:
+def unique_decl(text: str, name: str) -> re.Match[str]:
     matches = [m for m in FN_DECL.finditer(text) if m.group(1) == name]
     if len(matches) != 1:
         raise SystemExit(
             f"r43 runtime classifier repair: expected exactly one {name}() declaration, found {len(matches)}"
         )
-    match = matches[0]
-    opening = text.find("{", match.end())
+    return matches[0]
+
+
+def locate_rewrite_span(text: str) -> tuple[int, int]:
+    """Return the whole region owned by classify(), up to emit_native_event().
+
+    r43 historically patched tuples inside classify() and could temporarily leave
+    an extra brace or an orphan collab block.  In that state the first balanced
+    closing brace is not a trustworthy rewrite boundary.  The r26 runtime contract
+    has a stable emit_native_event() sink immediately after the classifier region,
+    so prefer that declaration as the end boundary.  If a future source genuinely
+    removes that sink, fall back to the classifier's own balanced body.
+    """
+    classify = unique_decl(text, "classify")
+    start = classify.start()
+
+    emit_matches = [m for m in FN_DECL.finditer(text) if m.group(1) == "emit_native_event"]
+    emit_after = [m for m in emit_matches if m.start() > start]
+    if len(emit_after) == 1:
+        return start, emit_after[0].start()
+    if len(emit_after) > 1:
+        raise SystemExit(
+            f"r43 runtime classifier repair: multiple emit_native_event() declarations after classify(): {len(emit_after)}"
+        )
+
+    # Last-resort compatibility fallback for a future runtime watcher layout.
+    opening = text.find("{", classify.end())
     if opening < 0:
-        raise SystemExit(f"r43 runtime classifier repair: {name}() body opening brace missing")
-    return match.start(), _matching_brace(text, opening)
+        raise SystemExit("r43 runtime classifier repair: classify() body opening brace missing")
+    return start, matching_brace(text, opening)
 
 
-# Structural-boundary regression tests. No following function is required, and a
-# following renamed/visible/async function must not be consumed. Braces in normal
-# strings, raw strings, line comments and nested block comments are ignored.
-_probe = r'''fn classify(lower: &str) -> Option<()> {
-    let a = "{ string }";
-    let b = r#"{ raw }"#;
-    // }
-    /* { nested /* } */ } */
-    if lower.contains("x") { return Some(()); }
+# Regression proof: an orphan block after a prematurely-closed classify() must be
+# consumed by the rewrite span rather than being left behind to break rustfmt.
+_probe = '''fn classify(lower: &str) -> Option<()> {
+    if lower.contains("base") { return Some(()); }
     None
 }
-
-pub(crate) async fn renamed_sink(line: &str) { let _ = line; }
+if lower.contains("collabtoolcall") { bogus(); }
+fn emit_native_event(line: &str) { let _ = line; }
 '''
-_probe_start, _probe_end = locate_function_span(_probe, "classify")
-if _probe_start != 0 or not _probe[_probe_end:].lstrip().startswith("pub(crate) async fn renamed_sink"):
-    raise SystemExit("r43 runtime classifier repair: structural-boundary self-test failed")
+_probe_start, _probe_end = locate_rewrite_span(_probe)
+if _probe_start != 0 or "collabtoolcall" not in _probe[_probe_start:_probe_end]:
+    raise SystemExit("r43 runtime classifier repair: malformed-intermediate boundary self-test failed")
+if not _probe[_probe_end:].startswith("fn emit_native_event"):
+    raise SystemExit("r43 runtime classifier repair: emit boundary self-test failed")
 
+# Also retain the fallback contract when classify() is the final function.
 _probe_last = 'fn classify(lower: &str) -> Option<()> {\n    None\n}'
-if locate_function_span(_probe_last, "classify") != (0, len(_probe_last)):
-    raise SystemExit("r43 runtime classifier repair: final-function self-test failed")
+_last_start, _last_end = locate_rewrite_span(_probe_last)
+if (_last_start, _last_end) != (0, len(_probe_last)):
+    raise SystemExit("r43 runtime classifier repair: final-function fallback self-test failed")
 
-start, end = locate_function_span(runtime, "classify")
-segment = runtime[start:end]
+start, replace_end = locate_rewrite_span(runtime)
+source_segment = runtime[start:replace_end]
 
-# IMPORTANT: this stage is a canonical *repair* gate. Requiring every historical
-# classifier entry to already survive would make the repair unable to repair the
-# exact drift it exists to fix. Verify only enough identity + r43 transition
-# surface to prove we found the intended function, then rebuild the complete known
-# classifier below and verify every required behavior after the write.
-identity_markers = (
+# Only identify the inherited r26 classifier here.  Do NOT require r43 markers or
+# collab markers before repair: this script exists specifically to recover a
+# partially-mutated intermediate classifier.  The complete behavior is enforced
+# strictly after canonical reconstruction below.
+for marker in (
     '"agent loop died unexpectedly"',
     '"error submitting message"',
-    '"context automatically compacting"',
-    '"model changed from"',
-    '"compact v2 upstream"',
     '"context automatically compacted"',
-    '"collabtoolcall"',
-)
-for marker in identity_markers:
-    if marker not in segment:
+):
+    if marker not in source_segment:
         raise SystemExit(
-            f"r43 runtime classifier repair: intended classify() identity marker missing: {marker}"
+            f"r43 runtime classifier repair: stable r26 identity marker missing: {marker}"
         )
 
 canonical = '''fn classify(lower: &str) -> Option<(&'static str, &'static str)> {
@@ -202,17 +220,16 @@ canonical = '''fn classify(lower: &str) -> Option<(&'static str, &'static str)> 
 
 '''
 
-replace_end = end
-while replace_end < len(runtime) and runtime[replace_end] in " \t\r\n":
-    replace_end += 1
 runtime = runtime[:start] + canonical + runtime[replace_end:]
+RUNTIME.write_text(runtime, encoding="utf-8")
 
-# Post-repair contract: after canonicalization every inherited r26 behavior and
-# every r43 transition classifier must exist in the rebuilt function. This catches
-# accidental omission without requiring broken input to already be perfect.
-post_start, post_end = locate_function_span(runtime, "classify")
-post = runtime[post_start:post_end]
+# Post-repair contract: all inherited and r43 behavior must now live inside the
+# canonical classifier region, not merely somewhere in the file.
+final = RUNTIME.read_text(encoding="utf-8")
+final_start, final_end = locate_rewrite_span(final)
+final_segment = final[final_start:final_end]
 required_after = (
+    "CAS-R43-RUNTIME-CLASSIFIER-CANONICAL",
     '"agent loop died unexpectedly"',
     '"error submitting message"',
     '"error creating task"',
@@ -238,10 +255,21 @@ required_after = (
     '"wait"',
 )
 for marker in required_after:
-    if marker not in post:
-        raise SystemExit(f"r43 runtime classifier repair: canonical post-repair marker missing: {marker}")
+    if marker not in final_segment:
+        raise SystemExit(
+            f"r43 runtime classifier repair: post-repair contract missing inside classify(): {marker}"
+        )
 
-RUNTIME.write_text(runtime, encoding="utf-8")
-print("r43 runtime classifier repair: balanced-brace self-tests PASS")
-print("r43 runtime classifier repair: canonical classifier post-repair contract PASS")
-print("r43 runtime classifier repair: PASS")
+for unique_marker in (
+    "CAS-R43-RUNTIME-CLASSIFIER-CANONICAL",
+    '"collabtoolcall"',
+    '"remote_compaction_v2"',
+):
+    if final.count(unique_marker) != 1:
+        raise SystemExit(
+            f"r43 runtime classifier repair: expected exactly one post-repair marker {unique_marker}, found {final.count(unique_marker)}"
+        )
+
+print("r43 runtime classifier repair: malformed-intermediate boundary self-tests PASS")
+print("r43 runtime classifier repair: canonical classifier region rebuilt through emit boundary")
+print("r43 runtime classifier repair: complete post-repair contract PASS")

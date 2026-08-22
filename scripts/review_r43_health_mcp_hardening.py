@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 CHAIN = ROOT / "src-tauri/src/admin/handlers/chain_health.rs"
@@ -41,14 +42,45 @@ if "let failed_correlations: HashSet<&str> = records" in chain:
 if "window_s={R43_SHARED_FAILURE_WINDOW_SECS}" not in chain:
     raise SystemExit("r43 review: shared-upstream short-window evidence missing")
 
-exit_guard = EXIT_GUARD.read_text(encoding="utf-8").lower()
+
+def powershell_executable_projection(text: str) -> str:
+    """Project PowerShell to executable-looking text for forbidden-command review.
+
+    r43 deliberately documents forbidden broad cleanup forms in comments.  Reviewing
+    the raw file therefore self-triggers on its own safety documentation.  PowerShell
+    ignores # line comments and <# ... #> block comments at runtime, so remove block
+    comments and comment-only lines before looking for dangerous executable forms.
+
+    End-of-line comments are intentionally retained: any executable command before
+    the # must still be reviewed.  This is a conservative projection, not a parser.
+    """
+
+    without_blocks = re.sub(r"<#.*?#>", "", text, flags=re.DOTALL)
+    return "\n".join(
+        line for line in without_blocks.splitlines() if not line.lstrip().startswith("#")
+    ).lower()
+
+
+# Regression proof for the review itself: documentation must not trip the gate,
+# while an executable broad process-name stop must still be caught.
+_comment_probe = "# Stop-Process -Name node\n<# taskkill /IM node.exe #>\nWrite-Host ok\n"
+if "stop-process -name" in powershell_executable_projection(_comment_probe):
+    raise SystemExit("r43 review self-test: line comments were not excluded")
+if "taskkill /im" in powershell_executable_projection(_comment_probe):
+    raise SystemExit("r43 review self-test: block comments were not excluded")
+if "stop-process -name" not in powershell_executable_projection("Stop-Process -Name node\n"):
+    raise SystemExit("r43 review self-test: executable forbidden command was hidden")
+
+exit_guard_raw = EXIT_GUARD.read_text(encoding="utf-8")
+exit_guard = exit_guard_raw.lower()
+exit_guard_code = powershell_executable_projection(exit_guard_raw)
 for forbidden in (
     "stop-process -name",
     "taskkill /im",
     "get-process -name 'node' | stop-process",
     'get-process -name "node" | stop-process',
 ):
-    if forbidden in exit_guard:
+    if forbidden in exit_guard_code:
         raise SystemExit(f"r43 review: broad process-name cleanup is forbidden: {forbidden}")
 if "same-identity $r" not in exit_guard:
     raise SystemExit("r43 review: exact PID/start/path identity guard missing")
@@ -61,4 +93,5 @@ print("- shared-upstream requires >=2 currently-failed lineages in a 120s window
 print("- model-switch/compact 5xx is diagnosed before blaming the selected new model")
 print("- MCP status counts verified Codex descendants separately from orphan/external candidates")
 print("- Exit Guard remains exact-PID/identity-only and verifies post-cleanup survivors")
+print("- broad-cleanup review ignores PowerShell comments but still rejects executable name-wide kills")
 print("- r42 Grok effective tool collision guard preserved")

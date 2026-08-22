@@ -260,14 +260,18 @@ for marker in required_after:
             f"r43 runtime classifier repair: post-repair contract missing inside classify(): {marker}"
         )
 
-for unique_marker in (
-    "CAS-R43-RUNTIME-CLASSIFIER-CANONICAL",
-    '"collabtoolcall"',
-    '"remote_compaction_v2"',
+# These are cardinality checks, not all "unique" checks.  The remote-compaction
+# tuple intentionally contains the same string twice: once as the input needle and
+# once as the emitted event name.
+for marker, expected_count in (
+    ("CAS-R43-RUNTIME-CLASSIFIER-CANONICAL", 1),
+    ('"collabtoolcall"', 1),
+    ('"remote_compaction_v2"', 2),
 ):
-    if final.count(unique_marker) != 1:
+    count = final.count(marker)
+    if count != expected_count:
         raise SystemExit(
-            f"r43 runtime classifier repair: expected exactly one post-repair marker {unique_marker}, found {final.count(unique_marker)}"
+            f"r43 runtime classifier repair: expected {expected_count} post-repair occurrence(s) of {marker}, found {count}"
         )
 
 print("r43 runtime classifier repair: malformed-intermediate boundary self-tests PASS")

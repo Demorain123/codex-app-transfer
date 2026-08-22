@@ -24,6 +24,7 @@ def run(rel: str) -> None:
 run("scripts/apply_r42_unified.py")
 run("scripts/apply_r43_semantic_anchor_prep.py")
 run("scripts/apply_r43_health_mcp_hardening.py")
+run("scripts/apply_r43_runtime_classifier_repair.py")
 REVISION.write_text("43\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 run("scripts/review_r43_health_mcp_hardening.py")
@@ -35,6 +36,7 @@ for marker, source in (
     ("CAS-R43-HEALTH-MCP-HARDENING", chain),
     ("fault_compaction_transition", chain),
     ("CAS-R43-MODEL-SWITCH-COMPACTION-DIAG", runtime),
+    ("CAS-R43-RUNTIME-CLASSIFIER-CANONICAL", runtime),
     ("CAS-R42-GROK-EFFECTIVE-TOOL-COLLISION-GUARD", grok),
 ):
     if marker not in source:
@@ -44,4 +46,4 @@ version = VERSION.read_text(encoding="utf-8")
 if "compat_revision=43" not in version or "app_version=2.4.5+43" not in version:
     raise SystemExit("r43 visible/package version stamp missing after composition")
 
-print("r43 unified composition: COMPLETE (r42 preserved + semantic anchor prep + health/compaction/MCP hardening)")
+print("r43 unified composition: COMPLETE (r42 preserved + semantic anchor prep + health/compaction/MCP hardening + canonical runtime classifier)")

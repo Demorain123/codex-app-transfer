@@ -22,6 +22,7 @@ def run(rel: str) -> None:
 
 
 run("scripts/apply_r42_unified.py")
+run("scripts/apply_r43_semantic_anchor_prep.py")
 run("scripts/apply_r43_health_mcp_hardening.py")
 REVISION.write_text("43\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -43,4 +44,4 @@ version = VERSION.read_text(encoding="utf-8")
 if "compat_revision=43" not in version or "app_version=2.4.5+43" not in version:
     raise SystemExit("r43 visible/package version stamp missing after composition")
 
-print("r43 unified composition: COMPLETE (r42 preserved + health/compaction/MCP hardening)")
+print("r43 unified composition: COMPLETE (r42 preserved + semantic anchor prep + health/compaction/MCP hardening)")

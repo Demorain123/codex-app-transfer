@@ -20,6 +20,7 @@ $stateDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Co
 New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
 $logPath = Join-Path $stateDir 'events.jsonl'
 
+# Key the singleton to the exact packaged executable path.
 $sha = [Security.Cryptography.SHA256]::Create()
 try {
   $hashBytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ExactCodexExe.ToLowerInvariant()))
@@ -56,6 +57,8 @@ function Start-Ticks($creationDate) {
   try { return ([datetime]$creationDate).ToUniversalTime().Ticks } catch { return $null }
 }
 
+# CAS-NO-LAGGING-R32-LIGHT-DESKTOP-POLL
+# This is the cheap heartbeat. Full process topology stays in the slower inventory path.
 function Get-DesktopProcessesCheap {
   $matches = @()
   foreach ($p in @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue)) {
@@ -69,6 +72,8 @@ function Get-DesktopProcessesCheap {
   return @($matches)
 }
 
+# CAS-NO-LAGGING-R32-HEAVY-INVENTORY
+# Full parent topology is intentionally much less frequent than the desktop heartbeat.
 function Get-Inventory {
   $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CreationDate)
   $byId = @{}
@@ -124,6 +129,7 @@ function Track-Candidates($inv) {
   if ($added -gt 0) { Write-Event 'helper_tracked' @{ added=$added; tracked=$tracked.Count } }
 }
 
+# Exact-PID cleanup validation uses process identity and avoids per-PID CIM calls.
 function Same-Identity($record) {
   try {
     $p = Get-Process -Id ([int]$record.Pid) -ErrorAction Stop
@@ -162,8 +168,8 @@ function Cleanup-OldGeneration {
     }
   }
 
-  # Post-stop verification stays exact-PID + creation-time/path identity only.
-  # Never fall back to Stop-Process -Name, taskkill /IM, or broad runtime-name cleanup.
+  # CAS-R43: re-check the exact PID + creation-time/path identity after termination.
+  # Cleanup never broadens from the tracked identity set to an executable-name-wide scope.
   Start-Sleep -Milliseconds 250
   $remaining = @($targets | Where-Object { Same-Identity $_ })
   Write-Event 'cleanup_verified' @{ attempted=$targets.Count; stopped=$stopped; remaining=$remaining.Count }

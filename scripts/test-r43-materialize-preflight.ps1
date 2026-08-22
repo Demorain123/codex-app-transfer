@@ -46,8 +46,31 @@ function Resolve-PythonRunner {
         }
     }
 
+    # First keep compatibility with the classic CPython launcher selector.
     if (Test-PythonRunner -Command 'py' -Prefix @('-3')) {
         return [pscustomobject]@{ Command = 'py'; Prefix = @('-3') }
+    }
+
+    # `py -3` only targets PythonCore and can fail when its registered interpreter
+    # was removed while another PEP 514 provider (for example Astral) is healthy.
+    # Enumerate every launcher-advertised runtime and prove it by actually executing
+    # a tiny Python 3 process.  This avoids trusting stale launcher registrations.
+    try {
+        if (Get-Command 'py' -ErrorAction Stop) {
+            $launcherLines = @(& py --list 2>$null)
+            foreach ($line in $launcherLines) {
+                if ([string]$line -match '^\s*-V:([^\s*]+)') {
+                    $tag = $Matches[1]
+                    $prefix = @("-V:$tag")
+                    if (Test-PythonRunner -Command 'py' -Prefix $prefix) {
+                        return [pscustomobject]@{ Command = 'py'; Prefix = $prefix }
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        # Continue to PATH/filesystem discovery below.
     }
 
     foreach ($name in @('python', 'python3')) {
@@ -56,6 +79,8 @@ function Resolve-PythonRunner {
         }
     }
 
+    # Last-resort discovery for normal per-user / system CPython installs that
+    # exist but are not on PATH. Do not inspect command lines or user files.
     $roots = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
         $env:ProgramFiles,
@@ -83,8 +108,8 @@ function Resolve-PythonRunner {
 
     throw @'
 No working Python 3 runtime was found.
-The Microsoft Store python.exe App Execution Alias is intentionally ignored.
-Quick checks: `py -3 --version` and `Get-Command python,py -All`.
+The Microsoft Store python.exe App Execution Alias and stale `py --list` registrations are intentionally ignored.
+Quick checks: `py --list` and `Get-Command python,py -All`.
 Install/expose Python 3, or set $env:PYTHON to a real python.exe path, then rerun this preflight.
 '@
 }

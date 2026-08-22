@@ -1,33 +1,53 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "src-tauri/src/runtime_diag.rs"
 
 runtime = RUNTIME.read_text(encoding="utf-8")
 
-# Locate by semantic function names rather than whitespace/newline layout.  The r43
-# overlay can temporarily leave classify() syntactically malformed, so the repair
-# gate must not depend on rustfmt-style spacing around the following function.
-start_token = "fn classify("
-end_token = "fn emit_native_event("
-start = runtime.find(start_token)
-end = runtime.find(end_token, start + len(start_token) if start >= 0 else 0)
-if start < 0:
-    raise SystemExit("r43 runtime classifier repair: classify() function marker missing")
-if end < 0 or end <= start:
-    raise SystemExit("r43 runtime classifier repair: emit_native_event() boundary missing")
+# Do not depend on the *name* or formatting of the function after classify().
+# Earlier overlays may rustfmt/rewrite that declaration, and r43 itself can leave
+# classify() temporarily unparsable.  Top-level Rust function declarations are a
+# much more stable boundary than an exact `fn emit_native_event(` substring.
+FN_DECL = re.compile(
+    r"(?m)^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
 
-# Preserve any whitespace immediately before the following function as part of the
-# replacement boundary.  This makes the rebuilt block deterministic without relying
-# on CRLF/LF or one-vs-two blank lines.
-replace_end = end
-while replace_end > start and runtime[replace_end - 1] in " \t\r\n":
-    replace_end -= 1
 
+def locate_function_span(text: str, name: str) -> tuple[int, int]:
+    declarations = list(FN_DECL.finditer(text))
+    matches = [m for m in declarations if m.group(1) == name]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"r43 runtime classifier repair: expected exactly one {name}() declaration, found {len(matches)}"
+        )
+
+    current = matches[0]
+    following = next((m for m in declarations if m.start() > current.start()), None)
+    if following is None:
+        raise SystemExit(
+            f"r43 runtime classifier repair: no following top-level function after {name}()"
+        )
+    return current.start(), following.start()
+
+
+# Contract probes: the boundary locator must survive a renamed/visible/async next
+# function and formatting changes.  These are intentionally independent of the
+# repository source so a future edit cannot silently reintroduce the old brittle
+# emit_native_event-name dependency.
+_probe = """fn classify (lower: &str) -> Option<()> {\n    if lower.contains(\"x\") { return Some(()); }\n    None\n}\n\npub(crate) async fn renamed_runtime_sink (line: &str) {\n    let _ = line;\n}\n"""
+_probe_start, _probe_end = locate_function_span(_probe, "classify")
+if _probe_start != 0 or not _probe[_probe_end:].startswith("pub(crate) async fn renamed_runtime_sink"):
+    raise SystemExit("r43 runtime classifier repair: structural-boundary self-test failed")
+
+start, end = locate_function_span(runtime, "classify")
 segment = runtime[start:end]
-# Fail closed unless this is still the expected r26+r43 classifier surface.
+
+# Fail closed unless this is still the expected r26+r43 classifier surface.  We
+# tolerate formatting and delimiter drift, but never missing behavior.
 for marker in (
     '"agent loop died unexpectedly"',
     '"error submitting message"',
@@ -127,5 +147,6 @@ canonical = '''fn classify(lower: &str) -> Option<(&'static str, &'static str)> 
 
 runtime = runtime[:start] + canonical + runtime[end:]
 RUNTIME.write_text(runtime, encoding="utf-8")
+print("r43 runtime classifier repair: structural function boundary self-test PASS")
 print("r43 runtime classifier repair: canonical classify() rebuilt after semantic verification")
 print("r43 runtime classifier repair: PASS")

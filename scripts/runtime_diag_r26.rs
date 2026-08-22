@@ -1,4 +1,5 @@
 //! CAS-RUNTIME-DIAG-R26
+//! CAS-R43-REWRITE-MODEL-SWITCH-COMPACTION-DIAG
 //!
 //! Diagnostic-only watcher for long-lived Codex Desktop sessions on Windows.
 //! It never restarts, kills, resumes, clears, or rewrites a Codex thread. It only
@@ -222,7 +223,6 @@ fn observe_native_logs(tails: &mut HashMap<PathBuf, TailState>) {
             tails.insert(
                 path.clone(),
                 TailState {
-                    // Never replay historical log contents when r26 attaches.
                     offset: len,
                     carry: String::new(),
                 },
@@ -339,6 +339,9 @@ fn classify(lower: &str) -> Option<(&'static str, &'static str)> {
         ("codex cli process exited", "cli_process_exited", "WARN"),
         ("classifiedasexpected=false", "cli_process_unexpected_exit", "WARN"),
         ("stdio_transport_spawned", "stdio_transport_spawned", "INFO"),
+        ("context automatically compacting", "context_auto_compacting", "INFO"),
+        ("model changed from", "model_switch_selected", "INFO"),
+        ("compact v2 upstream", "compact_v2_upstream_failed", "WARN"),
         ("context automatically compacted", "context_auto_compacted", "INFO"),
         ("remote_compaction_v2", "remote_compaction_v2", "WARN"),
         ("response.failed", "response_failed", "WARN"),

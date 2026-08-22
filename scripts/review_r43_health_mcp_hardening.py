@@ -21,6 +21,7 @@ checks: list[tuple[Path, str]] = [
     (CHAIN, "r43_lifecycle_failure_predicate_clears_on_success"),
     (CHAIN, "r43_compaction_transition_requires_fresh_5xx_and_signal"),
     (RUNTIME, "CAS-R43-MODEL-SWITCH-COMPACTION-DIAG"),
+    (RUNTIME, "CAS-R43-RUNTIME-CLASSIFIER-CANONICAL"),
     (RUNTIME, "context_auto_compacting"),
     (RUNTIME, "model_switch_selected"),
     (RUNTIME, "compact_v2_upstream_failed"),
@@ -46,13 +47,13 @@ if "window_s={R43_SHARED_FAILURE_WINDOW_SECS}" not in chain:
 def powershell_executable_projection(text: str) -> str:
     """Project PowerShell to executable-looking text for forbidden-command review.
 
-    r43 deliberately documents forbidden broad cleanup forms in comments.  Reviewing
-    the raw file therefore self-triggers on its own safety documentation.  PowerShell
+    r43 deliberately documents forbidden broad cleanup forms in comments. Reviewing
+    the raw file therefore self-triggers on its own safety documentation. PowerShell
     ignores # line comments and <# ... #> block comments at runtime, so remove block
     comments and comment-only lines before looking for dangerous executable forms.
 
     End-of-line comments are intentionally retained: any executable command before
-    the # must still be reviewed.  This is a conservative projection, not a parser.
+    the # must still be reviewed. This is a conservative projection, not a parser.
     """
 
     without_blocks = re.sub(r"<#.*?#>", "", text, flags=re.DOTALL)
@@ -91,6 +92,7 @@ print("R43 HEALTH + MCP HARDENING REVIEW PASS")
 print("- latest provider/model/lineage state wins; recovered failures stop voting")
 print("- shared-upstream requires >=2 currently-failed lineages in a 120s window")
 print("- model-switch/compact 5xx is diagnosed before blaming the selected new model")
+print("- runtime classifier is canonically rebuilt after semantic verification")
 print("- MCP status counts verified Codex descendants separately from orphan/external candidates")
 print("- Exit Guard remains exact-PID/identity-only and verifies post-cleanup survivors")
 print("- broad-cleanup review ignores PowerShell comments but still rejects executable name-wide kills")

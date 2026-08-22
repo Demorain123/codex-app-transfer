@@ -15,7 +15,7 @@ FN_DECL = re.compile(
 
 
 def _matching_brace(text: str, opening: int) -> int:
-    # Return one-past the matching body brace, ignoring Rust strings/comments.
+    """Return one-past the function body brace, ignoring Rust strings/comments."""
     depth = 0
     block_depth = 0
     raw_hashes = 0
@@ -113,8 +113,9 @@ def locate_function_span(text: str, name: str) -> tuple[int, int]:
     return match.start(), _matching_brace(text, opening)
 
 
-# Boundary regression: no following function is required, and a following renamed
-# function must not be consumed. Braces in ordinary/raw strings and comments are ignored.
+# Structural-boundary regression tests. No following function is required, and a
+# following renamed/visible/async function must not be consumed. Braces in normal
+# strings, raw strings, line comments and nested block comments are ignored.
 _probe = r'''fn classify(lower: &str) -> Option<()> {
     let a = "{ string }";
     let b = r#"{ raw }"#;
@@ -137,34 +138,24 @@ if locate_function_span(_probe_last, "classify") != (0, len(_probe_last)):
 start, end = locate_function_span(runtime, "classify")
 segment = runtime[start:end]
 
-for marker in (
+# IMPORTANT: this stage is a canonical *repair* gate. Requiring every historical
+# classifier entry to already survive would make the repair unable to repair the
+# exact drift it exists to fix. Verify only enough identity + r43 transition
+# surface to prove we found the intended function, then rebuild the complete known
+# classifier below and verify every required behavior after the write.
+identity_markers = (
     '"agent loop died unexpectedly"',
     '"error submitting message"',
-    '"error creating task"',
-    '"failed to start turn"',
-    '"app-server connection closed"',
-    '"codex cli process exited"',
-    '"classifiedasexpected=false"',
-    '"stdio_transport_spawned"',
     '"context automatically compacting"',
     '"model changed from"',
     '"compact v2 upstream"',
     '"context automatically compacted"',
-    '"remote_compaction_v2"',
-    '"stream disconnected"',
-    '"response.failed"',
-    '"reconnecting"',
-    '"upstream request failed"',
     '"collabtoolcall"',
-    '"spawn_agent"',
-    '"send_input"',
-    '"resume_agent"',
-    '"close_agent"',
-    '"wait"',
-):
+)
+for marker in identity_markers:
     if marker not in segment:
         raise SystemExit(
-            f"r43 runtime classifier repair: expected semantic marker missing: {marker}"
+            f"r43 runtime classifier repair: intended classify() identity marker missing: {marker}"
         )
 
 canonical = '''fn classify(lower: &str) -> Option<(&'static str, &'static str)> {
@@ -214,9 +205,43 @@ canonical = '''fn classify(lower: &str) -> Option<(&'static str, &'static str)> 
 replace_end = end
 while replace_end < len(runtime) and runtime[replace_end] in " \t\r\n":
     replace_end += 1
-
 runtime = runtime[:start] + canonical + runtime[replace_end:]
+
+# Post-repair contract: after canonicalization every inherited r26 behavior and
+# every r43 transition classifier must exist in the rebuilt function. This catches
+# accidental omission without requiring broken input to already be perfect.
+post_start, post_end = locate_function_span(runtime, "classify")
+post = runtime[post_start:post_end]
+required_after = (
+    '"agent loop died unexpectedly"',
+    '"error submitting message"',
+    '"error creating task"',
+    '"failed to start turn"',
+    '"app-server connection closed"',
+    '"codex cli process exited"',
+    '"classifiedasexpected=false"',
+    '"stdio_transport_spawned"',
+    '"context automatically compacting"',
+    '"model changed from"',
+    '"compact v2 upstream"',
+    '"context automatically compacted"',
+    '"remote_compaction_v2"',
+    '"stream disconnected"',
+    '"response.failed"',
+    '"reconnecting"',
+    '"upstream request failed"',
+    '"collabtoolcall"',
+    '"spawn_agent"',
+    '"send_input"',
+    '"resume_agent"',
+    '"close_agent"',
+    '"wait"',
+)
+for marker in required_after:
+    if marker not in post:
+        raise SystemExit(f"r43 runtime classifier repair: canonical post-repair marker missing: {marker}")
+
 RUNTIME.write_text(runtime, encoding="utf-8")
 print("r43 runtime classifier repair: balanced-brace self-tests PASS")
-print("r43 runtime classifier repair: canonical classify() rebuilt after semantic verification")
+print("r43 runtime classifier repair: canonical classifier post-repair contract PASS")
 print("r43 runtime classifier repair: PASS")

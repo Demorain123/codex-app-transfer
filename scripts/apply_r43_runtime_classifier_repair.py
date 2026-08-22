@@ -6,12 +6,25 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "src-tauri/src/runtime_diag.rs"
 
 runtime = RUNTIME.read_text(encoding="utf-8")
-start_token = "fn classify(lower: &str) -> Option<(&'static str, &'static str)> {"
-end_token = "\nfn emit_native_event("
+
+# Locate by semantic function names rather than whitespace/newline layout.  The r43
+# overlay can temporarily leave classify() syntactically malformed, so the repair
+# gate must not depend on rustfmt-style spacing around the following function.
+start_token = "fn classify("
+end_token = "fn emit_native_event("
 start = runtime.find(start_token)
-end = runtime.find(end_token, start if start >= 0 else 0)
-if start < 0 or end < 0:
-    raise SystemExit("r43 runtime classifier repair: classify/emit boundary missing")
+end = runtime.find(end_token, start + len(start_token) if start >= 0 else 0)
+if start < 0:
+    raise SystemExit("r43 runtime classifier repair: classify() function marker missing")
+if end < 0 or end <= start:
+    raise SystemExit("r43 runtime classifier repair: emit_native_event() boundary missing")
+
+# Preserve any whitespace immediately before the following function as part of the
+# replacement boundary.  This makes the rebuilt block deterministic without relying
+# on CRLF/LF or one-vs-two blank lines.
+replace_end = end
+while replace_end > start and runtime[replace_end - 1] in " \t\r\n":
+    replace_end -= 1
 
 segment = runtime[start:end]
 # Fail closed unless this is still the expected r26+r43 classifier surface.
@@ -109,6 +122,7 @@ canonical = '''fn classify(lower: &str) -> Option<(&'static str, &'static str)> 
     }
     None
 }
+
 '''
 
 runtime = runtime[:start] + canonical + runtime[end:]

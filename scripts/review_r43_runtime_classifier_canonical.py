@@ -51,15 +51,17 @@ for marker in required:
             f"r43 runtime canonical review: required marker is not inside classify(): {marker}"
         )
 
-for marker in (
-    "CAS-R43-RUNTIME-CLASSIFIER-CANONICAL",
-    '"collabtoolcall"',
-    '"remote_compaction_v2"',
+# remote_compaction_v2 appears twice by design in its classifier tuple: needle +
+# event name.  The other sentinels remain singletons.
+for marker, expected_count in (
+    ("CAS-R43-RUNTIME-CLASSIFIER-CANONICAL", 1),
+    ('"collabtoolcall"', 1),
+    ('"remote_compaction_v2"', 2),
 ):
     count = text.count(marker)
-    if count != 1:
+    if count != expected_count:
         raise SystemExit(
-            f"r43 runtime canonical review: expected exactly one {marker}, found {count}"
+            f"r43 runtime canonical review: expected {expected_count} occurrence(s) of {marker}, found {count}"
         )
 
 # The canonical function must end before the emit sink.  This catches the exact
@@ -82,4 +84,5 @@ for marker in ('"collabtoolcall"', '"remote_compaction_v2"', '"model changed fro
 print("R43 RUNTIME CLASSIFIER CANONICAL REVIEW PASS")
 print("- exactly one classify() and one emit_native_event()")
 print("- inherited + model-switch + compaction + collab markers are inside classify()")
+print("- marker cardinality matches canonical classifier semantics")
 print("- no orphan classifier block survives before/after the emit sink")

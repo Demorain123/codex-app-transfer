@@ -46,8 +46,6 @@ function Resolve-PythonRunner {
         }
     }
 
-    # On Windows the Python launcher is more reliable than a bare `python`
-    # because `python.exe` can be a Microsoft Store App Execution Alias.
     if (Test-PythonRunner -Command 'py' -Prefix @('-3')) {
         return [pscustomobject]@{ Command = 'py'; Prefix = @('-3') }
     }
@@ -58,8 +56,6 @@ function Resolve-PythonRunner {
         }
     }
 
-    # Last-resort discovery for normal per-user / system CPython installs that
-    # exist but are not on PATH. Do not inspect command lines or user files.
     $roots = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Python'),
         $env:ProgramFiles,
@@ -95,8 +91,8 @@ Install/expose Python 3, or set $env:PYTHON to a real python.exe path, then reru
 
 function Invoke-Python {
     param([Parameter(Mandatory)][string]$Script)
-    $args = @($script:PythonRunner.Prefix) + @($Script)
-    Invoke-Checked $script:PythonRunner.Command @args
+    $runnerArgs = @($script:PythonRunner.Prefix) + @($Script)
+    Invoke-Checked -Command $script:PythonRunner.Command -Arguments $runnerArgs
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

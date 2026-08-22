@@ -1,4 +1,5 @@
 # CAS-NO-LAGGING-R32-MCP-EXIT-GUARD
+# CAS-R43-REWRITE-POST-CLEANUP-VERIFICATION
 # Background Windows watcher for Codex Desktop generations.
 # It never terminates helpers while the exact Codex Desktop executable is running.
 # It does not read or log process command lines, prompts, tokens, or thread content.
@@ -19,9 +20,6 @@ $stateDir = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Co
 New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
 $logPath = Join-Path $stateDir 'events.jsonl'
 
-# Key the singleton to the exact packaged executable path. A future Codex update can
-# therefore start a watcher for its new package path even if an old watcher has not
-# noticed package removal yet. Old watchers self-retire after their executable vanishes.
 $sha = [Security.Cryptography.SHA256]::Create()
 try {
   $hashBytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($ExactCodexExe.ToLowerInvariant()))
@@ -58,9 +56,6 @@ function Start-Ticks($creationDate) {
   try { return ([datetime]$creationDate).ToUniversalTime().Ticks } catch { return $null }
 }
 
-# CAS-NO-LAGGING-R32-LIGHT-DESKTOP-POLL
-# This is the 2-second heartbeat. Do not replace it with full Win32_Process CIM
-# enumeration: repeated WMI inventory has itself been implicated in Windows input lag.
 function Get-DesktopProcessesCheap {
   $matches = @()
   foreach ($p in @(Get-Process -Name 'ChatGPT','Codex' -ErrorAction SilentlyContinue)) {
@@ -74,8 +69,6 @@ function Get-DesktopProcessesCheap {
   return @($matches)
 }
 
-# CAS-NO-LAGGING-R32-HEAVY-INVENTORY
-# Full parent topology is intentionally much less frequent than the desktop heartbeat.
 function Get-Inventory {
   $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CreationDate)
   $byId = @{}
@@ -131,8 +124,6 @@ function Track-Candidates($inv) {
   if ($added -gt 0) { Write-Event 'helper_tracked' @{ added=$added; tracked=$tracked.Count } }
 }
 
-# Exact-PID cleanup validation uses System.Diagnostics.Process rather than per-PID CIM,
-# keeping WMI out of the exit/cleanup hot path while retaining PID-reuse protection.
 function Same-Identity($record) {
   try {
     $p = Get-Process -Id ([int]$record.Pid) -ErrorAction Stop
@@ -154,10 +145,9 @@ function Cleanup-OldGeneration {
     return $false
   }
 
-  $survivors = @($tracked.Values | Where-Object { Same-Identity $_ } | Sort-Object Depth -Descending)
+  $targets = @($tracked.Values | Where-Object { Same-Identity $_ } | Sort-Object Depth -Descending)
   $stopped = 0
-  foreach ($r in $survivors) {
-    # Cheap race guard immediately before every exact-PID stop.
+  foreach ($r in $targets) {
     if (@(Get-DesktopProcessesCheap).Count -gt 0) {
       Write-Event 'cleanup_cancelled_desktop_reappeared' @{ stopped=$stopped }
       return $false
@@ -171,7 +161,13 @@ function Cleanup-OldGeneration {
       Write-Event 'helper_stop_failed' @{ pid=$r.Pid; name=$r.Name }
     }
   }
-  Write-Event 'cleanup_complete' @{ tracked=$tracked.Count; survivors=$survivors.Count; stopped=$stopped }
+
+  # Post-stop verification stays exact-PID + creation-time/path identity only.
+  # Never fall back to Stop-Process -Name, taskkill /IM, or broad runtime-name cleanup.
+  Start-Sleep -Milliseconds 250
+  $remaining = @($targets | Where-Object { Same-Identity $_ })
+  Write-Event 'cleanup_verified' @{ attempted=$targets.Count; stopped=$stopped; remaining=$remaining.Count }
+  Write-Event 'cleanup_complete' @{ tracked=$tracked.Count; attempted=$targets.Count; survivors=$remaining.Count; stopped=$stopped }
   return $true
 }
 
@@ -222,9 +218,6 @@ try {
 
     if ($null -eq $zeroSince) {
       $zeroSince = Get-Date
-      # One final topology pass catches long-lived helpers created since the previous
-      # 15-second inventory. Reuse the remembered Desktop PIDs as dead-root ancestry
-      # anchors; Get-Desktop-Ancestry checks those IDs before requiring a live parent row.
       try {
         $finalInv = Get-Inventory
         $finalInv.DesktopIds = $generationDesktopIds
@@ -245,7 +238,6 @@ try {
       $generationDesktopIds = @{}
       Write-Event 'guard_waiting_next_generation'
     } else {
-      # Safety wins over cleanup. Re-enter discovery and build fresh ownership evidence.
       $seenDesktop = $false
       $zeroSince = $null
       $tracked.Clear()

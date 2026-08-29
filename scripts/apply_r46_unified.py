@@ -27,6 +27,7 @@ run("scripts/apply_r46_thread_recovery_backend_fixes.py")
 run("scripts/apply_r46_thread_recovery_backup_hardening.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
+run("scripts/apply_r46_recovery_explainability_ui.py")
 run("scripts/apply_r46_chain_health_recovery_hint.py")
 
 REVISION.write_text("46\n", encoding="utf-8")
@@ -64,8 +65,12 @@ checks = {
     ),
     "frontend/src/pages/ProxyPage.vue": (
         "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI",
+        "CAS-R46-RECOVERY-EXPLAINABILITY-UI",
         "同 ID 回退 1 轮（推荐）",
         "创建恢复副本（原会话不动）",
+        "旧会话恢复（先预览）",
+        "已尝试，先查看结果",
+        "相同故障指纹已经尝试过一次",
     ),
     "frontend/src/api/threadRecovery.ts": (
         "/api/thread-recovery/preview",
@@ -87,6 +92,8 @@ print("R46 UNIFIED COMPOSITION PASS")
 print("- r45 model-switch continuity + metadata truth + semantic terminal base preserved")
 print("- privacy-bounded structural model-switch forensics v2 added")
 print("- read-only old-thread recovery preview added")
+print("- recovery buttons explain applicability / side effects before execution")
+print("- unchanged fault signature is locked after one generic repair attempt")
 print("- same-thread one-turn rewind prefers thread/revert, method-not-found falls back to rollback(1)")
 print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")

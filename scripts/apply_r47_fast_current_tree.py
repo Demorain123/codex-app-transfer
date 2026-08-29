@@ -24,6 +24,7 @@ def run(rel: str) -> None:
 # Warm workspace: r24-r45 historical replay remains skipped.
 run("scripts/apply_r46_fast_current_tree.py")
 run("scripts/apply_r47_codex_temp_dir.py")
+run("scripts/apply_r47_frontend_invalidate_once.py")
 
 REVISION.write_text("47\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -59,4 +60,5 @@ if "compat_revision=47" not in version or "app_version=2.4.5+47" not in version:
 print("R47 FAST CURRENT-TREE COMPOSITION PASS")
 print("- r46 generated baseline/cache path reused")
 print("- only r47 Codex custom-temp overlay added")
+print("- custom-temp settings UI invalidates stale frontend assets once")
 print("- no user/system environment mutation")

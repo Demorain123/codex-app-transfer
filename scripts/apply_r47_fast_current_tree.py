@@ -49,6 +49,7 @@ else:
 
 run("scripts/apply_r47_codex_temp_dir.py")
 run("scripts/apply_r47_temp_toggle_restart_fix.py")
+run("scripts/apply_r47_agent_loop_recovery.py")
 run("scripts/apply_r47_frontend_invalidate_once.py")
 
 version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
@@ -76,6 +77,18 @@ checks = {
         "codexCustomTempDir",
         "settings.codexCustomTempApplyRestart",
     ),
+    "src-tauri/src/admin/handlers/chain_health.rs": (
+        "CAS-R47-AGENT-LOOP-RECOVERY",
+        'recent_log_age_r37("agent_loop_died"',
+        '"fault_codex_agent_loop"',
+        'return "codex_agent_loop_failure"',
+    ),
+    "frontend/src/pages/ProxyPage.vue": (
+        "CAS-R47-AGENT-LOOP-RECOVERY",
+        "codexAgentLoopDetected",
+        "onRestartCodexForAgentLoop",
+        "重启 Codex（agent loop）",
+    ),
 }
 for rel, markers in checks.items():
     text = (ROOT / rel).read_text(encoding="utf-8")
@@ -89,8 +102,10 @@ if "compat_revision=47" not in version or "app_version=2.4.5+47" not in version:
 
 print("R47 FAST CURRENT-TREE COMPOSITION PASS")
 print("- complete generated r46 baseline is reused without replay when present")
-print("- only r47 Codex custom-temp overlay is added")
+print("- r47 custom-temp launch overlay is applied")
+print("- sanitized agent_loop_died is classified as a local Codex turn-start failure")
+print("- agent-loop recovery exposes one targeted Codex-only restart; provider/Docker/gateway/history/workspace stay untouched")
 print("- compatibility revision stamping runs only on the first r46→r47 transition")
 print("- disabling custom temp still leaves Apply/Restart reachable")
-print("- custom-temp settings UI invalidates stale frontend assets once")
+print("- r47 UI changes invalidate stale frontend assets once")
 print("- no user/system environment mutation")

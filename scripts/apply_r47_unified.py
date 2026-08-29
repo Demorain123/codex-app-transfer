@@ -23,6 +23,7 @@ def run(rel: str) -> None:
 run("scripts/apply_r46_unified.py")
 run("scripts/apply_r47_codex_temp_dir.py")
 run("scripts/apply_r47_temp_toggle_restart_fix.py")
+run("scripts/apply_r47_agent_loop_recovery.py")
 run("scripts/apply_r47_frontend_invalidate_once.py")
 
 REVISION.write_text("47\n", encoding="utf-8")
@@ -57,6 +58,20 @@ checks = {
         '"codexCustomTempEnabled": false',
         '"codexCustomTempDir": ""',
     ),
+    "src-tauri/src/admin/handlers/chain_health.rs": (
+        "CAS-R47-AGENT-LOOP-RECOVERY",
+        'recent_log_age_r37("agent_loop_died"',
+        '"fault_codex_agent_loop"',
+        'return "codex_agent_loop_failure"',
+        "use_targeted_codex_restart",
+    ),
+    "frontend/src/pages/ProxyPage.vue": (
+        "CAS-R47-AGENT-LOOP-RECOVERY",
+        "restartCodexApp",
+        "codexAgentLoopDetected",
+        "onRestartCodexForAgentLoop",
+        "重启 Codex（agent loop）",
+    ),
 }
 for rel, markers in checks.items():
     text = (ROOT / rel).read_text(encoding="utf-8")
@@ -71,8 +86,10 @@ if "compat_revision=47" not in version or "app_version=2.4.5+47" not in version:
 print("R47 UNIFIED COMPOSITION PASS")
 print("- complete r46 model-switch/recovery tree preserved")
 print("- Windows Transfer-launched Codex can use a user-selected process-local TEMP/TMP/TMPDIR")
+print("- sanitized agent_loop_died / failed_to_start_turn are classified before provider/upstream")
+print("- local agent-loop faults get one explicit Codex-only restart action, not a generic infrastructure repair")
 print("- user/system environment and CODEX_HOME remain unchanged")
 print("- invalid custom temp fails closed; no silent fallback to system temp")
 print("- disabling custom temp can immediately restart back onto inherited system TEMP")
-print("- custom-temp settings UI forces one frontend rebuild, then returns to warm reuse")
+print("- r47 UI changes force one frontend rebuild, then return to warm reuse")
 print("- no existing temp cache is moved or deleted")

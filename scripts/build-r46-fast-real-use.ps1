@@ -16,9 +16,11 @@ function Invoke-Checked {
         [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
     )
     Write-Host "`n> $Command $($Arguments -join ' ')" -ForegroundColor Cyan
+    $global:LASTEXITCODE = 0
     & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed ($LASTEXITCODE): $Command $($Arguments -join ' ')"
+    $exitCode = $global:LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Command failed ($exitCode): $Command $($Arguments -join ' ')"
     }
 }
 
@@ -32,11 +34,16 @@ function Parse-RustVersion {
 
 function Get-StableRustVersion {
     param([Parameter(Mandatory)][string]$Rustup)
-    $line = (& $Rustup run stable rustc --version | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not $line) {
+    # Under Set-StrictMode, $LASTEXITCODE may be undefined before the first native
+    # process in this scope. Initialize it explicitly, capture all output, then parse.
+    $global:LASTEXITCODE = 0
+    $output = @(& $Rustup run stable rustc --version 2>&1)
+    $exitCode = $global:LASTEXITCODE
+    $line = $output | Select-Object -First 1
+    if ($exitCode -ne 0 -or -not $line) {
         return $null
     }
-    return Parse-RustVersion $line.Trim()
+    return Parse-RustVersion ([string]$line).Trim()
 }
 
 function Invoke-StableCargo {
@@ -45,9 +52,11 @@ function Invoke-StableCargo {
         [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
     )
     Write-Host "`n> rustup run stable cargo $($Arguments -join ' ')" -ForegroundColor Cyan
+    $global:LASTEXITCODE = 0
     & $Rustup run stable cargo @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed ($LASTEXITCODE): rustup run stable cargo $($Arguments -join ' ')"
+    $exitCode = $global:LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Command failed ($exitCode): rustup run stable cargo $($Arguments -join ' ')"
     }
 }
 
@@ -117,8 +126,9 @@ if ($rustVersion -and $rustVersion -ge $minimumRust) {
     Write-Host "Stable Rust already ready: $rustVersion; SKIP rustup update." -ForegroundColor Green
 } else {
     Write-Host "Stable Rust missing/too old; updating stable toolchain..." -ForegroundColor Yellow
+    $global:LASTEXITCODE = 0
     & $rustup update stable
-    $updateExit = $LASTEXITCODE
+    $updateExit = $global:LASTEXITCODE
     $rustVersion = Get-StableRustVersion $rustup
     if (-not $rustVersion -or $rustVersion -lt $minimumRust) {
         throw "Stable Rust is still unavailable or < $minimumRust after rustup update (exit=$updateExit)."
@@ -132,8 +142,9 @@ Write-Host "Using stable rustc: $rustVersion" -ForegroundColor Green
 Write-Host "`n[4/6] Locate Tauri" -ForegroundColor Green
 $tauriAvailable = $false
 try {
+    $global:LASTEXITCODE = 0
     & $rustup run stable cargo tauri --version *> $null
-    $tauriAvailable = ($LASTEXITCODE -eq 0)
+    $tauriAvailable = ($global:LASTEXITCODE -eq 0)
 } catch { $tauriAvailable = $false }
 if (-not $tauriAvailable) {
     if ($SkipTauriInstall) {

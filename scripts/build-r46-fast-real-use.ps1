@@ -29,9 +29,9 @@ Write-Host 'Codex App Transfer r46 - FAST REAL-USE BUILD' -ForegroundColor Green
 Write-Host '============================================================' -ForegroundColor Green
 Write-Host 'Purpose: get to real old-thread testing as fast as possible.'
 Write-Host 'Skipped: Rust unit tests / cargo check / legacy stress / release proof.' -ForegroundColor Yellow
-Write-Host 'Included: r46 materialization + actual Windows NSIS compilation.'
+Write-Host 'Included: r46 materialization + required frontend build + actual Windows NSIS compilation.'
 
-Write-Host "`n[1/4] Materialize r46" -ForegroundColor Green
+Write-Host "`n[1/5] Materialize r46" -ForegroundColor Green
 Invoke-Checked 'python' '.\scripts\apply_r46_unified.py'
 
 $versionPath = Join-Path $repoRoot 'SUB2API_GROK_COMPAT_VERSION.txt'
@@ -41,7 +41,26 @@ if ($versionFile -notmatch 'compat_revision=46' -or $versionFile -notmatch 'app_
 }
 Write-Host $versionFile.Trim() -ForegroundColor Green
 
-Write-Host "`n[2/4] Locate Cargo / Tauri" -ForegroundColor Green
+Write-Host "`n[2/5] Build required frontend assets" -ForegroundColor Green
+$frontendDir = Join-Path $repoRoot 'frontend'
+$nodeModules = Join-Path $frontendDir 'node_modules'
+Push-Location $frontendDir
+try {
+    if (-not (Test-Path -LiteralPath $nodeModules -PathType Container)) {
+        Write-Host 'frontend/node_modules missing; running npm ci once...' -ForegroundColor Yellow
+        Invoke-Checked 'npm.cmd' 'ci'
+    }
+    Invoke-Checked 'npm.cmd' 'run' 'build'
+} finally {
+    Pop-Location
+}
+$frontendIndex = Join-Path $frontendDir 'dist\index.html'
+if (-not (Test-Path -LiteralPath $frontendIndex -PathType Leaf)) {
+    throw "Frontend build completed but dist/index.html is missing: $frontendIndex"
+}
+Write-Host "Frontend assets ready: $frontendIndex" -ForegroundColor Green
+
+Write-Host "`n[3/5] Locate Cargo / Tauri" -ForegroundColor Green
 $cargo = (Get-Command cargo.exe -ErrorAction SilentlyContinue).Source
 if (-not $cargo) {
     $cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
@@ -62,9 +81,7 @@ if (-not $tauriAvailable) {
     Invoke-Checked $cargo 'install' 'tauri-cli' '--version' '^2' '--locked'
 }
 
-Write-Host "`n[3/4] Build actual Windows NSIS package" -ForegroundColor Green
-# Tauri runs the configured frontend beforeBuildCommand itself. Do not run a second
-# npm production build here: this script intentionally optimizes time-to-real-test.
+Write-Host "`n[4/5] Build actual Windows NSIS package" -ForegroundColor Green
 Push-Location (Join-Path $repoRoot 'src-tauri')
 try {
     Invoke-Checked $cargo 'tauri' 'build' '--target' $target '--bundles' 'nsis'
@@ -72,7 +89,7 @@ try {
     Pop-Location
 }
 
-Write-Host "`n[4/4] Copy real-use installer" -ForegroundColor Green
+Write-Host "`n[5/5] Copy real-use installer" -ForegroundColor Green
 $appVersionLine = ($versionFile -split "`r?`n" | Where-Object { $_ -like 'app_version=*' } | Select-Object -First 1)
 $appVersion = if ($appVersionLine) { $appVersionLine.Substring('app_version='.Length) } else { '2.4.5+46' }
 $safeVersion = $appVersion -replace '\+', '-r'
@@ -102,6 +119,7 @@ $manifest = [ordered]@{
     fullReleaseValidation = $false
     skipped = @('Rust unit tests','cargo check','legacy stress','release proof')
     materialization = 'passed'
+    frontendBuild = 'passed'
     windowsNsisCompilation = 'passed'
     realThreadRecoveryExecutedDuringBuild = $false
     installer = $dest

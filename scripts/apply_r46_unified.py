@@ -27,6 +27,7 @@ run("scripts/apply_r46_thread_recovery_backend_fixes.py")
 run("scripts/apply_r46_thread_recovery_backup_hardening.py")
 run("scripts/apply_r46_recovery_backup_vdrive_hotfix.py")
 run("scripts/apply_r46_codex_cli_launchability_hotfix.py")
+run("scripts/apply_r46_codex_cli_shadow_copy_hotfix.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 run("scripts/apply_r46_recovery_explainability_preflight.py")
@@ -52,9 +53,11 @@ checks = {
         "CAS-R46-RECOVERY-STATE-DB-BACKUP",
         "CAS-R46-RECOVERY-BACKUP-VDRIVE",
         "CAS-R46-CODEX-CLI-LAUNCHABILITY-HOTFIX",
+        "CAS-R46-CODEX-CLI-SHADOW-COPY",
         "CODEX_APP_TRANSFER_RECOVERY_BACKUP_DIR",
         "Codex-App-Transfer-Recovery-Backups",
         "find_launchable_codex_cli",
+        "shadow_copy_running_codex_cli",
         "thread/revert",
         "thread/rollback",
         "thread/fork",
@@ -111,6 +114,6 @@ print("- same-thread one-turn rewind prefers thread/revert, method-not-found fal
 print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")
 print("- large recovery backups prefer V:\\Codex-App-Transfer-Recovery-Backups instead of the system drive")
-print("- recovery uses a launch-preflighted Codex CLI and avoids protected MSIX process paths")
+print("- recovery uses a launch-preflighted Codex CLI and can shadow-copy the running Desktop native runtime to V:")
 print("- chain-health session/context faults point to the recovery center instead of restart loops")
 print("- workspace files are never reverted by r46 recovery")

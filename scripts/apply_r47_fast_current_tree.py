@@ -39,9 +39,6 @@ def has_complete_r46_generated_baseline() -> bool:
     )
 
 
-# FAST policy: a proven generated r46 working tree is the baseline. Do not replay
-# successful r46 hotfixes on every r47 iteration. Only repair/bootstrap r46 when one
-# of its required markers is genuinely absent.
 if has_complete_r46_generated_baseline():
     print("R47 FAST BASELINE: complete generated r46 tree detected; R46 COMPOSITION SKIP")
 else:
@@ -51,10 +48,9 @@ else:
         raise SystemExit("r47 fast baseline repair completed but required r46 markers are still missing")
 
 run("scripts/apply_r47_codex_temp_dir.py")
+run("scripts/apply_r47_temp_toggle_restart_fix.py")
 run("scripts/apply_r47_frontend_invalidate_once.py")
 
-# The heavy compatibility revision materializer only needs to run on the first r46→r47
-# transition. Later r47 hotfix builds keep the already-stamped generated tree.
 version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
 if "compat_revision=47" not in version_before or "app_version=2.4.5+47" not in version_before:
     REVISION.write_text("47\n", encoding="utf-8")
@@ -75,6 +71,7 @@ checks = {
     ),
     "frontend/src/pages/SettingsPage.vue": (
         "CAS-R47-CODEX-CUSTOM-TEMP",
+        "CAS-R47-TEMP-TOGGLE-RESTART-FIX",
         "codexCustomTempEnabled",
         "codexCustomTempDir",
         "settings.codexCustomTempApplyRestart",
@@ -94,5 +91,6 @@ print("R47 FAST CURRENT-TREE COMPOSITION PASS")
 print("- complete generated r46 baseline is reused without replay when present")
 print("- only r47 Codex custom-temp overlay is added")
 print("- compatibility revision stamping runs only on the first r46→r47 transition")
+print("- disabling custom temp still leaves Apply/Restart reachable")
 print("- custom-temp settings UI invalidates stale frontend assets once")
 print("- no user/system environment mutation")

@@ -28,6 +28,7 @@ run("scripts/apply_r46_thread_recovery_backup_hardening.py")
 run("scripts/apply_r46_recovery_backup_vdrive_hotfix.py")
 run("scripts/apply_r46_codex_cli_launchability_hotfix.py")
 run("scripts/apply_r46_codex_cli_shadow_copy_hotfix.py")
+run("scripts/apply_r46_revert_compat_logging_hotfix.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 run("scripts/apply_r46_recovery_explainability_preflight.py")
@@ -54,10 +55,14 @@ checks = {
         "CAS-R46-RECOVERY-BACKUP-VDRIVE",
         "CAS-R46-CODEX-CLI-LAUNCHABILITY-HOTFIX",
         "CAS-R46-CODEX-CLI-SHADOW-COPY",
+        "CAS-R46-REVERT-COMPAT-LOGGING-HOTFIX",
         "CODEX_APP_TRANSFER_RECOVERY_BACKUP_DIR",
         "Codex-App-Transfer-Recovery-Backups",
         "find_launchable_codex_cli",
         "shadow_copy_running_codex_cli",
+        "stage=rpc_call",
+        "stage=rpc_error",
+        "stage=rpc_ok",
         "thread/revert",
         "thread/rollback",
         "thread/fork",
@@ -110,7 +115,8 @@ print("- privacy-bounded structural model-switch forensics v2 added")
 print("- read-only old-thread recovery preview added")
 print("- recovery buttons explain applicability / side effects before execution")
 print("- unchanged fault signature is locked in both UI and backend after one generic repair attempt")
-print("- same-thread one-turn rewind prefers thread/revert, method-not-found falls back to rollback(1)")
+print("- same-thread one-turn rewind prefers thread/revert; old app-server unknown-variant/method-not-found falls back to rollback(1)")
+print("- recovery RPC call/error/success stages are logged without dumping full app-server error bodies")
 print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")
 print("- large recovery backups prefer V:\\Codex-App-Transfer-Recovery-Backups instead of the system drive")

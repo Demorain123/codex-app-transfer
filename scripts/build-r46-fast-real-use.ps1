@@ -71,19 +71,63 @@ function Find-Nasm {
     $cmd = Get-Command nasm.exe -ErrorAction SilentlyContinue
     if (-not $cmd) { $cmd = Get-Command nasm -ErrorAction SilentlyContinue }
     if ($cmd) { return $cmd.Source }
+
+    # Known NASM installer layouts seen across current and older Windows installers.
     $roots = @(
         (Join-Path $env:ProgramFiles 'NASM'),
         (Join-Path ${env:ProgramFiles(x86)} 'NASM'),
-        (Join-Path $env:LOCALAPPDATA 'Programs\NASM')
+        (Join-Path $env:LOCALAPPDATA 'NASM'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\NASM'),
+        (Join-Path $env:USERPROFILE 'AppData\Local\NASM'),
+        (Join-Path $env:USERPROFILE 'AppData\Local\Programs\NASM')
     ) | Where-Object { $_ }
+
     foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
         $direct = Join-Path $root 'nasm.exe'
         if (Test-Path -LiteralPath $direct -PathType Leaf) { return $direct }
-        if (Test-Path -LiteralPath $root -PathType Container) {
-            $found = Get-ChildItem -LiteralPath $root -Filter nasm.exe -File -Recurse -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-            if ($found) { return $found.FullName }
+        $found = Get-ChildItem -LiteralPath $root -Filter nasm.exe -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+
+    # Winget/NSIS may register the real install directory without adding it to PATH.
+    $uninstallRoots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    foreach ($uninstallRoot in $uninstallRoots) {
+        $entries = Get-ItemProperty -Path $uninstallRoot -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match '^(NASM|Netwide Assembler)' }
+        foreach ($entry in $entries) {
+            $candidateDirs = @()
+            if ($entry.InstallLocation) { $candidateDirs += [string]$entry.InstallLocation }
+            if ($entry.DisplayIcon) {
+                $iconPath = ([string]$entry.DisplayIcon).Trim('"') -replace ',\d+$',''
+                if ($iconPath) { $candidateDirs += (Split-Path -Parent $iconPath) }
+            }
+            if ($entry.UninstallString) {
+                $u = [string]$entry.UninstallString
+                if ($u -match '^"([^"]+)"') { $candidateDirs += (Split-Path -Parent $Matches[1]) }
+            }
+            foreach ($dir in ($candidateDirs | Where-Object { $_ } | Select-Object -Unique)) {
+                if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+                $direct = Join-Path $dir 'nasm.exe'
+                if (Test-Path -LiteralPath $direct -PathType Leaf) { return $direct }
+                $found = Get-ChildItem -LiteralPath $dir -Filter nasm.exe -File -Recurse -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+                if ($found) { return $found.FullName }
+            }
         }
+    }
+
+    # Last bounded fallback: search only Program Files trees, not the whole drive.
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $root -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        $found = Get-ChildItem -LiteralPath $root -Filter nasm.exe -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
     }
     return $null
 }
@@ -209,15 +253,11 @@ if (-not $nasm) {
     if (-not $winget) { throw 'NASM is required by BoringSSL, but nasm and winget were both not found.' }
     Write-Host 'NASM missing; installing NASM.NASM once with winget...' -ForegroundColor Yellow
     Invoke-Checked $winget 'install' '--id' 'NASM.NASM' '--exact' '--silent' '--accept-package-agreements' '--accept-source-agreements'
+    $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ($machinePath -or $userPath) { $env:PATH = "$machinePath;$userPath;$env:PATH" }
     $nasm = Find-Nasm
-    if (-not $nasm) {
-        # Refresh PATH from machine/user environment once, then probe again.
-        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-        if ($machinePath -or $userPath) { $env:PATH = "$machinePath;$userPath;$env:PATH" }
-        $nasm = Find-Nasm
-    }
-    if (-not $nasm) { throw 'winget reported success, but nasm.exe was still not found.' }
+    if (-not $nasm) { throw 'winget reported success, but nasm.exe was still not found after PATH refresh, registry probe, and bounded Program Files scan.' }
 } else {
     Write-Host "NASM already available; SKIP install: $nasm" -ForegroundColor Green
 }

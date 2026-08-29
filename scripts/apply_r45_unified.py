@@ -21,9 +21,10 @@ def run(rel: str) -> None:
 
 
 # Preserve the r43 verified health/MCP composition, then add only the runtime
-# continuity + semantic-terminal transform.
+# continuity + semantic-terminal transforms.
 run("scripts/apply_r43_unified.py")
 run("scripts/apply_r45_model_switch_continuity.py")
+run("scripts/apply_r45_compaction_detector_safety.py")
 
 REVISION.write_text("45\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -33,6 +34,7 @@ checks = {
         "CAS-R45-MODEL-SWITCH-CONTINUITY",
         "effective-models-r45.json",
         "rebind_compaction_model",
+        "CAS-R45-COMPACTION-DETECTOR-SAFETY",
         "CAS-R45-RESPONSES-SEMANTIC-TERMINAL",
         "response_eof_without_terminal",
         "r45_compaction_helper_detection_is_structural",
@@ -62,5 +64,6 @@ print("R45 UNIFIED COMPOSITION PASS")
 print("- r43 health/MCP base preserved")
 print("- cross-model effective-model continuity added")
 print("- stale compaction helper model rebound before resolver routing")
+print("- free-text compaction mentions cannot trigger model rebinding")
 print("- subagent/memgen helpers cannot overwrite main-session effective model")
 print("- Responses semantic terminal events now outrank transport EOF/Drop")

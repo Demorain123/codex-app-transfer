@@ -34,15 +34,11 @@ function Parse-RustVersion {
 
 function Get-StableRustVersion {
     param([Parameter(Mandatory)][string]$Rustup)
-    # Under Set-StrictMode, $LASTEXITCODE may be undefined before the first native
-    # process in this scope. Initialize it explicitly, capture all output, then parse.
     $global:LASTEXITCODE = 0
     $output = @(& $Rustup run stable rustc --version 2>&1)
     $exitCode = $global:LASTEXITCODE
     $line = $output | Select-Object -First 1
-    if ($exitCode -ne 0 -or -not $line) {
-        return $null
-    }
+    if ($exitCode -ne 0 -or -not $line) { return $null }
     return Parse-RustVersion ([string]$line).Trim()
 }
 
@@ -58,6 +54,18 @@ function Invoke-StableCargo {
     if ($exitCode -ne 0) {
         throw "Command failed ($exitCode): rustup run stable cargo $($Arguments -join ' ')"
     }
+}
+
+function Find-CMake {
+    $cmd = Get-Command cmake.exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { $cmd = Get-Command cmake -ErrorAction SilentlyContinue }
+    if ($cmd) { return $cmd.Source }
+
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'CMake\bin\cmake.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'CMake\bin\cmake.exe')
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    return ($candidates | Select-Object -First 1)
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -82,7 +90,7 @@ $alreadyMaterialized = $currentVersion -match 'compat_revision=46' -and
     (Test-Path -LiteralPath $recoveryBackend -PathType Leaf) -and
     ((Get-Content -LiteralPath $recoveryBackend -Raw -Encoding UTF8) -match 'CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY')
 
-Write-Host "`n[1/6] Materialize r46" -ForegroundColor Green
+Write-Host "`n[1/7] Materialize r46" -ForegroundColor Green
 if ($alreadyMaterialized -and -not $ForceMaterialize) {
     Write-Host 'Warm r46 materialization detected; SKIP.' -ForegroundColor Green
 } else {
@@ -95,7 +103,7 @@ if ($versionFile -notmatch 'compat_revision=46' -or $versionFile -notmatch 'app_
 }
 Write-Host $versionFile.Trim() -ForegroundColor Green
 
-Write-Host "`n[2/6] Frontend assets" -ForegroundColor Green
+Write-Host "`n[2/7] Frontend assets" -ForegroundColor Green
 $frontendDir = Join-Path $repoRoot 'frontend'
 $nodeModules = Join-Path $frontendDir 'node_modules'
 $frontendIndex = Join-Path $frontendDir 'dist\index.html'
@@ -116,7 +124,7 @@ if ((Test-Path -LiteralPath $frontendIndex -PathType Leaf) -and -not $ForceFront
     }
 }
 
-Write-Host "`n[3/6] Ensure stable Rust >= 1.95" -ForegroundColor Green
+Write-Host "`n[3/7] Ensure stable Rust >= 1.95" -ForegroundColor Green
 $rustup = (Get-Command rustup.exe -ErrorAction SilentlyContinue).Source
 if (-not $rustup) { $rustup = (Get-Command rustup -ErrorAction SilentlyContinue).Source }
 if (-not $rustup) { throw 'rustup was not found in PATH.' }
@@ -125,7 +133,7 @@ $rustVersion = Get-StableRustVersion $rustup
 if ($rustVersion -and $rustVersion -ge $minimumRust) {
     Write-Host "Stable Rust already ready: $rustVersion; SKIP rustup update." -ForegroundColor Green
 } else {
-    Write-Host "Stable Rust missing/too old; updating stable toolchain..." -ForegroundColor Yellow
+    Write-Host 'Stable Rust missing/too old; updating stable toolchain...' -ForegroundColor Yellow
     $global:LASTEXITCODE = 0
     & $rustup update stable
     $updateExit = $global:LASTEXITCODE
@@ -134,12 +142,12 @@ if ($rustVersion -and $rustVersion -ge $minimumRust) {
         throw "Stable Rust is still unavailable or < $minimumRust after rustup update (exit=$updateExit)."
     }
     if ($updateExit -ne 0) {
-        Write-Warning "rustup update returned $updateExit (often self-update/locked rustup-init.exe), but stable rustc $rustVersion is installed, so continuing."
+        Write-Warning "rustup update returned $updateExit, but stable rustc $rustVersion is installed, so continuing."
     }
 }
 Write-Host "Using stable rustc: $rustVersion" -ForegroundColor Green
 
-Write-Host "`n[4/6] Locate Tauri" -ForegroundColor Green
+Write-Host "`n[4/7] Locate Tauri" -ForegroundColor Green
 $tauriAvailable = $false
 try {
     $global:LASTEXITCODE = 0
@@ -147,16 +155,41 @@ try {
     $tauriAvailable = ($global:LASTEXITCODE -eq 0)
 } catch { $tauriAvailable = $false }
 if (-not $tauriAvailable) {
-    if ($SkipTauriInstall) {
-        throw 'cargo-tauri is not installed and -SkipTauriInstall was specified.'
-    }
+    if ($SkipTauriInstall) { throw 'cargo-tauri is not installed and -SkipTauriInstall was specified.' }
     Write-Host 'cargo-tauri missing; installing once...' -ForegroundColor Yellow
     Invoke-StableCargo $rustup 'install' 'tauri-cli' '--version' '^2' '--locked'
 } else {
     Write-Host 'cargo-tauri already available; SKIP install.' -ForegroundColor Green
 }
 
-Write-Host "`n[5/6] Build actual Windows NSIS package" -ForegroundColor Green
+Write-Host "`n[5/7] Ensure CMake for boring-sys2" -ForegroundColor Green
+$cmake = Find-CMake
+if (-not $cmake) {
+    $winget = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
+    if (-not $winget) { $winget = (Get-Command winget -ErrorAction SilentlyContinue).Source }
+    if (-not $winget) {
+        throw 'CMake is required by boring-sys2, but cmake and winget were both not found.'
+    }
+    Write-Host 'CMake missing; installing Kitware.CMake once with winget...' -ForegroundColor Yellow
+    Invoke-Checked $winget 'install' '--id' 'Kitware.CMake' '--exact' '--silent' '--accept-package-agreements' '--accept-source-agreements'
+    $cmake = Find-CMake
+    if (-not $cmake) {
+        throw 'winget reported success, but cmake.exe was still not found under PATH or Program Files.'
+    }
+} else {
+    Write-Host "CMake already available; SKIP install: $cmake" -ForegroundColor Green
+}
+$cmakeBin = Split-Path -Parent $cmake
+if (($env:PATH -split ';') -notcontains $cmakeBin) {
+    $env:PATH = "$cmakeBin;$env:PATH"
+}
+$env:CMAKE = $cmake
+$global:LASTEXITCODE = 0
+$cmakeVersion = @(& $cmake --version 2>&1) | Select-Object -First 1
+if ($global:LASTEXITCODE -ne 0) { throw "cmake --version failed: $cmake" }
+Write-Host "Using $cmakeVersion" -ForegroundColor Green
+
+Write-Host "`n[6/7] Build actual Windows NSIS package" -ForegroundColor Green
 Push-Location (Join-Path $repoRoot 'src-tauri')
 try {
     Invoke-StableCargo $rustup 'tauri' 'build' '--target' $target '--bundles' 'nsis'
@@ -164,7 +197,7 @@ try {
     Pop-Location
 }
 
-Write-Host "`n[6/6] Copy real-use installer" -ForegroundColor Green
+Write-Host "`n[7/7] Copy real-use installer" -ForegroundColor Green
 $appVersionLine = ($versionFile -split "`r?`n" | Where-Object { $_ -like 'app_version=*' } | Select-Object -First 1)
 $appVersion = if ($appVersionLine) { $appVersionLine.Substring('app_version='.Length) } else { '2.4.5+46' }
 $safeVersion = $appVersion -replace '\+', '-r'
@@ -194,6 +227,7 @@ $manifest = [ordered]@{
     materialization = 'passed/reused'
     frontendBuild = 'passed/reused'
     rustc = $rustVersion.ToString()
+    cmake = [string]$cmakeVersion
     windowsNsisCompilation = 'passed'
     realThreadRecoveryExecutedDuringBuild = $false
     installer = $dest

@@ -29,6 +29,7 @@ run("scripts/apply_r46_recovery_backup_vdrive_hotfix.py")
 run("scripts/apply_r46_codex_cli_launchability_hotfix.py")
 run("scripts/apply_r46_codex_cli_shadow_copy_hotfix.py")
 run("scripts/apply_r46_revert_compat_logging_hotfix.py")
+run("scripts/apply_r46_resume_before_rollback_hotfix.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 run("scripts/apply_r46_recovery_explainability_preflight.py")
@@ -56,6 +57,7 @@ checks = {
         "CAS-R46-CODEX-CLI-LAUNCHABILITY-HOTFIX",
         "CAS-R46-CODEX-CLI-SHADOW-COPY",
         "CAS-R46-REVERT-COMPAT-LOGGING-HOTFIX",
+        "CAS-R46-RESUME-BEFORE-ROLLBACK-HOTFIX",
         "CODEX_APP_TRANSFER_RECOVERY_BACKUP_DIR",
         "Codex-App-Transfer-Recovery-Backups",
         "find_launchable_codex_cli",
@@ -63,6 +65,8 @@ checks = {
         "stage=rpc_call",
         "stage=rpc_error",
         "stage=rpc_ok",
+        "stage=thread_loaded",
+        "thread/resume",
         "thread/revert",
         "thread/rollback",
         "thread/fork",
@@ -115,8 +119,9 @@ print("- privacy-bounded structural model-switch forensics v2 added")
 print("- read-only old-thread recovery preview added")
 print("- recovery buttons explain applicability / side effects before execution")
 print("- unchanged fault signature is locked in both UI and backend after one generic repair attempt")
+print("- persisted historical thread is resumed into the shadow app-server before any revert/rollback mutation")
 print("- same-thread one-turn rewind prefers thread/revert; old app-server unknown-variant/method-not-found falls back to rollback(1)")
-print("- recovery RPC call/error/success stages are logged without dumping full app-server error bodies")
+print("- recovery RPC call/error/success and thread-load stages are logged without dumping full app-server error bodies")
 print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")
 print("- large recovery backups prefer V:\\Codex-App-Transfer-Recovery-Backups instead of the system drive")

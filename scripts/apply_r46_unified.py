@@ -24,6 +24,7 @@ def run(rel: str) -> None:
 # then add r46's structural forensics and explicit old-thread recovery center.
 run("scripts/apply_r45_unified.py")
 run("scripts/apply_r46_thread_recovery_backend_fixes.py")
+run("scripts/apply_r46_thread_recovery_backup_hardening.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 
@@ -42,10 +43,12 @@ checks = {
     ),
     "src-tauri/src/admin/handlers/thread_recovery.rs": (
         "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY",
+        "CAS-R46-RECOVERY-STATE-DB-BACKUP",
         "thread/revert",
         "thread/rollback",
         "thread/fork",
         "RECOVERY-BACKUP.json",
+        "state-db-backup",
     ),
     "src-tauri/src/admin/handlers/mod.rs": (
         "pub mod thread_recovery;",
@@ -62,6 +65,7 @@ checks = {
     "frontend/src/api/threadRecovery.ts": (
         "/api/thread-recovery/preview",
         "/api/thread-recovery/action",
+        "stateDbCopies",
     ),
 }
 for rel, markers in checks.items():
@@ -80,5 +84,5 @@ print("- privacy-bounded structural model-switch forensics v2 added")
 print("- read-only old-thread recovery preview added")
 print("- same-thread one-turn rewind prefers thread/revert, method-not-found falls back to rollback(1)")
 print("- fork recovery remains non-destructive fallback")
-print("- rollout backup + SHA256 happens before every recovery mutation")
+print("- rollout + cold Codex state DB backup happens before every recovery mutation")
 print("- workspace files are never reverted by r46 recovery")

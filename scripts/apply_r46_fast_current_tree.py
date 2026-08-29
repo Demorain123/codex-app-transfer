@@ -58,6 +58,7 @@ else:
     run("scripts/apply_r46_thread_recovery_ui.py")
     run("scripts/apply_r46_recovery_explainability_preflight.py")
     run("scripts/apply_r46_recovery_explainability_ui.py")
+    run("scripts/apply_r46_failure_boundary_fork_hotfix.py")
     run("scripts/apply_r46_chain_health_recovery_hint.py")
     run("scripts/apply_r46_generic_repair_loop_guard.py")
 
@@ -73,9 +74,13 @@ checks = {
         "CAS-R46-CODEX-CLI-SHADOW-COPY",
         "CAS-R46-REVERT-COMPAT-LOGGING-HOTFIX",
         "CAS-R46-RESUME-BEFORE-ROLLBACK-HOTFIX",
+        "CAS-R46-FAILURE-BOUNDARY-FORK-HOTFIX",
         '"thread/resume"',
         "stage=thread_loaded",
+        "stage=fork_boundary",
+        "latest_failed_compaction_turn_id",
         '"thread/rollback"',
+        '"thread/fork"',
     ),
     "crates/proxy/src/forward.rs": (
         "CAS-R45-MODEL-SWITCH-CONTINUITY",
@@ -86,6 +91,7 @@ checks = {
         "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI",
         "CAS-R46-RECOVERY-EXPLAINABILITY-UI",
         "同 ID 回退 1 轮（推荐）",
+        "创建故障前恢复副本（推荐）",
     ),
 }
 for rel, markers in checks.items():
@@ -103,3 +109,4 @@ print("- canonical baseline bootstraps only when generated r45 markers are absen
 print("- warm runs skip historical r24-r45 replay")
 print("- current r46 recovery hotfix stack is materialized")
 print("- thread/resume-before-rollback is present")
+print("- recovery-copy forks before the exact failed compaction boundary")

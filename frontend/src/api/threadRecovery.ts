@@ -31,6 +31,7 @@ export interface ThreadRecoveryBackup {
   rolloutCopy: string
   sha256: string
   bytes: number
+  stateDbCopies: string[]
 }
 
 export interface ThreadRecoveryResult {

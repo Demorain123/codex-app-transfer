@@ -20,9 +20,9 @@ def run(rel: str) -> None:
             raise
 
 
-# Preserve the complete r46 generated tree, then layer the new launch-only temp setting.
 run("scripts/apply_r46_unified.py")
 run("scripts/apply_r47_codex_temp_dir.py")
+run("scripts/apply_r47_temp_toggle_restart_fix.py")
 run("scripts/apply_r47_frontend_invalidate_once.py")
 
 REVISION.write_text("47\n", encoding="utf-8")
@@ -47,6 +47,7 @@ checks = {
     ),
     "frontend/src/pages/SettingsPage.vue": (
         "CAS-R47-CODEX-CUSTOM-TEMP",
+        "CAS-R47-TEMP-TOGGLE-RESTART-FIX",
         "codexCustomTempEnabled",
         "codexCustomTempDir",
         "settings.codexCustomTempApplyRestart",
@@ -72,5 +73,6 @@ print("- complete r46 model-switch/recovery tree preserved")
 print("- Windows Transfer-launched Codex can use a user-selected process-local TEMP/TMP/TMPDIR")
 print("- user/system environment and CODEX_HOME remain unchanged")
 print("- invalid custom temp fails closed; no silent fallback to system temp")
+print("- disabling custom temp can immediately restart back onto inherited system TEMP")
 print("- custom-temp settings UI forces one frontend rebuild, then returns to warm reuse")
 print("- no existing temp cache is moved or deleted")

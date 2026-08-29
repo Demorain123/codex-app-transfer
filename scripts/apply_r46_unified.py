@@ -27,6 +27,7 @@ run("scripts/apply_r46_thread_recovery_backend_fixes.py")
 run("scripts/apply_r46_thread_recovery_backup_hardening.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
+run("scripts/apply_r46_chain_health_recovery_hint.py")
 
 REVISION.write_text("46\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -49,6 +50,10 @@ checks = {
         "thread/fork",
         "RECOVERY-BACKUP.json",
         "state-db-backup",
+    ),
+    "src-tauri/src/admin/handlers/chain_health.rs": (
+        "CAS-R46-OLD-THREAD-RECOVERY-HINT",
+        "same_thread_recovery_available",
     ),
     "src-tauri/src/admin/handlers/mod.rs": (
         "pub mod thread_recovery;",
@@ -85,4 +90,5 @@ print("- read-only old-thread recovery preview added")
 print("- same-thread one-turn rewind prefers thread/revert, method-not-found falls back to rollback(1)")
 print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")
+print("- chain-health session/context faults point to the recovery center instead of restart loops")
 print("- workspace files are never reverted by r46 recovery")

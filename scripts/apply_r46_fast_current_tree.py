@@ -59,6 +59,7 @@ else:
     run("scripts/apply_r46_recovery_explainability_preflight.py")
     run("scripts/apply_r46_recovery_explainability_ui.py")
     run("scripts/apply_r46_failure_boundary_fork_hotfix.py")
+    run("scripts/apply_r46_frontend_direct_entry_hotfix.py")
     run("scripts/apply_r46_chain_health_recovery_hint.py")
     run("scripts/apply_r46_generic_repair_loop_guard.py")
 
@@ -93,6 +94,11 @@ checks = {
         "同 ID 回退 1 轮（推荐）",
         "创建故障前恢复副本（推荐）",
     ),
+    "scripts/build-r46-fast-real-use.ps1": (
+        "CAS-R46-FRONTEND-DIRECT-ENTRY-GUARD",
+        "vue-tsc\\bin\\vue-tsc.js",
+        "vite\\bin\\vite.js",
+    ),
 }
 for rel, markers in checks.items():
     text = (ROOT / rel).read_text(encoding="utf-8")
@@ -110,3 +116,4 @@ print("- warm runs skip historical r24-r45 replay")
 print("- current r46 recovery hotfix stack is materialized")
 print("- thread/resume-before-rollback is present")
 print("- recovery-copy forks before the exact failed compaction boundary")
+print("- frontend build bypasses stale node_modules/.bin shims")

@@ -14,7 +14,7 @@ echo Codex App Transfer r46 - FAST REAL-USE BUILD
 echo ============================================================
 echo This intentionally skips the long validation suite.
 echo Goal: build an installable r46 ASAP for real old-thread testing.
-echo Latest recovery hotfixes are ALWAYS rematerialized before Cargo build.
+echo Historical r24-r45 replay is NOT run in this fast path.
 echo.
 
 echo [PRE] Ensure a reusable NASM is available for BoringSSL...
@@ -26,8 +26,15 @@ if errorlevel 1 (
 )
 set "PATH=%CD%\.tools\nasm;%PATH%"
 
-echo [PRE] Force current r46 overlay composition so no stale recovery backend is reused...
-pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\scripts\build-r46-fast-real-use.ps1" -ForceMaterialize
+echo [PRE] Apply only the current r46 hotfix stack on the checked-in r46 baseline...
+python ".\scripts\apply_r46_fast_current_tree.py"
+if errorlevel 1 (
+  echo [FAILED] r46 fast current-tree composition failed.
+  pause
+  exit /b 1
+)
+
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\scripts\build-r46-fast-real-use.ps1"
 set "RC=%ERRORLEVEL%"
 echo.
 if not "%RC%"=="0" (

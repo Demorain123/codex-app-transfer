@@ -27,6 +27,7 @@ run("scripts/apply_r46_thread_recovery_backend_fixes.py")
 run("scripts/apply_r46_thread_recovery_backup_hardening.py")
 run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
+run("scripts/apply_r46_recovery_explainability_preflight.py")
 run("scripts/apply_r46_recovery_explainability_ui.py")
 run("scripts/apply_r46_chain_health_recovery_hint.py")
 run("scripts/apply_r46_generic_repair_loop_guard.py")
@@ -69,6 +70,7 @@ checks = {
     ),
     "frontend/src/pages/ProxyPage.vue": (
         "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI",
+        "CAS-R46-RECOVERY-EXPLAINABILITY-PREFLIGHT",
         "CAS-R46-RECOVERY-EXPLAINABILITY-UI",
         "同 ID 回退 1 轮（推荐）",
         "创建恢复副本（原会话不动）",

@@ -4,6 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - 'scripts/apply_r43_*.py'
       - 'scripts/apply_r46_*.py'
       - 'scripts/build-r46-*.ps1'
       - 'scripts/README-R46.md'
@@ -110,8 +111,19 @@ jobs:
           )) {
             if (-not $backend.Contains($marker)) { throw "missing backend marker: $marker" }
           }
+          foreach ($marker in @(
+            'CAS-R46-RECOVERY-EXPLAINABILITY-UI',
+            '旧会话恢复（先预览）',
+            '已尝试，先查看结果',
+            '相同故障指纹已经尝试过一次',
+            '可能执行：',
+            '明确不会：'
+          )) {
+            if (-not $page.Contains($marker)) { throw "missing explainability UI marker: $marker" }
+          }
           if (-not $page.Contains('同 ID 回退 1 轮（推荐）')) { throw 'recovery UI missing' }
           if (-not $health.Contains('CAS-R46-OLD-THREAD-RECOVERY-HINT')) { throw 'health recovery hint missing' }
+          if (-not $health.Contains('CAS-R43-REPLAY-PREFLIGHT-LATEST-LINEAGE')) { throw 'r43 replay preflight marker missing' }
           $version = Get-Content .\SUB2API_GROK_COMPAT_VERSION.txt -Raw
           if ($version -notmatch 'compat_revision=46' -or $version -notmatch 'app_version=2\.4\.5\+46') {
             throw 'r46 version stamp mismatch'

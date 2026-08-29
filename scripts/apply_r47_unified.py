@@ -41,7 +41,7 @@ checks = {
     "src-tauri/src/windows_msix.rs": (
         "CAS-R47-CODEX-CUSTOM-TEMP",
         "resolve_codex_gui_executable",
-        "app\").join(\"ChatGPT.exe",
+        'join("app").join("ChatGPT.exe")',
         "launch_codex_direct_with_env",
     ),
     "frontend/src/pages/SettingsPage.vue": (

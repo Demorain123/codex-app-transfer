@@ -6,6 +6,9 @@ import runpy
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = ROOT / "SUB2API_GROK_COMPAT_REVISION.txt"
 VERSION = ROOT / "SUB2API_GROK_COMPAT_VERSION.txt"
+FORWARD = ROOT / "crates/proxy/src/forward.rs"
+RECOVERY = ROOT / "src-tauri/src/admin/handlers/thread_recovery.rs"
+R46_BUILDER = ROOT / "scripts/build-r46-fast-real-use.ps1"
 
 
 def run(rel: str) -> None:
@@ -20,14 +23,44 @@ def run(rel: str) -> None:
             raise
 
 
-# Reuse the proven r46 warm/cold baseline policy, then layer only r47.
-# Warm workspace: r24-r45 historical replay remains skipped.
-run("scripts/apply_r46_fast_current_tree.py")
+def has_complete_r46_generated_baseline() -> bool:
+    if not FORWARD.is_file() or not RECOVERY.is_file() or not R46_BUILDER.is_file():
+        return False
+    forward = FORWARD.read_text(encoding="utf-8")
+    recovery = RECOVERY.read_text(encoding="utf-8")
+    builder = R46_BUILDER.read_text(encoding="utf-8")
+    return (
+        "CAS-R45-MODEL-SWITCH-CONTINUITY" in forward
+        and "CAS-R45-COMPACTION-METADATA-TRUTH" in forward
+        and "CAS-R46-MODEL-SWITCH-FORENSICS-V2" in forward
+        and "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY" in recovery
+        and "CAS-R46-FAILURE-BOUNDARY-FORK-HOTFIX" in recovery
+        and "CAS-R46-FRONTEND-DIRECT-ENTRY-GUARD" in builder
+    )
+
+
+# FAST policy: a proven generated r46 working tree is the baseline. Do not replay
+# successful r46 hotfixes on every r47 iteration. Only repair/bootstrap r46 when one
+# of its required markers is genuinely absent.
+if has_complete_r46_generated_baseline():
+    print("R47 FAST BASELINE: complete generated r46 tree detected; R46 COMPOSITION SKIP")
+else:
+    print("R47 FAST BASELINE: r46 generated markers incomplete; repairing r46 baseline once")
+    run("scripts/apply_r46_fast_current_tree.py")
+    if not has_complete_r46_generated_baseline():
+        raise SystemExit("r47 fast baseline repair completed but required r46 markers are still missing")
+
 run("scripts/apply_r47_codex_temp_dir.py")
 run("scripts/apply_r47_frontend_invalidate_once.py")
 
-REVISION.write_text("47\n", encoding="utf-8")
-run("scripts/apply_sub2api_grok_compat_revision.py")
+# The heavy compatibility revision materializer only needs to run on the first r46→r47
+# transition. Later r47 hotfix builds keep the already-stamped generated tree.
+version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
+if "compat_revision=47" not in version_before or "app_version=2.4.5+47" not in version_before:
+    REVISION.write_text("47\n", encoding="utf-8")
+    run("scripts/apply_sub2api_grok_compat_revision.py")
+else:
+    print("R47 version already stamped; revision materializer SKIP")
 
 checks = {
     "src-tauri/src/admin/services/desktop/process.rs": (
@@ -58,7 +91,8 @@ if "compat_revision=47" not in version or "app_version=2.4.5+47" not in version:
     raise SystemExit("r47 fast-current-tree version stamp missing")
 
 print("R47 FAST CURRENT-TREE COMPOSITION PASS")
-print("- r46 generated baseline/cache path reused")
-print("- only r47 Codex custom-temp overlay added")
+print("- complete generated r46 baseline is reused without replay when present")
+print("- only r47 Codex custom-temp overlay is added")
+print("- compatibility revision stamping runs only on the first r46→r47 transition")
 print("- custom-temp settings UI invalidates stale frontend assets once")
 print("- no user/system environment mutation")

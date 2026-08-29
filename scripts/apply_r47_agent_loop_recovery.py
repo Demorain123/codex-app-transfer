@@ -67,11 +67,10 @@ if MARKER not in text:
 ''' + recommendation_anchor
     text = replace_once(text, recommendation_anchor, recommendation, "agent-loop recommendation")
 
-    classify_anchor = '''    if matches!(
-        snapshot.diagnosis.code.as_str(),
-        "fault_session_scoped" | "fault_session_state" | "fault_compaction_context"
-    ) {
-        return "session_or_context_failure";
+    # r46 generated trees have evolved around the session/context match list. Anchor on
+    # the stable upstream-rate-limit branch instead of requiring an exact historical block.
+    classify_anchor = '''    if snapshot.upstream.code == "upstream_rate_limited" {
+        return "upstream_rate_limited";
     }
 '''
     classify = '''    if snapshot.diagnosis.code == "fault_codex_agent_loop" {
@@ -210,8 +209,6 @@ if not STAMP.exists():
     STAMP.write_text("r47 agent-loop recovery UI requires rebuilt frontend assets\n", encoding="utf-8")
     print("R47 AGENT-LOOP FRONTEND INVALIDATE-ONCE PASS")
 elif ui_changed:
-    # This should only occur after external stamp copying; surface it rather than silently
-    # claiming stale assets are safe.
     print("r47 agent-loop UI changed while invalidation stamp already existed")
 else:
     print("r47 agent-loop frontend invalidation already recorded; SKIP")

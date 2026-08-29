@@ -32,24 +32,32 @@ required = {
     ],
     "router": ["/api/chain-health/recover", "recover_chain"],
     "api": ["recoverChainHealth", "ChainRecoveryReport"],
+    # Keep the review semantic/replay-tolerant. Later revisions are allowed to rename
+    # the visible recovery button/copy while preserving the same recovery wiring.
     "page": ["onRecoverChain", "chainHealth.recover", "chainRecovery.needsRealRequestVerification"],
-    "zh": ["尝试恢复", "需要下一次真实请求验证账号池 / 上游是否已经恢复"],
-    "en": ["Try recovery", "next real request"],
     "version": ["compat_revision=36", "app_version=2.4.5+36"],
 }
 for name, markers in required.items():
-    source = {"health": health, "router": router, "api": api, "page": page, "zh": zh, "en": en, "version": version}[name]
+    source = {"health": health, "router": router, "api": api, "page": page, "version": version}[name]
     for marker in markers:
         if marker not in source:
             raise SystemExit(f"r36 review missing {name} marker: {marker}")
+
+# i18n must still expose recovery-related copy in both languages, but exact button
+# wording is intentionally not frozen: later explainability revisions replace
+# "尝试恢复" / "Try recovery" with diagnosis-specific labels.
+if not any(marker in zh for marker in ("恢复", "修复", "真实请求")):
+    raise SystemExit("r36 review missing zh recovery semantics")
+if not any(marker in en.lower() for marker in ("recover", "repair", "real request")):
+    raise SystemExit("r36 review missing en recovery semantics")
 
 # Safety invariants: recovery may restart a specific diagnosed target container,
 # but must never run compose down/up, delete/recreate containers, mutate volumes,
 # inspect secrets/env, update images, or send model inference traffic.
 for forbidden in [
-    '"compose".into(),\n                        "down"',
-    '"rm".into()',
-    '"pull".into()',
+    '\"compose\".into(),\n                        \"down\"',
+    '\"rm\".into()',
+    '\"pull\".into()',
     'docker compose down',
     'docker compose up',
     'docker inspect --format {{json .Config.Env}}',

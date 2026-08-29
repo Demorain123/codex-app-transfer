@@ -72,13 +72,17 @@ function Find-Nasm {
     if (-not $cmd) { $cmd = Get-Command nasm -ErrorAction SilentlyContinue }
     if ($cmd) { return $cmd.Source }
 
+    # Known installer layouts plus WinGet package roots. WinGet may install an
+    # unpackaged executable under LOCALAPPDATA without refreshing PATH.
     $roots = @(
         (Join-Path $env:ProgramFiles 'NASM'),
         (Join-Path ${env:ProgramFiles(x86)} 'NASM'),
         (Join-Path $env:LOCALAPPDATA 'NASM'),
         (Join-Path $env:LOCALAPPDATA 'Programs\NASM'),
         (Join-Path $env:USERPROFILE 'AppData\Local\NASM'),
-        (Join-Path $env:USERPROFILE 'AppData\Local\Programs\NASM')
+        (Join-Path $env:USERPROFILE 'AppData\Local\Programs\NASM'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links')
     ) | Where-Object { $_ }
 
     foreach ($root in $roots) {
@@ -207,7 +211,7 @@ if (-not $nasm) {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($machinePath -or $userPath) { $env:PATH = "$machinePath;$userPath;$env:PATH" }
     $nasm = Find-Nasm
-    if (-not $nasm) { throw 'winget reported success, but nasm.exe was still not found after PATH refresh, registry probe, and bounded Program Files scan.' }
+    if (-not $nasm) { throw 'winget reported success, but nasm.exe was still not found after PATH refresh, registry probe, Program Files scan, and WinGet package scan.' }
 } else { Write-Host "NASM already available; SKIP install: $nasm" -ForegroundColor Green }
 $nasmBin = Split-Path -Parent $nasm
 if (($env:PATH -split ';') -notcontains $nasmBin) { $env:PATH = "$nasmBin;$env:PATH" }

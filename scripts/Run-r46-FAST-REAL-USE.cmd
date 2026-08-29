@@ -16,6 +16,15 @@ echo This intentionally skips the long validation suite.
 echo Goal: build an installable r46 ASAP for real old-thread testing.
 echo.
 
+echo [PRE] Ensure a reusable NASM is available for BoringSSL...
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\scripts\ensure-r46-portable-nasm.ps1"
+if errorlevel 1 (
+  echo [FAILED] NASM preflight failed.
+  pause
+  exit /b 1
+)
+set "PATH=%CD%\.tools\nasm;%PATH%"
+
 pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\scripts\build-r46-fast-real-use.ps1"
 set "RC=%ERRORLEVEL%"
 echo.

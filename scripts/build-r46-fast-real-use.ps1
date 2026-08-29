@@ -22,14 +22,33 @@ function Invoke-Checked {
     }
 }
 
-function Get-RustVersion {
-    param([Parameter(Mandatory)][string]$Rustc)
-    $line = (& $Rustc --version).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "rustc --version failed: $Rustc" }
-    if ($line -notmatch '^rustc\s+(\d+)\.(\d+)\.(\d+)') {
-        throw "Unable to parse rustc version: $line"
+function Parse-RustVersion {
+    param([Parameter(Mandatory)][string]$Line)
+    if ($Line -notmatch '^rustc\s+(\d+)\.(\d+)\.(\d+)') {
+        throw "Unable to parse rustc version: $Line"
     }
     [version]::new([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+}
+
+function Get-StableRustVersion {
+    param([Parameter(Mandatory)][string]$Rustup)
+    $line = (& $Rustup run stable rustc --version | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or -not $line) {
+        return $null
+    }
+    return Parse-RustVersion $line.Trim()
+}
+
+function Invoke-StableCargo {
+    param(
+        [Parameter(Mandatory)][string]$Rustup,
+        [Parameter(ValueFromRemainingArguments)][string[]]$Arguments
+    )
+    Write-Host "`n> rustup run stable cargo $($Arguments -join ' ')" -ForegroundColor Cyan
+    & $Rustup run stable cargo @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed ($LASTEXITCODE): rustup run stable cargo $($Arguments -join ' ')"
+    }
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -42,7 +61,7 @@ Write-Host 'Codex App Transfer r46 - FAST REAL-USE BUILD' -ForegroundColor Green
 Write-Host '============================================================' -ForegroundColor Green
 Write-Host 'Purpose: get to real old-thread testing as fast as possible.'
 Write-Host 'Skipped: Rust unit tests / cargo check / legacy stress / release proof.' -ForegroundColor Yellow
-Write-Host 'Included: r46 materialization + frontend assets + actual Windows NSIS compilation.'
+Write-Host 'Successful stages are reused automatically.' -ForegroundColor Green
 
 $versionPath = Join-Path $repoRoot 'SUB2API_GROK_COMPAT_VERSION.txt'
 $currentVersion = if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
@@ -56,7 +75,7 @@ $alreadyMaterialized = $currentVersion -match 'compat_revision=46' -and
 
 Write-Host "`n[1/6] Materialize r46" -ForegroundColor Green
 if ($alreadyMaterialized -and -not $ForceMaterialize) {
-    Write-Host 'Warm r46 materialization detected; reusing current generated tree.' -ForegroundColor Green
+    Write-Host 'Warm r46 materialization detected; SKIP.' -ForegroundColor Green
 } else {
     Invoke-Checked 'python' '.\scripts\apply_r46_unified.py'
 }
@@ -72,12 +91,11 @@ $frontendDir = Join-Path $repoRoot 'frontend'
 $nodeModules = Join-Path $frontendDir 'node_modules'
 $frontendIndex = Join-Path $frontendDir 'dist\index.html'
 if ((Test-Path -LiteralPath $frontendIndex -PathType Leaf) -and -not $ForceFrontendBuild) {
-    Write-Host "Warm frontend assets detected; reusing: $frontendIndex" -ForegroundColor Green
+    Write-Host "Warm frontend assets detected; SKIP: $frontendIndex" -ForegroundColor Green
 } else {
     Push-Location $frontendDir
     try {
         if (-not (Test-Path -LiteralPath $nodeModules -PathType Container)) {
-            Write-Host 'frontend/node_modules missing; running npm ci once...' -ForegroundColor Yellow
             Invoke-Checked 'npm.cmd' 'ci'
         }
         Invoke-Checked 'npm.cmd' 'run' 'build'
@@ -87,41 +105,34 @@ if ((Test-Path -LiteralPath $frontendIndex -PathType Leaf) -and -not $ForceFront
     if (-not (Test-Path -LiteralPath $frontendIndex -PathType Leaf)) {
         throw "Frontend build completed but dist/index.html is missing: $frontendIndex"
     }
-    Write-Host "Frontend assets ready: $frontendIndex" -ForegroundColor Green
 }
 
-Write-Host "`n[3/6] Ensure Rust >= 1.95" -ForegroundColor Green
-$rustc = (Get-Command rustc.exe -ErrorAction SilentlyContinue).Source
-if (-not $rustc) { $rustc = (Get-Command rustc -ErrorAction SilentlyContinue).Source }
-if (-not $rustc) { throw 'rustc was not found in PATH.' }
-$rustVersion = Get-RustVersion $rustc
-Write-Host "Current rustc: $rustVersion ($rustc)"
-if ($rustVersion -lt $minimumRust) {
-    $rustup = (Get-Command rustup.exe -ErrorAction SilentlyContinue).Source
-    if (-not $rustup) { $rustup = (Get-Command rustup -ErrorAction SilentlyContinue).Source }
-    if (-not $rustup) {
-        throw "rustc $rustVersion is too old. r46 dependency libsqlite3-sys 0.38.1 requires Rust >= 1.95, and rustup was not found."
+Write-Host "`n[3/6] Ensure stable Rust >= 1.95" -ForegroundColor Green
+$rustup = (Get-Command rustup.exe -ErrorAction SilentlyContinue).Source
+if (-not $rustup) { $rustup = (Get-Command rustup -ErrorAction SilentlyContinue).Source }
+if (-not $rustup) { throw 'rustup was not found in PATH.' }
+
+$rustVersion = Get-StableRustVersion $rustup
+if ($rustVersion -and $rustVersion -ge $minimumRust) {
+    Write-Host "Stable Rust already ready: $rustVersion; SKIP rustup update." -ForegroundColor Green
+} else {
+    Write-Host "Stable Rust missing/too old; updating stable toolchain..." -ForegroundColor Yellow
+    & $rustup update stable
+    $updateExit = $LASTEXITCODE
+    $rustVersion = Get-StableRustVersion $rustup
+    if (-not $rustVersion -or $rustVersion -lt $minimumRust) {
+        throw "Stable Rust is still unavailable or < $minimumRust after rustup update (exit=$updateExit)."
     }
-    Write-Host "Rust $rustVersion is too old; updating stable toolchain to >= 1.95..." -ForegroundColor Yellow
-    Invoke-Checked $rustup 'update' 'stable'
-    $env:RUSTUP_TOOLCHAIN = 'stable'
-    $rustc = (Get-Command rustc.exe -ErrorAction SilentlyContinue).Source
-    if (-not $rustc) { $rustc = (Get-Command rustc -ErrorAction SilentlyContinue).Source }
-    $rustVersion = Get-RustVersion $rustc
-    Write-Host "Updated rustc: $rustVersion"
-    if ($rustVersion -lt $minimumRust) {
-        throw "rustup update stable completed, but rustc is still $rustVersion; need >= $minimumRust."
+    if ($updateExit -ne 0) {
+        Write-Warning "rustup update returned $updateExit (often self-update/locked rustup-init.exe), but stable rustc $rustVersion is installed, so continuing."
     }
 }
+Write-Host "Using stable rustc: $rustVersion" -ForegroundColor Green
 
-Write-Host "`n[4/6] Locate Cargo / Tauri" -ForegroundColor Green
-$cargo = (Get-Command cargo.exe -ErrorAction SilentlyContinue).Source
-if (-not $cargo) { $cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source }
-if (-not $cargo) { throw 'cargo was not found in PATH.' }
-
+Write-Host "`n[4/6] Locate Tauri" -ForegroundColor Green
 $tauriAvailable = $false
 try {
-    & $cargo tauri --version *> $null
+    & $rustup run stable cargo tauri --version *> $null
     $tauriAvailable = ($LASTEXITCODE -eq 0)
 } catch { $tauriAvailable = $false }
 if (-not $tauriAvailable) {
@@ -129,13 +140,15 @@ if (-not $tauriAvailable) {
         throw 'cargo-tauri is not installed and -SkipTauriInstall was specified.'
     }
     Write-Host 'cargo-tauri missing; installing once...' -ForegroundColor Yellow
-    Invoke-Checked $cargo 'install' 'tauri-cli' '--version' '^2' '--locked'
+    Invoke-StableCargo $rustup 'install' 'tauri-cli' '--version' '^2' '--locked'
+} else {
+    Write-Host 'cargo-tauri already available; SKIP install.' -ForegroundColor Green
 }
 
 Write-Host "`n[5/6] Build actual Windows NSIS package" -ForegroundColor Green
 Push-Location (Join-Path $repoRoot 'src-tauri')
 try {
-    Invoke-Checked $cargo 'tauri' 'build' '--target' $target '--bundles' 'nsis'
+    Invoke-StableCargo $rustup 'tauri' 'build' '--target' $target '--bundles' 'nsis'
 } finally {
     Pop-Location
 }
@@ -167,8 +180,8 @@ $manifest = [ordered]@{
     purpose = 'FAST REAL-USE TEST BUILD'
     fullReleaseValidation = $false
     skipped = @('Rust unit tests','cargo check','legacy stress','release proof')
-    materialization = 'passed'
-    frontendBuild = 'passed'
+    materialization = 'passed/reused'
+    frontendBuild = 'passed/reused'
     rustc = $rustVersion.ToString()
     windowsNsisCompilation = 'passed'
     realThreadRecoveryExecutedDuringBuild = $false
@@ -183,9 +196,4 @@ Write-Host 'R46 FAST REAL-USE BUILD PASS' -ForegroundColor Green
 Write-Host "Installer: $dest"
 Write-Host "SHA256   : $sha"
 Write-Host '============================================================' -ForegroundColor Green
-Write-Host 'Next real test:' -ForegroundColor Yellow
-Write-Host '1. Install r46.'
-Write-Host '2. Start Codex Desktop + Transfer.'
-Write-Host '3. Open 路由 -> 全链路健康 -> 旧会话恢复（先预览）.'
-Write-Host '4. First test ONLY read-only preview against the broken old thread.'
-Write-Host '5. If preview is correct, click 同 ID 回退 1 轮 only once, then send one short message.'
+Write-Host 'Next: install r46, open 路由 -> 全链路健康 -> 旧会话恢复（先预览）.' -ForegroundColor Yellow

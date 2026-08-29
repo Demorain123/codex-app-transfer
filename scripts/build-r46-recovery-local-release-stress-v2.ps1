@@ -23,11 +23,9 @@ $target = 'x86_64-pc-windows-msvc'
 
 Write-Host 'Codex App Transfer r46 v2 - Recovery Safety Hardening' -ForegroundColor Green
 $baseGate = Join-Path $PSScriptRoot 'build-r46-recovery-local-release-stress.ps1'
-$args = @()
-$args += '-SkipCargoCheck'
-$args += '-SkipFrontendBuild'
-if ($SkipLegacyStress) { $args += '-SkipLegacyStress' }
-& $baseGate @args
+$gateArgs = @('-SkipCargoCheck', '-SkipFrontendBuild')
+if ($SkipLegacyStress) { $gateArgs += '-SkipLegacyStress' }
+& $baseGate @gateArgs
 if ($LASTEXITCODE -ne 0) { throw "r46 base gate failed with exit code $LASTEXITCODE" }
 
 if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) { throw 'CARGO_HOME is empty after inherited gate.' }

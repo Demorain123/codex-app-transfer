@@ -20,11 +20,11 @@ def run(rel: str) -> None:
             raise
 
 
-# Preserve r45's model continuity + Responses semantic terminal work, then add
-# r46's structural forensics and explicit old-thread recovery center.
+# Preserve r45's FINAL model continuity / metadata-truth / Responses terminal tree,
+# then add r46's structural forensics and explicit old-thread recovery center.
 run("scripts/apply_r45_unified.py")
 run("scripts/apply_r46_thread_recovery_backend_fixes.py")
-run("scripts/apply_r46_model_switch_forensics.py")
+run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 
 REVISION.write_text("46\n", encoding="utf-8")
@@ -33,11 +33,12 @@ run("scripts/apply_sub2api_grok_compat_revision.py")
 checks = {
     "crates/proxy/src/forward.rs": (
         "CAS-R45-MODEL-SWITCH-CONTINUITY",
+        "CAS-R45-COMPACTION-METADATA-TRUTH",
         "CAS-R45-RESPONSES-SEMANTIC-TERMINAL",
-        "CAS-R46-MODEL-SWITCH-FORENSICS",
+        "CAS-R46-MODEL-SWITCH-FORENSICS-V2",
         "event=raw_client_status_mismatch",
         "cross_model_compaction_mismatch",
-        "r46_request_kind_header_outranks_beta_feature_noise",
+        "r46_metadata_truth_keeps_feature_flag_out_of_request_role",
     ),
     "src-tauri/src/admin/handlers/thread_recovery.rs": (
         "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY",
@@ -74,9 +75,8 @@ if "compat_revision=46" not in version or "app_version=2.4.5+46" not in version:
     raise SystemExit("r46 visible/package version stamp missing")
 
 print("R46 UNIFIED COMPOSITION PASS")
-print("- r45 model-switch continuity + semantic terminal base preserved")
-print("- authoritative x-codex-turn-metadata request_kind classification added")
-print("- privacy-bounded structural model-switch forensics added")
+print("- r45 model-switch continuity + metadata truth + semantic terminal base preserved")
+print("- privacy-bounded structural model-switch forensics v2 added")
 print("- read-only old-thread recovery preview added")
 print("- same-thread one-turn rewind prefers thread/revert, method-not-found falls back to rollback(1)")
 print("- fork recovery remains non-destructive fallback")

@@ -23,7 +23,12 @@ def run(rel: str) -> None:
 # r42 is the last real-environment-verified base. Its composition remains unchanged.
 run("scripts/apply_r42_unified.py")
 
-# r43 has one post-r42 source transform only: health attribution/MCP policy.
+# CAS-R43-REPLAY-PREFLIGHT-LATEST-LINEAGE: r42 replay output can differ in harmless
+# formatting around the failure-selection block. Normalize only that superseded block
+# before applying r43's latest-lineage rewrite; the preflight refuses newer semantics.
+run("scripts/apply_r43_rewrite_health_replay_preflight.py")
+
+# r43 has one behavioral post-r42 source transform only: health attribution/MCP policy.
 # Runtime transition classifiers come from the r26 template source, and MCP post-stop
 # verification comes from the r32 exit-guard source, so there is no runtime repair pass.
 run("scripts/apply_r43_rewrite_health.py")
@@ -33,6 +38,7 @@ run("scripts/apply_sub2api_grok_compat_revision.py")
 
 checks = {
     "src-tauri/src/admin/handlers/chain_health.rs": (
+        "CAS-R43-REPLAY-PREFLIGHT-LATEST-LINEAGE",
         "CAS-R43-REWRITE-HEALTH-MCP",
         "CAS-R43-REWRITE-LATEST-LINEAGE-WINS",
         "CAS-R43-REWRITE-SHARED-FAILURE-QUORUM",
@@ -68,7 +74,7 @@ if "compat_revision=43" not in version or "app_version=2.4.5+43" not in version:
 
 print("R43 REWRITE COMPOSITION PASS")
 print("- r42 verified base preserved")
-print("- one health/MCP post-r42 transform")
+print("- replay-only semantic-boundary preflight canonicalizes the superseded lineage block")
+print("- one behavioral health/MCP post-r42 transform")
 print("- model-switch/compact classifiers originate in runtime template source")
 print("- Exit Guard post-cleanup verification originates in janitor source")
-print("- no semantic-anchor prep, classifier repair, or canonical-review parser")

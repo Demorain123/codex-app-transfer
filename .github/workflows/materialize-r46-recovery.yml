@@ -1,0 +1,111 @@
+name: materialize-r46-recovery-fast
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'scripts/apply_r43_*.py'
+      - 'scripts/apply_r46_*.py'
+      - 'scripts/build-r46-*.ps1'
+      - 'scripts/README-R46.md'
+      - 'src-tauri/src/admin/handlers/thread_recovery.rs'
+      - 'frontend/src/api/threadRecovery.ts'
+      - '.github/workflows/materialize-r46-recovery.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: r46-recovery-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-r46-fast:
+    name: Windows · r46 fast materialization gate
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Materialize r46 from replayable overlays
+        shell: pwsh
+        run: |
+          python .\scripts\apply_r46_unified.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content .\SUB2API_GROK_COMPAT_VERSION.txt
+
+      - name: Fast generated-tree sanity
+        shell: pwsh
+        run: |
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: r46 critical invariants
+        shell: pwsh
+        run: |
+          $forward = Get-Content .\crates\proxy\src\forward.rs -Raw
+          $backend = Get-Content .\src-tauri\src\admin\handlers\thread_recovery.rs -Raw
+          $page = Get-Content .\frontend\src\pages\ProxyPage.vue -Raw
+          $health = Get-Content .\src-tauri\src\admin\handlers\chain_health.rs -Raw
+
+          foreach ($marker in @(
+            'CAS-R46-MODEL-SWITCH-FORENSICS-V2',
+            'event=raw_client_status_mismatch',
+            'failed_compaction_preserves_history'
+          )) {
+            if (-not $forward.Contains($marker)) { throw "missing forward marker: $marker" }
+          }
+
+          foreach ($marker in @(
+            'CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY',
+            'CAS-R46-RECOVERY-STATE-DB-BACKUP',
+            'thread/revert',
+            'thread/rollback',
+            'thread/fork',
+            'state-db-backup'
+          )) {
+            if (-not $backend.Contains($marker)) { throw "missing backend marker: $marker" }
+          }
+
+          foreach ($marker in @(
+            'CAS-R46-RECOVERY-EXPLAINABILITY-UI',
+            '旧会话恢复（先预览）',
+            '已尝试，先查看结果',
+            '相同故障指纹已经尝试过一次',
+            '可能执行：',
+            '明确不会：',
+            '同 ID 回退 1 轮（推荐）'
+          )) {
+            if (-not $page.Contains($marker)) { throw "missing recovery UI marker: $marker" }
+          }
+
+          foreach ($marker in @(
+            'CAS-R46-OLD-THREAD-RECOVERY-HINT',
+            'CAS-R43-REPLAY-PREFLIGHT-LATEST-LINEAGE'
+          )) {
+            if (-not $health.Contains($marker)) { throw "missing health marker: $marker" }
+          }
+
+          $version = Get-Content .\SUB2API_GROK_COMPAT_VERSION.txt -Raw
+          if ($version -notmatch 'compat_revision=46' -or $version -notmatch 'app_version=2\.4\.5\+46') {
+            throw 'r46 version stamp mismatch'
+          }
+
+      - name: Privacy structural guard
+        shell: pwsh
+        run: |
+          $generated = Get-Content .\crates\proxy\src\forward.rs -Raw
+          $start = $generated.IndexOf('// CAS-R46-MODEL-SWITCH-FORENSICS-V2')
+          $end = $generated.IndexOf('pub async fn forward_handler(', $start)
+          if ($start -lt 0 -or $end -le $start) { throw 'cannot isolate r46 forensics block' }
+          $block = $generated.Substring($start, $end - $start)
+          foreach ($forbidden in @('SUPER_SECRET_CANARY','SECRET_REASONING','SECRET_ARGS')) {
+            if ($block.Contains($forbidden)) { throw "forensics runtime block contains forbidden test content: $forbidden" }
+          }
+
+      - name: Show generated status
+        shell: pwsh
+        run: git status --short

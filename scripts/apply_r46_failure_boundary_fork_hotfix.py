@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "src-tauri/src/admin/handlers/thread_recovery.rs"
 PAGE = ROOT / "frontend/src/pages/ProxyPage.vue"
+FRONTEND_INDEX = ROOT / "frontend/dist/index.html"
 MARKER = "CAS-R46-FAILURE-BOUNDARY-FORK-HOTFIX"
 
 text = BACKEND.read_text(encoding="utf-8")
@@ -209,6 +210,11 @@ new_label = "创建故障前恢复副本（推荐）"
 if old_label in page:
     page = page.replace(old_label, new_label, 1)
     PAGE.write_text(page, encoding="utf-8")
+    # Invalidate only the generated frontend entry once. The FAST builder will rebuild
+    # dist on this first UI change, then subsequent runs return to the warm SKIP path.
+    if FRONTEND_INDEX.is_file():
+        FRONTEND_INDEX.unlink()
+        print("r46 failure-boundary fork: invalidated stale frontend dist once")
     print("R46 FAILURE-BOUNDARY FORK UI PASS")
 elif new_label in page:
     print("r46 failure-boundary fork UI already applied")

@@ -72,6 +72,8 @@ Write-Host "`n[r45 1/6] Apply r45 runtime transforms over verified r43 materiali
 if ($LASTEXITCODE -ne 0) { throw 'r45 model-switch continuity transform failed' }
 & python 'scripts/apply_r45_compaction_detector_safety.py'
 if ($LASTEXITCODE -ne 0) { throw 'r45 compaction detector safety transform failed' }
+& python 'scripts/apply_r45_compaction_metadata_truth.py'
+if ($LASTEXITCODE -ne 0) { throw 'r45 compaction metadata truth transform failed' }
 Set-Content -LiteralPath (Join-Path $repoRoot 'SUB2API_GROK_COMPAT_REVISION.txt') -Value "45" -Encoding UTF8
 & python 'scripts/apply_sub2api_grok_compat_revision.py'
 if ($LASTEXITCODE -ne 0) { throw 'r45 version materialization failed' }
@@ -100,6 +102,10 @@ foreach ($marker in @(
     'effective-models-r45.json',
     'action=rebind_compaction_model',
     'CAS-R45-COMPACTION-DETECTOR-SAFETY',
+    'CAS-R45-COMPACTION-METADATA-TRUTH',
+    'x-codex-turn-metadata',
+    'request_kind',
+    'normal Terra turns also advertise',
     'CAS-R45-RESPONSES-SEMANTIC-TERMINAL',
     'response_eof_without_terminal'
 )) {
@@ -107,6 +113,9 @@ foreach ($marker in @(
 }
 if ($forward -match '"remote_compaction_v2"\s*\|\s*"local_compaction_v2"\s*\|\s*"compaction"') {
     throw 'r45 detector safety failed: free-text compaction is still a helper marker'
+}
+if ($forward -match 'matches!\([^\r\n]*remote_compaction_v2') {
+    throw 'r45 metadata truth failed: feature-name strings are still request-role classifiers'
 }
 
 if (-not $SkipCargoCheck) {

@@ -43,9 +43,6 @@ def canonicalize_button(click_expr: str, canonical: str, label: str) -> None:
     text = text[:begin] + canonical + text[end:]
 
 
-# r36/r46 overlays own these two controls. Later replay formatting may alter whitespace
-# or attributes, but explainability only needs the semantic click targets. Canonicalize
-# those two superseded button blocks immediately before the r46 explainability transform.
 canonicalize_button(
     "onRecoverChain",
     '''          <button
@@ -74,11 +71,14 @@ canonicalize_button(
     "old-thread recovery",
 )
 
+# Keep the original r46 UI marker immediately adjacent to its state declaration because
+# the explainability overlay intentionally uses that pair as a deterministic replay anchor.
+# Put the preflight marker *before* it instead of between marker and state.
 if MARKER not in text:
     anchor = "// CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI\n"
     if anchor not in text:
         raise SystemExit("r46 recovery explainability preflight: r46 UI marker missing")
-    text = text.replace(anchor, anchor + f"// {MARKER}\n", 1)
+    text = text.replace(anchor, f"// {MARKER}\n" + anchor, 1)
 
 PAGE.write_text(text, encoding="utf-8")
 print("R46 RECOVERY EXPLAINABILITY PREFLIGHT PASS")

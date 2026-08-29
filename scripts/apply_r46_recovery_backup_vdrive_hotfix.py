@@ -42,6 +42,61 @@ fn recovery_backup_root() -> Result<PathBuf, String> {
         .join("thread-recovery"))
 }
 
+fn recovery_backup_required_bytes(codex_home: &Path, source: &Path) -> u64 {
+    let mut total = fs::metadata(source).map(|m| m.len()).unwrap_or(0);
+    if let Some(state_db) = newest_state_db(codex_home) {
+        for path in [
+            state_db.clone(),
+            PathBuf::from(format!("{}-wal", state_db.display())),
+            PathBuf::from(format!("{}-shm", state_db.display())),
+        ] {
+            total = total.saturating_add(fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+        }
+    }
+    // Keep a small safety margin for the manifest and filesystem allocation slack.
+    total.saturating_add(64 * 1024 * 1024)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_drive_free_bytes(root: &Path) -> Result<u64, String> {
+    let raw = root.display().to_string();
+    let bytes = raw.as_bytes();
+    if bytes.len() < 2 || bytes[1] != b':' || !bytes[0].is_ascii_alphabetic() {
+        return Err(format!("恢复备份目录不是可检测剩余空间的盘符路径: {raw}"));
+    }
+    let drive = (bytes[0] as char).to_ascii_uppercase();
+    let script = format!("$d=Get-PSDrive -Name '{drive}' -ErrorAction Stop; [Console]::Out.Write($d.Free)");
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map_err(|e| format!("检测 {drive}: 剩余空间失败: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("检测 {drive}: 剩余空间失败"));
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .map_err(|e| format!("解析 {drive}: 剩余空间失败: {e}"))
+}
+
+fn preflight_recovery_backup_space(codex_home: &Path, source: &Path) -> Result<(), String> {
+    let root = recovery_backup_root()?;
+    let required = recovery_backup_required_bytes(codex_home, source);
+    #[cfg(target_os = "windows")]
+    {
+        let free = windows_drive_free_bytes(&root)?;
+        if free < required {
+            return Err(format!(
+                "恢复备份空间不足，未关闭 Codex、未修改会话：需要至少 {:.2} MB，可用 {:.2} MB，备份目录 {}",
+                required as f64 / 1024.0 / 1024.0,
+                free as f64 / 1024.0 / 1024.0,
+                root.display(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn backup_recovery_state(
     codex_home: &Path,
     source: &Path,
@@ -52,6 +107,37 @@ fn backup_recovery_state(
 if old not in text:
     raise SystemExit("r46 V-drive backup hotfix: backup root anchor missing")
 text = text.replace(old, new, 1)
+
+old_action = '''    proxy_telemetry().logs.add(
+        "WARN",
+        format!(
+            "[thread-recovery-r46] action={} stage=begin thread={} workspace_mutation=false",
+            action_name,
+            fingerprint8(&thread_id),
+        ),
+    );
+
+    let outcome = tokio::task::spawn_blocking(move || {
+'''
+new_action = '''    if let Err(e) = preflight_recovery_backup_space(&paths.codex_home, &rollout) {
+        return err(StatusCode::INSUFFICIENT_STORAGE, e).into_response();
+    }
+
+    proxy_telemetry().logs.add(
+        "WARN",
+        format!(
+            "[thread-recovery-r46] action={} stage=begin thread={} workspace_mutation=false backup_root={}",
+            action_name,
+            fingerprint8(&thread_id),
+            recovery_backup_root().map(|p| p.display().to_string()).unwrap_or_else(|_| "<unavailable>".into()),
+        ),
+    );
+
+    let outcome = tokio::task::spawn_blocking(move || {
+'''
+if old_action not in text:
+    raise SystemExit("r46 V-drive backup hotfix: recovery action preflight anchor missing")
+text = text.replace(old_action, new_action, 1)
 
 # Surface the actual backup root in the preview safeguards so users know large
 # history copies are not silently targeting the system drive.
@@ -65,6 +151,8 @@ for marker in (
     MARKER,
     "CODEX_APP_TRANSFER_RECOVERY_BACKUP_DIR",
     "Codex-App-Transfer-Recovery-Backups",
+    "preflight_recovery_backup_space(&paths.codex_home, &rollout)",
+    "StatusCode::INSUFFICIENT_STORAGE",
     "let root = recovery_backup_root()?;",
 ):
     if marker not in text:

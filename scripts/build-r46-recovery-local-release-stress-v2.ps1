@@ -21,7 +21,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $repoRoot
 $target = 'x86_64-pc-windows-msvc'
 
-Write-Host 'Codex App Transfer r46 v2 - Recovery Safety Hardening' -ForegroundColor Green
+Write-Host 'Codex App Transfer r46 v2 - Recovery Safety + Explainability Hardening' -ForegroundColor Green
 $baseGate = Join-Path $PSScriptRoot 'build-r46-recovery-local-release-stress.ps1'
 $gateArgs = @('-SkipCargoCheck', '-SkipFrontendBuild')
 if ($SkipLegacyStress) { $gateArgs += '-SkipLegacyStress' }
@@ -32,8 +32,9 @@ if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) { throw 'CARGO_HOME is empty 
 $cargoExe = Join-Path $env:CARGO_HOME 'bin\cargo.exe'
 if (-not (Test-Path -LiteralPath $cargoExe -PathType Leaf)) { throw "cargo.exe not found: $cargoExe" }
 
-Write-Host "`n[r46-v2 1/5] Recovery backup + chain-health hardening" -ForegroundColor Green
+Write-Host "`n[r46-v2 1/5] Recovery backup + explainability + chain-health hardening" -ForegroundColor Green
 Invoke-Checked 'python' 'scripts/apply_r46_thread_recovery_backup_hardening.py'
+Invoke-Checked 'python' 'scripts/apply_r46_recovery_explainability_ui.py'
 Invoke-Checked 'python' 'scripts/apply_r46_chain_health_recovery_hint.py'
 Set-Content -LiteralPath (Join-Path $repoRoot 'SUB2API_GROK_COMPAT_REVISION.txt') -Value '46' -Encoding UTF8
 Invoke-Checked 'python' 'scripts/apply_sub2api_grok_compat_revision.py'
@@ -43,7 +44,7 @@ Invoke-Checked $cargoExe 'fmt' '--all'
 Invoke-Checked 'git' 'diff' '--check'
 Invoke-Checked $cargoExe 'fmt' '--all' '--' '--check'
 
-Write-Host "`n[r46-v2 3/5] Hardened source invariants" -ForegroundColor Green
+Write-Host "`n[r46-v2 3/5] Hardened source + UX invariants" -ForegroundColor Green
 $backend = Get-Content (Join-Path $repoRoot 'src-tauri/src/admin/handlers/thread_recovery.rs') -Raw -Encoding UTF8
 foreach ($marker in @(
     'CAS-R46-RECOVERY-STATE-DB-BACKUP',
@@ -57,6 +58,18 @@ foreach ($marker in @(
 $health = Get-Content (Join-Path $repoRoot 'src-tauri/src/admin/handlers/chain_health.rs') -Raw -Encoding UTF8
 if ($health -notmatch 'CAS-R46-OLD-THREAD-RECOVERY-HINT' -or $health -notmatch 'same_thread_recovery_available') {
     throw 'r46-v2 chain-health recovery hint missing'
+}
+$page = Get-Content (Join-Path $repoRoot 'frontend/src/pages/ProxyPage.vue') -Raw -Encoding UTF8
+foreach ($marker in @(
+    'CAS-R46-RECOVERY-EXPLAINABILITY-UI',
+    '旧会话恢复（先预览）',
+    '已尝试，先查看结果',
+    '相同故障指纹已经尝试过一次',
+    '不适用：MCP/helper 进程异常',
+    '可能执行：',
+    '明确不会：'
+)) {
+    if ($page -notmatch [regex]::Escape($marker)) { throw "r46-v2 explainability invariant missing: $marker" }
 }
 
 Write-Host "`n[r46-v2 4/5] Production frontend" -ForegroundColor Green
@@ -78,6 +91,6 @@ if ($version -notmatch 'compat_revision=46' -or $version -notmatch 'app_version=
     throw 'r46-v2 version stamp mismatch'
 }
 
-Write-Host "`nR46 V2 RECOVERY SAFETY VALIDATION PASS" -ForegroundColor Green
+Write-Host "`nR46 V2 RECOVERY SAFETY + EXPLAINABILITY VALIDATION PASS" -ForegroundColor Green
 Write-Host $version.Trim()
 Write-Host 'No real thread recovery was executed by this build gate.' -ForegroundColor Yellow

@@ -60,12 +60,32 @@ function Find-CMake {
     $cmd = Get-Command cmake.exe -ErrorAction SilentlyContinue
     if (-not $cmd) { $cmd = Get-Command cmake -ErrorAction SilentlyContinue }
     if ($cmd) { return $cmd.Source }
-
     $candidates = @(
         (Join-Path $env:ProgramFiles 'CMake\bin\cmake.exe'),
         (Join-Path ${env:ProgramFiles(x86)} 'CMake\bin\cmake.exe')
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
     return ($candidates | Select-Object -First 1)
+}
+
+function Find-Nasm {
+    $cmd = Get-Command nasm.exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { $cmd = Get-Command nasm -ErrorAction SilentlyContinue }
+    if ($cmd) { return $cmd.Source }
+    $roots = @(
+        (Join-Path $env:ProgramFiles 'NASM'),
+        (Join-Path ${env:ProgramFiles(x86)} 'NASM'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\NASM')
+    ) | Where-Object { $_ }
+    foreach ($root in $roots) {
+        $direct = Join-Path $root 'nasm.exe'
+        if (Test-Path -LiteralPath $direct -PathType Leaf) { return $direct }
+        if (Test-Path -LiteralPath $root -PathType Container) {
+            $found = Get-ChildItem -LiteralPath $root -Filter nasm.exe -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($found) { return $found.FullName }
+        }
+    }
+    return $null
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -90,7 +110,7 @@ $alreadyMaterialized = $currentVersion -match 'compat_revision=46' -and
     (Test-Path -LiteralPath $recoveryBackend -PathType Leaf) -and
     ((Get-Content -LiteralPath $recoveryBackend -Raw -Encoding UTF8) -match 'CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY')
 
-Write-Host "`n[1/7] Materialize r46" -ForegroundColor Green
+Write-Host "`n[1/8] Materialize r46" -ForegroundColor Green
 if ($alreadyMaterialized -and -not $ForceMaterialize) {
     Write-Host 'Warm r46 materialization detected; SKIP.' -ForegroundColor Green
 } else {
@@ -103,7 +123,7 @@ if ($versionFile -notmatch 'compat_revision=46' -or $versionFile -notmatch 'app_
 }
 Write-Host $versionFile.Trim() -ForegroundColor Green
 
-Write-Host "`n[2/7] Frontend assets" -ForegroundColor Green
+Write-Host "`n[2/8] Frontend assets" -ForegroundColor Green
 $frontendDir = Join-Path $repoRoot 'frontend'
 $nodeModules = Join-Path $frontendDir 'node_modules'
 $frontendIndex = Join-Path $frontendDir 'dist\index.html'
@@ -124,11 +144,10 @@ if ((Test-Path -LiteralPath $frontendIndex -PathType Leaf) -and -not $ForceFront
     }
 }
 
-Write-Host "`n[3/7] Ensure stable Rust >= 1.95" -ForegroundColor Green
+Write-Host "`n[3/8] Ensure stable Rust >= 1.95" -ForegroundColor Green
 $rustup = (Get-Command rustup.exe -ErrorAction SilentlyContinue).Source
 if (-not $rustup) { $rustup = (Get-Command rustup -ErrorAction SilentlyContinue).Source }
 if (-not $rustup) { throw 'rustup was not found in PATH.' }
-
 $rustVersion = Get-StableRustVersion $rustup
 if ($rustVersion -and $rustVersion -ge $minimumRust) {
     Write-Host "Stable Rust already ready: $rustVersion; SKIP rustup update." -ForegroundColor Green
@@ -147,7 +166,7 @@ if ($rustVersion -and $rustVersion -ge $minimumRust) {
 }
 Write-Host "Using stable rustc: $rustVersion" -ForegroundColor Green
 
-Write-Host "`n[4/7] Locate Tauri" -ForegroundColor Green
+Write-Host "`n[4/8] Locate Tauri" -ForegroundColor Green
 $tauriAvailable = $false
 try {
     $global:LASTEXITCODE = 0
@@ -162,34 +181,55 @@ if (-not $tauriAvailable) {
     Write-Host 'cargo-tauri already available; SKIP install.' -ForegroundColor Green
 }
 
-Write-Host "`n[5/7] Ensure CMake for boring-sys2" -ForegroundColor Green
+$winget = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
+if (-not $winget) { $winget = (Get-Command winget -ErrorAction SilentlyContinue).Source }
+
+Write-Host "`n[5/8] Ensure CMake for boring-sys2" -ForegroundColor Green
 $cmake = Find-CMake
 if (-not $cmake) {
-    $winget = (Get-Command winget.exe -ErrorAction SilentlyContinue).Source
-    if (-not $winget) { $winget = (Get-Command winget -ErrorAction SilentlyContinue).Source }
-    if (-not $winget) {
-        throw 'CMake is required by boring-sys2, but cmake and winget were both not found.'
-    }
+    if (-not $winget) { throw 'CMake is required by boring-sys2, but cmake and winget were both not found.' }
     Write-Host 'CMake missing; installing Kitware.CMake once with winget...' -ForegroundColor Yellow
     Invoke-Checked $winget 'install' '--id' 'Kitware.CMake' '--exact' '--silent' '--accept-package-agreements' '--accept-source-agreements'
     $cmake = Find-CMake
-    if (-not $cmake) {
-        throw 'winget reported success, but cmake.exe was still not found under PATH or Program Files.'
-    }
+    if (-not $cmake) { throw 'winget reported success, but cmake.exe was still not found.' }
 } else {
     Write-Host "CMake already available; SKIP install: $cmake" -ForegroundColor Green
 }
 $cmakeBin = Split-Path -Parent $cmake
-if (($env:PATH -split ';') -notcontains $cmakeBin) {
-    $env:PATH = "$cmakeBin;$env:PATH"
-}
+if (($env:PATH -split ';') -notcontains $cmakeBin) { $env:PATH = "$cmakeBin;$env:PATH" }
 $env:CMAKE = $cmake
 $global:LASTEXITCODE = 0
 $cmakeVersion = @(& $cmake --version 2>&1) | Select-Object -First 1
 if ($global:LASTEXITCODE -ne 0) { throw "cmake --version failed: $cmake" }
 Write-Host "Using $cmakeVersion" -ForegroundColor Green
 
-Write-Host "`n[6/7] Build actual Windows NSIS package" -ForegroundColor Green
+Write-Host "`n[6/8] Ensure NASM for BoringSSL" -ForegroundColor Green
+$nasm = Find-Nasm
+if (-not $nasm) {
+    if (-not $winget) { throw 'NASM is required by BoringSSL, but nasm and winget were both not found.' }
+    Write-Host 'NASM missing; installing NASM.NASM once with winget...' -ForegroundColor Yellow
+    Invoke-Checked $winget 'install' '--id' 'NASM.NASM' '--exact' '--silent' '--accept-package-agreements' '--accept-source-agreements'
+    $nasm = Find-Nasm
+    if (-not $nasm) {
+        # Refresh PATH from machine/user environment once, then probe again.
+        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if ($machinePath -or $userPath) { $env:PATH = "$machinePath;$userPath;$env:PATH" }
+        $nasm = Find-Nasm
+    }
+    if (-not $nasm) { throw 'winget reported success, but nasm.exe was still not found.' }
+} else {
+    Write-Host "NASM already available; SKIP install: $nasm" -ForegroundColor Green
+}
+$nasmBin = Split-Path -Parent $nasm
+if (($env:PATH -split ';') -notcontains $nasmBin) { $env:PATH = "$nasmBin;$env:PATH" }
+$env:CMAKE_ASM_NASM_COMPILER = $nasm
+$global:LASTEXITCODE = 0
+$nasmVersion = @(& $nasm -v 2>&1) | Select-Object -First 1
+if ($global:LASTEXITCODE -ne 0) { throw "nasm -v failed: $nasm" }
+Write-Host "Using $nasmVersion" -ForegroundColor Green
+
+Write-Host "`n[7/8] Build actual Windows NSIS package" -ForegroundColor Green
 Push-Location (Join-Path $repoRoot 'src-tauri')
 try {
     Invoke-StableCargo $rustup 'tauri' 'build' '--target' $target '--bundles' 'nsis'
@@ -197,13 +237,12 @@ try {
     Pop-Location
 }
 
-Write-Host "`n[7/7] Copy real-use installer" -ForegroundColor Green
+Write-Host "`n[8/8] Copy real-use installer" -ForegroundColor Green
 $appVersionLine = ($versionFile -split "`r?`n" | Where-Object { $_ -like 'app_version=*' } | Select-Object -First 1)
 $appVersion = if ($appVersionLine) { $appVersionLine.Substring('app_version='.Length) } else { '2.4.5+46' }
 $safeVersion = $appVersion -replace '\+', '-r'
 $outDir = "V:\Codex-App-Transfer-Packages\r46-real-use\$safeVersion"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-
 $bundleRoot = if ($env:CARGO_TARGET_DIR) {
     Join-Path $env:CARGO_TARGET_DIR "$target\release\bundle\nsis"
 } else {
@@ -213,11 +252,9 @@ $setup = Get-ChildItem -LiteralPath $bundleRoot -Filter '*.exe' -File -ErrorActi
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 if (-not $setup) { throw "NSIS installer not found under: $bundleRoot" }
-
 $dest = Join-Path $outDir "Codex-App-Transfer-Sub2API-Grok-Compat-$safeVersion-FAST-REAL-USE.exe"
 Copy-Item -LiteralPath $setup.FullName -Destination $dest -Force
 $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash
-
 $manifest = [ordered]@{
     version = $appVersion
     compatRevision = 46
@@ -228,6 +265,7 @@ $manifest = [ordered]@{
     frontendBuild = 'passed/reused'
     rustc = $rustVersion.ToString()
     cmake = [string]$cmakeVersion
+    nasm = [string]$nasmVersion
     windowsNsisCompilation = 'passed'
     realThreadRecoveryExecutedDuringBuild = $false
     installer = $dest

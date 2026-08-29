@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "src-tauri/src/admin/handlers/thread_recovery.rs"
 PAGE = ROOT / "frontend/src/pages/ProxyPage.vue"
 FRONTEND_INDEX = ROOT / "frontend/dist/index.html"
+BUILD = ROOT / "scripts/build-r46-fast-real-use.ps1"
 MARKER = "CAS-R46-FAILURE-BOUNDARY-FORK-HOTFIX"
 
 text = BACKEND.read_text(encoding="utf-8")
@@ -220,5 +221,22 @@ elif new_label in page:
     print("r46 failure-boundary fork UI already applied")
 else:
     raise SystemExit("r46 failure-boundary fork: recovery-copy UI label anchor missing")
+
+# CAS-R46-FRONTEND-DEPS-COMPLETE-GUARD
+# A reused node_modules directory can be incomplete even though the directory exists.
+# The frontend build requires devDependencies (vue-tsc + vite), so detect the actual
+# executables and force a one-time dev dependency restore when either is absent.
+build = BUILD.read_text(encoding="utf-8")
+deps_marker = "CAS-R46-FRONTEND-DEPS-COMPLETE-GUARD"
+if deps_marker not in build:
+    old_deps = "        if (-not (Test-Path -LiteralPath $nodeModules -PathType Container)) { Invoke-Checked 'npm.cmd' 'ci' }\n"
+    new_deps = """        # CAS-R46-FRONTEND-DEPS-COMPLETE-GUARD\n        $vueTsc = Join-Path $nodeModules '.bin\\vue-tsc.cmd'\n        $vite = Join-Path $nodeModules '.bin\\vite.cmd'\n        $frontendDepsReady = (Test-Path -LiteralPath $vueTsc -PathType Leaf) -and (Test-Path -LiteralPath $vite -PathType Leaf)\n        if (-not $frontendDepsReady) {\n            Write-Host 'Frontend dev dependencies incomplete; running npm ci --include=dev once...' -ForegroundColor Yellow\n            Invoke-Checked 'npm.cmd' 'ci' '--include=dev'\n        } else {\n            Write-Host 'Frontend dev dependencies ready; SKIP npm ci.' -ForegroundColor Green\n        }\n"""
+    if old_deps not in build:
+        raise SystemExit("r46 frontend deps guard: build-script anchor missing")
+    build = build.replace(old_deps, new_deps, 1)
+    BUILD.write_text(build, encoding="utf-8")
+    print("R46 FRONTEND DEPS COMPLETE GUARD PASS")
+else:
+    print("r46 frontend deps complete guard already applied")
 
 print("R46 FAILURE-BOUNDARY FORK HOTFIX PASS")

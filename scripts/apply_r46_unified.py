@@ -29,6 +29,7 @@ run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 run("scripts/apply_r46_recovery_explainability_ui.py")
 run("scripts/apply_r46_chain_health_recovery_hint.py")
+run("scripts/apply_r46_generic_repair_loop_guard.py")
 
 REVISION.write_text("46\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -55,6 +56,9 @@ checks = {
     "src-tauri/src/admin/handlers/chain_health.rs": (
         "CAS-R46-OLD-THREAD-RECOVERY-HINT",
         "same_thread_recovery_available",
+        "CAS-R46-GENERIC-REPAIR-SAME-FAULT-GUARD",
+        "recovery_same_fault_already_attempted",
+        "r46_same_fault_signature_unlocks_after_meaningful_health_change",
     ),
     "src-tauri/src/admin/handlers/mod.rs": (
         "pub mod thread_recovery;",
@@ -93,7 +97,7 @@ print("- r45 model-switch continuity + metadata truth + semantic terminal base p
 print("- privacy-bounded structural model-switch forensics v2 added")
 print("- read-only old-thread recovery preview added")
 print("- recovery buttons explain applicability / side effects before execution")
-print("- unchanged fault signature is locked after one generic repair attempt")
+print("- unchanged fault signature is locked in both UI and backend after one generic repair attempt")
 print("- same-thread one-turn rewind prefers thread/revert, method-not-found falls back to rollback(1)")
 print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")

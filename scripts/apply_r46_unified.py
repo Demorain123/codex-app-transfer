@@ -34,6 +34,7 @@ run("scripts/apply_r46_model_switch_forensics_v2.py")
 run("scripts/apply_r46_thread_recovery_ui.py")
 run("scripts/apply_r46_recovery_explainability_preflight.py")
 run("scripts/apply_r46_recovery_explainability_ui.py")
+run("scripts/apply_r46_failure_boundary_fork_hotfix.py")
 run("scripts/apply_r46_chain_health_recovery_hint.py")
 run("scripts/apply_r46_generic_repair_loop_guard.py")
 
@@ -58,6 +59,7 @@ checks = {
         "CAS-R46-CODEX-CLI-SHADOW-COPY",
         "CAS-R46-REVERT-COMPAT-LOGGING-HOTFIX",
         "CAS-R46-RESUME-BEFORE-ROLLBACK-HOTFIX",
+        "CAS-R46-FAILURE-BOUNDARY-FORK-HOTFIX",
         "CODEX_APP_TRANSFER_RECOVERY_BACKUP_DIR",
         "Codex-App-Transfer-Recovery-Backups",
         "find_launchable_codex_cli",
@@ -66,6 +68,8 @@ checks = {
         "stage=rpc_error",
         "stage=rpc_ok",
         "stage=thread_loaded",
+        "stage=fork_boundary",
+        "latest_failed_compaction_turn_id",
         "thread/resume",
         "thread/revert",
         "thread/rollback",
@@ -92,7 +96,7 @@ checks = {
         "CAS-R46-RECOVERY-EXPLAINABILITY-PREFLIGHT",
         "CAS-R46-RECOVERY-EXPLAINABILITY-UI",
         "同 ID 回退 1 轮（推荐）",
-        "创建恢复副本（原会话不动）",
+        "创建故障前恢复副本（推荐）",
         "旧会话恢复（先预览）",
         "已尝试，先查看结果",
         "相同故障指纹已经尝试过一次",
@@ -121,8 +125,8 @@ print("- recovery buttons explain applicability / side effects before execution"
 print("- unchanged fault signature is locked in both UI and backend after one generic repair attempt")
 print("- persisted historical thread is resumed into the shadow app-server before any revert/rollback mutation")
 print("- same-thread one-turn rewind prefers thread/revert; old app-server unknown-variant/method-not-found falls back to rollback(1)")
+print("- recovery-copy forks before the exact failed compaction and excludes later failed retries")
 print("- recovery RPC call/error/success and thread-load stages are logged without dumping full app-server error bodies")
-print("- fork recovery remains non-destructive fallback")
 print("- rollout + cold Codex state DB backup happens before every recovery mutation")
 print("- large recovery backups prefer V:\\Codex-App-Transfer-Recovery-Backups instead of the system drive")
 print("- recovery uses a launch-preflighted Codex CLI and can shadow-copy the running Desktop native runtime to V:")

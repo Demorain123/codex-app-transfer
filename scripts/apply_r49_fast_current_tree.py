@@ -49,6 +49,7 @@ else:
         raise SystemExit("r49 fast baseline repair completed but required r48 markers are still missing")
 
 run("scripts/apply_r49_unified_codex_temp_launch.py")
+run("scripts/apply_r49_no_micro_temp_scope_fix.py")
 
 version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
 if "compat_revision=49" not in version_before or "app_version=2.4.5+49" not in version_before:
@@ -64,6 +65,7 @@ checks = {
     ),
     "src-tauri/src/admin/services/desktop/no_micro.rs": (
         "CAS-R49-UNIFIED-CODEX-TEMP-LAUNCH",
+        "CAS-R49-NO-MICRO-TEMP-SCOPE-FIX",
         'codex_custom_temp_launch_env("windows")',
         ".envs(custom_temp_env.iter()",
     ),
@@ -93,5 +95,6 @@ print("R49 FAST CURRENT-TREE COMPOSITION PASS")
 print("- complete generated r48 tree is reused without replay")
 print("- Restart Codex App / Normal A / No Lagging B share one persisted TEMP draft")
 print("- B launcher reuses the same r47 TEMP/TMP/TMPDIR validation helper")
+print("- B TEMP logging is scoped only to the actual Node launch command")
 print("- frontend assets invalidate once for unified launch behavior")
 print("- no user/system environment mutation")

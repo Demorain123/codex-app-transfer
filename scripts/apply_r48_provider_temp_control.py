@@ -225,7 +225,7 @@ async function loadCodexTempDraft() {
   min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--surface);
 }
 .providers__temp-label {
@@ -245,7 +245,7 @@ async function loadCodexTempDraft() {
   outline: none;
 }
 .providers__temp-input:focus {
-  border-color: var(--primary);
+  border-color: var(--accent);
 }
 .providers__temp-apply-hint {
   color: var(--text-muted);

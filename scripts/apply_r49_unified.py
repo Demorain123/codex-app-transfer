@@ -39,6 +39,7 @@ else:
     print("R49 UNIFIED BASELINE: r48 UI/runtime already materialized; r48 replay SKIP")
 
 run("scripts/apply_r49_unified_codex_temp_launch.py")
+run("scripts/apply_r49_no_micro_temp_scope_fix.py")
 REVISION.write_text("49\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
 
@@ -50,6 +51,7 @@ checks = {
     ),
     "src-tauri/src/admin/services/desktop/no_micro.rs": (
         "CAS-R49-UNIFIED-CODEX-TEMP-LAUNCH",
+        "CAS-R49-NO-MICRO-TEMP-SCOPE-FIX",
         'codex_custom_temp_launch_env("windows")',
         ".envs(custom_temp_env.iter()",
     ),
@@ -78,5 +80,6 @@ if "compat_revision=49" not in version or "app_version=2.4.5+49" not in version:
 print("R49 UNIFIED COMPOSITION PASS")
 print("- all three Transfer-owned Codex launch buttons apply the same Codex TEMP setting")
 print("- No Lagging B inherits the same validated process-local TEMP/TMP/TMPDIR")
+print("- B TEMP logging is scoped to launch_windows after its env injection")
 print("- r48 Providers placement and r47 agent-loop recovery remain intact")
 print("- no user/system TEMP mutation and no old cache deletion")

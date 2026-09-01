@@ -8,8 +8,20 @@ echo ============================================================
 echo Reuses the proven r56/r55/r54/r53/r52/r51/r50/r49/r48/r47/r46 local build caches.
 echo Migrates stale external cat-webfetch source definitions to the detached MCP helper.
 echo Reuses the workspace's existing rusqlite 0.40 / libsqlite3-sys line.
+echo Performs an early V: Cargo-target free-space check before compiling.
 echo Full validation suites remain intentionally skipped.
 echo.
+
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Repair-r57-Build-Space.ps1"
+if errorlevel 1 (
+  echo.
+  echo [FAILED] r57 build-space preflight.
+  echo If it reported LOW, run:
+  echo   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\Repair-r57-Build-Space.ps1 -CleanCargoTarget
+  echo Then rerun this command.
+  pause
+  exit /b 1
+)
 
 python ".\scripts\apply_r57_fast_current_tree.py"
 if errorlevel 1 (

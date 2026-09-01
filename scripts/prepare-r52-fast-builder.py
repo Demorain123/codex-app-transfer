@@ -37,7 +37,7 @@ for old, new in replacements:
     text = text.replace(old, new)
 
 old_guard = "((Get-Content -LiteralPath $recoveryBackend -Raw -Encoding UTF8) -match 'CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'src-tauri\\src\\admin\\services\\desktop\\process.rs') -Raw -Encoding UTF8) -match 'CAS-R47-CODEX-CUSTOM-TEMP') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'frontend\\src\\pages\\ProvidersPage.vue') -Raw -Encoding UTF8) -match 'CAS-R48-PROVIDER-TEMP-CONTROL') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'src-tauri\\src\\admin\\services\\desktop\\no_micro.rs') -Raw -Encoding UTF8) -match 'CAS-R49-UNIFIED-CODEX-TEMP-LAUNCH') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\proxy\\src\\forward.rs') -Raw -Encoding UTF8) -match 'CAS-R50-SAME-SESSION-CROSS-MODEL-REPLAY') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\proxy\\src\\forward.rs') -Raw -Encoding UTF8) -match 'CAS-R51-COMPACTION-ROLE-TRUTH') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\responses\\compact.rs') -Raw -Encoding UTF8) -match 'CAS-R51-COMPACT-HANDOFF-QUALITY')"
-new_guard = old_guard + " -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\mapper\\sub2api_grok_compat.rs') -Raw -Encoding UTF8) -match 'CAS-R52-SUB2API-CROSS-MODEL-COMPACTION') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\mapper\\responses.rs') -Raw -Encoding UTF8) -match 'CAS-R52-SUB2API-CROSS-MODEL-COMPACTION') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\responses\\compact.rs') -Raw -Encoding UTF8) -match 'CAS-R52-SUB2API-CROSS-MODEL-COMPACTION')"
+new_guard = old_guard + " -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\mapper\\sub2api_grok_compat.rs') -Raw -Encoding UTF8) -match 'CAS-R52-SUB2API-CROSS-MODEL-COMPACTION') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\mapper\\responses.rs') -Raw -Encoding UTF8) -match 'CAS-R52-SUB2API-CROSS-MODEL-COMPACTION') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\mapper\\responses.rs') -Raw -Encoding UTF8) -match 'CAS-R52-NON-GROK-COMPACT-ADAPTER-GUARD') -and ((Get-Content -LiteralPath (Join-Path $repoRoot 'crates\\adapters\\src\\responses\\compact.rs') -Raw -Encoding UTF8) -match 'CAS-R52-SUB2API-CROSS-MODEL-COMPACTION')"
 if old_guard not in text:
     raise SystemExit("r52 fast builder: r51 materialized guard anchor missing")
 text = text.replace(old_guard, new_guard, 1)
@@ -52,6 +52,7 @@ required = (
     "CAS-R51-COMPACTION-ROLE-TRUTH",
     "CAS-R51-COMPACT-HANDOFF-QUALITY",
     "CAS-R52-SUB2API-CROSS-MODEL-COMPACTION",
+    "CAS-R52-NON-GROK-COMPACT-ADAPTER-GUARD",
     "r52-real-use",
 )
 for marker in required:
@@ -62,4 +63,5 @@ TARGET.write_text(text, encoding="utf-8")
 print("R52 FAST BUILDER PREP PASS")
 print("- reused the proven r51/r50/r49/r48/r47/r46 DevCache and toolchain")
 print("- changed only r52 materializer/version/output/materialization guards")
+print("- warm materialization requires the non-Grok compact adapter guard too")
 print("- full validation suites remain intentionally skipped for this local real-use build")

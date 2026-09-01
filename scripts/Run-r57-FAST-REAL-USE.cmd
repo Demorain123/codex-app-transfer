@@ -7,7 +7,7 @@ echo Codex App Transfer r57 - FAST REAL-USE BUILD
 echo ============================================================
 echo Reuses the proven r56/r55/r54/r53/r52/r51/r50/r49/r48/r47/r46 local build caches.
 echo Migrates stale external cat-webfetch source definitions to the detached MCP helper.
-echo First r57 native build may spend extra time compiling bundled SQLite once.
+echo Reuses the workspace's existing rusqlite 0.40 / libsqlite3-sys line.
 echo Full validation suites remain intentionally skipped.
 echo.
 

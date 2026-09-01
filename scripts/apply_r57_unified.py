@@ -25,6 +25,7 @@ def run(rel: str) -> None:
 
 run("scripts/apply_r56_unified.py")
 run("scripts/apply_r57_external_mcp_source_migration.py")
+run("scripts/apply_r57_sqlite_dependency_repair.py")
 
 REVISION.write_text("57\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -50,8 +51,10 @@ for rel, markers in checks.items():
             raise SystemExit(f"r57 generated-source invariant missing in {rel}: {marker}")
 
 cargo = CARGO.read_text(encoding="utf-8")
-if 'rusqlite = { version = "0.31", features = ["bundled"] }' not in cargo:
-    raise SystemExit("r57 Windows rusqlite dependency missing")
+if 'rusqlite = { version = "0.40", features = ["bundled"] }' not in cargo:
+    raise SystemExit("r57 Windows rusqlite 0.40 dependency missing")
+if 'rusqlite = { version = "0.31", features = ["bundled"] }' in cargo:
+    raise SystemExit("r57 stale rusqlite 0.31 dependency remains")
 
 version = VERSION.read_text(encoding="utf-8")
 if "compat_revision=57" not in version or "app_version=2.4.5+57" not in version:
@@ -62,4 +65,5 @@ print("- r56 same-model/cross-model compact SSE summary recovery remains intact"
 print("- r55 detached MCP helper remains the runtime target")
 print("- CC Switch persistent Codex MCP source and OMP-native user/profile sources migrate old cat-webfetch commands")
 print("- migration is narrow, idempotent and best-effort; unrelated MCP/provider data is untouched")
+print("- src-tauri shares the workspace's existing rusqlite 0.40/libsqlite3-sys dependency line")
 print("- after external hosts restart once, they no longer need the installed main Transfer EXE for webfetch MCP")

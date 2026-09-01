@@ -49,6 +49,7 @@ else:
         raise SystemExit("r52 fast baseline repair completed but required r51 markers are still missing")
 
 run("scripts/apply_r52_sub2api_cross_model_compaction.py")
+run("scripts/apply_r52_non_grok_compact_adapter_guard.py")
 
 version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
 if "compat_revision=52" not in version_before or "app_version=2.4.5+52" not in version_before:
@@ -68,8 +69,10 @@ checks = {
     ),
     "crates/adapters/src/mapper/responses.rs": (
         "CAS-R52-SUB2API-CROSS-MODEL-COMPACTION",
+        "CAS-R52-NON-GROK-COMPACT-ADAPTER-GUARD",
         "use_sub2api_local_compaction",
         "[model-switch-r52] action=local_private_compaction",
+        "let summ = if use_grok_compat",
     ),
     "crates/adapters/src/responses/compact.rs": (
         "CAS-R51-COMPACT-HANDOFF-QUALITY",
@@ -91,4 +94,5 @@ print("R52 FAST CURRENT-TREE COMPOSITION PASS")
 print("- complete generated r51 tree is reused without replay when warm")
 print("- Sub2API private compact is locally translated for every selected model")
 print("- prior compact summaries are portableized before the ordinary summary request")
+print("- non-Grok compact requests skip the Grok-only request adapter")
 print("- ordinary model turns, session identity, and r49 launch TEMP behavior are preserved")

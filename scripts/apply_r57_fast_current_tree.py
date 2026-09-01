@@ -46,6 +46,10 @@ else:
         raise SystemExit("r57 fast baseline repair completed but required r56 markers are still missing")
 
 run("scripts/apply_r57_external_mcp_source_migration.py")
+# r57 initially used rusqlite 0.31 here, but crates/adapters already uses 0.40.
+# Reconcile even when the r57 source marker is already materialized so failed local
+# builds can resume without reset/clean.
+run("scripts/apply_r57_sqlite_dependency_repair.py")
 
 version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
 if "compat_revision=57" not in version_before or "app_version=2.4.5+57" not in version_before:
@@ -71,8 +75,11 @@ for rel, markers in checks.items():
         if marker not in text:
             raise SystemExit(f"r57 fast-current-tree invariant missing in {rel}: {marker}")
 
-if 'rusqlite = { version = "0.31", features = ["bundled"] }' not in CARGO.read_text(encoding="utf-8"):
-    raise SystemExit("r57 fast-current-tree rusqlite dependency missing")
+cargo_text = CARGO.read_text(encoding="utf-8")
+if 'rusqlite = { version = "0.40", features = ["bundled"] }' not in cargo_text:
+    raise SystemExit("r57 fast-current-tree rusqlite 0.40 dependency missing")
+if 'rusqlite = { version = "0.31", features = ["bundled"] }' in cargo_text:
+    raise SystemExit("r57 fast-current-tree stale rusqlite 0.31 dependency remains")
 
 version = VERSION.read_text(encoding="utf-8")
 if "compat_revision=57" not in version or "app_version=2.4.5+57" not in version:
@@ -80,5 +87,6 @@ if "compat_revision=57" not in version or "app_version=2.4.5+57" not in version:
 
 print("R57 FAST CURRENT-TREE COMPOSITION PASS")
 print("- complete generated r56 tree is reused without replay when warm")
-print("- only external MCP source migration + narrow SQLite dependency are added in r57")
+print("- external MCP source migration is added in r57")
+print("- src-tauri reuses the existing workspace rusqlite 0.40/libsqlite3-sys line")
 print("- r56 compact parser, r55 detached helper, model/session behavior and r49 TEMP remain unchanged")

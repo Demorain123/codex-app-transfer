@@ -52,7 +52,7 @@ fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
         .map_err(|e| format!("拿不到自身可执行路径: {e}"))?;
     let source_bytes = fs::read(&source_exe)
         .map_err(|e| format!("读取 MCP helper 源二进制失败: {e}"))?;
-    let source_digest = Sha256::digest(&source_bytes);
+    let source_digest = Sha256::digest(&source_bytes).to_vec();
 
     let home = resolve_home().ok_or_else(|| "HOME / USERPROFILE not set".to_owned())?;
     let helper_dir = home.join(".codex-app-transfer").join("mcp-bin");
@@ -64,7 +64,7 @@ fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
 
     let helper_is_current = fs::read(&helper_path)
         .ok()
-        .map(|bytes| Sha256::digest(&bytes)[..] == source_digest[..])
+        .map(|bytes| Sha256::digest(&bytes).to_vec() == source_digest)
         .unwrap_or(false);
 
     if !helper_is_current {
@@ -88,7 +88,7 @@ fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
                 let _ = fs::remove_file(&temp_path);
                 let winner = fs::read(&helper_path)
                     .map_err(|e| format!("读取并发生成的 MCP helper 失败: {e}"))?;
-                if Sha256::digest(&winner)[..] != source_digest[..] {
+                if Sha256::digest(&winner).to_vec() != source_digest {
                     return Err(format!(
                         "并发生成的 MCP helper 校验失败: {rename_error}"
                     ));

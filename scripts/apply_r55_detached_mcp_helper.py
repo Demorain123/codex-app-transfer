@@ -21,15 +21,15 @@ comment_anchor = "/// 注册 transfer 自己的 web_fetch MCP server(`command` =
 helper_code = r'''// CAS-R55-DETACHED-MCP-HELPER
 //
 // Windows does not allow an installer/updater to replace or remove an executable while
-// another process is running that image.  `cat-webfetch` used to register the *main*
+// another process is running that image. `cat-webfetch` used to register the *main*
 // installed codex-app-transfer.exe as its stdio MCP command, so long-lived hosts (for
 // example OMP) could keep the installation executable mapped even after the GUI exited.
 //
 // Materialize a content-addressed byte-for-byte helper copy under the user's Transfer
-// data directory and register that path instead.  The helper is the same binary and is
+// data directory and register that path instead. The helper is the same binary and is
 // still entered with `--mcp-serve-webfetch`, but it no longer lives in the installation
-// directory.  Content-addressed names let an update create a new helper even while an
-// older helper is still running/locked.  Stale helpers are removed best-effort once they
+// directory. Content-addressed names let an update create a new helper even while an
+// older helper is still running/locked. Stale helpers are removed best-effort once they
 // are no longer locked.
 const DETACHED_MCP_HELPER_PREFIX_R55: &str = "codex-app-transfer-mcp-";
 
@@ -68,7 +68,7 @@ fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
         .unwrap_or(false);
 
     if !helper_is_current {
-        // A content-addressed path should normally be absent.  If a corrupt/incomplete
+        // A content-addressed path should normally be absent. If a corrupt/incomplete
         // file exists, remove it if possible; a locked mismatch is surfaced rather than
         // silently registering unverified bytes.
         if helper_path.exists() {
@@ -101,8 +101,8 @@ fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
         }
     }
 
-    // Best-effort GC.  A helper still serving an old host is expected to be locked on
-    // Windows; leave it alone and retry on a later GUI startup.  This never blocks the
+    // Best-effort GC. A helper still serving an old host is expected to be locked on
+    // Windows; leave it alone and retry on a later GUI startup. This never blocks the
     // current registration or installation directory cleanup.
     if let Ok(entries) = fs::read_dir(&helper_dir) {
         for entry in entries.flatten() {
@@ -130,7 +130,7 @@ fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
 
 #[cfg(not(target_os = "windows"))]
 fn detached_web_fetch_exe_r55() -> Result<PathBuf, String> {
-    // The install-lock failure is Windows-specific.  Keep the existing command path on
+    // The install-lock failure is Windows-specific. Keep the existing command path on
     // other platforms until there is a demonstrated need to change their lifecycle.
     std::env::current_exe().map_err(|e| format!("拿不到自身可执行路径: {e}"))
 }
@@ -184,7 +184,7 @@ for invariant in (
     "CAS-R55-DETACHED-MCP-HELPER",
     "detached_web_fetch_exe_r55",
     "detached_mcp_helper_name_r55",
-    ".codex-app-transfer\").join(\"mcp-bin",
+    'join(".codex-app-transfer").join("mcp-bin")',
     "[mcp-r55] action=detached_helper_ready",
     "r55_detached_helper_name_is_content_addressed",
 ):

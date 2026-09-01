@@ -26,6 +26,7 @@ def run(rel: str) -> None:
 
 run("scripts/apply_r51_unified.py")
 run("scripts/apply_r52_sub2api_cross_model_compaction.py")
+run("scripts/apply_r52_non_grok_compact_adapter_guard.py")
 
 REVISION.write_text("52\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -42,8 +43,10 @@ checks = {
     ),
     "crates/adapters/src/mapper/responses.rs": (
         "CAS-R52-SUB2API-CROSS-MODEL-COMPACTION",
+        "CAS-R52-NON-GROK-COMPACT-ADAPTER-GUARD",
         "use_sub2api_local_compaction",
         "[model-switch-r52] action=local_private_compaction",
+        "let summ = if use_grok_compat",
     ),
     "crates/adapters/src/responses/compact.rs": (
         "CAS-R51-COMPACT-HANDOFF-QUALITY",
@@ -71,5 +74,6 @@ print("- r51 keeps ordinary model-switch turns authoritative")
 print("- r50 portable replay remains the main-turn cross-model boundary")
 print("- explicit Sub2API compat providers now locally implement Codex private compaction for GPT/Luna/Terra as well as Grok")
 print("- local compact history lowers prior compaction summaries to portable user messages and drops opaque reasoning")
+print("- non-Grok Sub2API compact keeps native Responses semantics; Grok-only adapter is gated")
 print("- direct native OpenAI Responses providers without Sub2API opt-in remain untouched")
 print("- exact Codex session/thread identity remains unchanged")

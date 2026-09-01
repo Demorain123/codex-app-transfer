@@ -176,7 +176,7 @@ tests = r'''    #[test]
 
     #[test]
     fn r54_non_sse_json_is_passthrough_signal_none() {
-        let json_body = br#"{\"output\":[{\"type\":\"message\"}]}"#;
+        let json_body = br#"{"output":[{"type":"message"}]}"#;
         assert!(reassemble_responses_sse_to_response_json_r54(json_body).is_none());
     }
 

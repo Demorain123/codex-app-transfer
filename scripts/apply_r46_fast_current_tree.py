@@ -42,6 +42,12 @@ if not has_r45_generated_baseline():
     print("- running canonical r46 materialization ONCE after reset/clean checkout")
     print("- later FAST runs will reuse this generated tree and skip historical replay")
     run("scripts/apply_r46_unified.py")
+    # CAS-R61-R46-FAST-BOOTSTRAP-FRONTEND-GUARD
+    # apply_r46_unified.py intentionally materializes production/source overlays only;
+    # the FAST-only frontend direct-entry guard patches build-r46-fast-real-use.ps1.
+    # A clean checkout therefore needs this one build-script overlay explicitly before
+    # the invariants below are evaluated. The warm path already applies the same helper.
+    run("scripts/apply_r46_frontend_direct_entry_hotfix.py")
     if not has_r45_generated_baseline():
         raise SystemExit("r46 fast baseline bootstrap completed but r45 generated markers are still missing")
 else:

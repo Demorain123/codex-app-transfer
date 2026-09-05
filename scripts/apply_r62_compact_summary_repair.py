@@ -73,6 +73,20 @@ if missing_count < 1:
     raise SystemExit("r62 missing-summary anchor missing")
 text = text.replace(old_missing, new_missing)
 
+# Positive telemetry after the unchanged r51 quality gate passes. This gives the
+# Windows real-use test an unambiguous success marker without logging summary content.
+old_success = '''    Ok(format!("{COMPACT_SUMMARY_PREFIX}\\n{summary}"))
+'''
+new_success = '''    tracing::info!(
+        "[compact-r62] action=summary_self_repair_pass chars={}",
+        summary.chars().count(),
+    );
+    Ok(format!("{COMPACT_SUMMARY_PREFIX}\\n{summary}"))
+'''
+if old_success not in text:
+    raise SystemExit("r62 quality-pass anchor missing")
+text = text.replace(old_success, new_success, 1)
+
 # Regression test: keep the old quality gate, but lock the stronger final prompt so a
 # future prompt simplification cannot silently reintroduce 9/229-char summaries.
 test_anchor = '''    #[test]
@@ -97,6 +111,7 @@ for invariant in (
     "CAS-R62-COMPACT-SUMMARY-SELF-REPAIR-RUNTIME",
     "CAS-R62-COMPACT-SUMMARY-MISSING-DIAG",
     "[compact-r62] action=summary_self_repair_exhausted",
+    "[compact-r62] action=summary_self_repair_pass",
     "## Current State",
     "## Important Files / Tools / Evidence",
     "1500-5000",
@@ -112,5 +127,5 @@ print("- r51 quality gate remains intact; short summaries are not silently accep
 print("- the final compact instruction now requires a structured 1500-5000 char checkpoint for substantial histories")
 print("- the model must silently self-check and repair/expand its draft once before emitting")
 print(f"- missing-summary diagnostics patched on {missing_count} collector path(s)")
-print("- missing/invalid summary failures emit bounded diagnostics without logging summary content")
+print("- success/failure telemetry logs only summary length/reason, never summary content")
 print("- no HTTP retry loop, rollout edit, rollback, or session/thread identity change is introduced")

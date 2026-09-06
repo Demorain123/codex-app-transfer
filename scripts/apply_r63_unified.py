@@ -9,6 +9,7 @@ VERSION = ROOT / "SUB2API_GROK_COMPAT_VERSION.txt"
 FORWARD = ROOT / "crates/proxy/src/forward.rs"
 COMPACT = ROOT / "crates/adapters/src/responses/compact.rs"
 PROCESS = ROOT / "src-tauri/src/admin/services/desktop/process.rs"
+RECOVERY = ROOT / "src-tauri/src/admin/handlers/thread_recovery.rs"
 SUB2API = ROOT / "crates/adapters/src/mapper/sub2api_grok_compat.rs"
 RESPONSES = ROOT / "crates/adapters/src/mapper/responses.rs"
 
@@ -37,7 +38,6 @@ run("scripts/apply_sub2api_grok_compat_revision.py")
 forward = FORWARD.read_text(encoding="utf-8")
 for marker in (
     "CAS-R50-SAME-SESSION-CROSS-MODEL-REPLAY",
-    "CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY",
     "CAS-R63-AUTH-EPOCH-ENCRYPTED-HISTORY-FENCE",
     "CAS-R63-AUTH-EPOCH-REQUEST-FENCE-HOOK",
     "CAS-R63-INVALID-ENCRYPTED-CONTENT-RECOVERY",
@@ -50,6 +50,9 @@ for marker in (
         raise SystemExit(f"r63 generated-source invariant missing in forward.rs: {marker}")
 if "let mut lower = |item:" in forward:
     raise SystemExit("r63 unified composition still contains the borrow-unsafe item-lowering closure")
+
+if "CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY" not in RECOVERY.read_text(encoding="utf-8"):
+    raise SystemExit("r63 lost inherited r59 same-id interrupted-tail recovery")
 
 compact = COMPACT.read_text(encoding="utf-8")
 for marker in (

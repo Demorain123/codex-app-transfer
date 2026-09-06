@@ -1,0 +1,79 @@
+name: r63 materialized validation
+
+on:
+  push:
+    branches:
+      - dev-r63-auth-epoch-encrypted-history-fence-local
+    paths:
+      - 'scripts/apply_r63_*.py'
+      - 'scripts/prepare-r63-fast-builder.py'
+      - 'scripts/Run-r63-FAST-REAL-USE.cmd'
+      - '.github/workflows/r63-materialized-validation.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: r63-materialized-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-r63:
+    name: Materialize r63 + proxy focused tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python syntax preflight
+        run: |
+          python3 -m py_compile \
+            scripts/apply_r63_auth_epoch_encrypted_history_fence.py \
+            scripts/apply_r63_compile_hardening.py \
+            scripts/apply_r63_fast_current_tree.py \
+            scripts/apply_r63_unified.py \
+            scripts/prepare-r63-fast-builder.py
+
+      - name: Materialize complete r63 overlay stack
+        run: python3 scripts/apply_r63_unified.py
+
+      - name: Verify r63 generated invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'CAS-R63-AUTH-EPOCH-ENCRYPTED-HISTORY-FENCE' crates/proxy/src/forward.rs
+          grep -q 'CAS-R63-AUTH-EPOCH-REQUEST-FENCE-HOOK' crates/proxy/src/forward.rs
+          grep -q 'CAS-R63-INVALID-ENCRYPTED-CONTENT-RECOVERY' crates/proxy/src/forward.rs
+          grep -q 'CAS-R63-COMPILE-HARDENING' crates/proxy/src/forward.rs
+          grep -q 'fn portableize_input_item_r63(' crates/proxy/src/forward.rs
+          if grep -q 'let mut lower = |item:' crates/proxy/src/forward.rs; then
+            echo 'borrow-unsafe r63 closure is still present' >&2
+            exit 1
+          fi
+          grep -q 'compat_revision=63' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -q 'app_version=2.4.5+63' SUB2API_GROK_COMPAT_VERSION.txt
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r63-proxy
+
+      - name: Format generated Rust
+        run: cargo fmt --all
+
+      - name: Check proxy crate
+        run: cargo check -p codex-app-transfer-proxy --lib
+
+      - name: Run r63 focused proxy tests
+        run: cargo test -p codex-app-transfer-proxy --lib r63_ -- --nocapture
+
+      - name: Show r63 generated diff summary
+        if: always()
+        run: |
+          git status --short
+          git diff --stat

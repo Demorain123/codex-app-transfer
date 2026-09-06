@@ -9,6 +9,7 @@ VERSION = ROOT / "SUB2API_GROK_COMPAT_VERSION.txt"
 FORWARD = ROOT / "crates/proxy/src/forward.rs"
 COMPACT = ROOT / "crates/adapters/src/responses/compact.rs"
 PROCESS = ROOT / "src-tauri/src/admin/services/desktop/process.rs"
+RECOVERY = ROOT / "src-tauri/src/admin/handlers/thread_recovery.rs"
 SUB2API = ROOT / "crates/adapters/src/mapper/sub2api_grok_compat.rs"
 RESPONSES = ROOT / "crates/adapters/src/mapper/responses.rs"
 
@@ -26,16 +27,17 @@ def run(rel: str) -> None:
 
 
 def has_complete_r62_generated_baseline() -> bool:
-    if not all(path.is_file() for path in (FORWARD, COMPACT, PROCESS, SUB2API, RESPONSES)):
+    if not all(path.is_file() for path in (FORWARD, COMPACT, PROCESS, RECOVERY, SUB2API, RESPONSES)):
         return False
     forward = FORWARD.read_text(encoding="utf-8")
     compact = COMPACT.read_text(encoding="utf-8")
     process = PROCESS.read_text(encoding="utf-8")
+    recovery = RECOVERY.read_text(encoding="utf-8")
     sub2api = SUB2API.read_text(encoding="utf-8")
     responses = RESPONSES.read_text(encoding="utf-8")
     return (
         "CAS-R50-SAME-SESSION-CROSS-MODEL-REPLAY" in forward
-        and "CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY" in forward
+        and "CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY" in recovery
         and "CAS-R62-COMPACT-SUMMARY-SELF-REPAIR" in compact
         and "CAS-R61-LEGACY-COMPACTION-V1" in process
         and "CAS-R60-SUB2API-POST-COMPACTION-REPLAY" in sub2api
@@ -64,7 +66,6 @@ else:
 forward = FORWARD.read_text(encoding="utf-8")
 for marker in (
     "CAS-R50-SAME-SESSION-CROSS-MODEL-REPLAY",
-    "CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY",
     "CAS-R63-AUTH-EPOCH-ENCRYPTED-HISTORY-FENCE",
     "CAS-R63-AUTH-EPOCH-REQUEST-FENCE-HOOK",
     "CAS-R63-INVALID-ENCRYPTED-CONTENT-RECOVERY",
@@ -77,6 +78,9 @@ for marker in (
         raise SystemExit(f"r63 fast-current-tree invariant missing in forward.rs: {marker}")
 if "let mut lower = |item:" in forward:
     raise SystemExit("r63 fast-current-tree still contains the borrow-unsafe item-lowering closure")
+
+if "CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY" not in RECOVERY.read_text(encoding="utf-8"):
+    raise SystemExit("r63 fast-current-tree lost inherited r59 same-id interrupted-tail recovery")
 
 compact = COMPACT.read_text(encoding="utf-8")
 if "CAS-R62-COMPACT-SUMMARY-SELF-REPAIR" not in compact:

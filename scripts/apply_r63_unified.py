@@ -29,6 +29,7 @@ def run(rel: str) -> None:
 # generation + encrypted-history compatibility boundary and explicit 400 recovery.
 run("scripts/apply_r62_unified.py")
 run("scripts/apply_r63_auth_epoch_encrypted_history_fence.py")
+run("scripts/apply_r63_compile_hardening.py")
 
 REVISION.write_text("63\n", encoding="utf-8")
 run("scripts/apply_sub2api_grok_compat_revision.py")
@@ -40,11 +41,15 @@ for marker in (
     "CAS-R63-AUTH-EPOCH-ENCRYPTED-HISTORY-FENCE",
     "CAS-R63-AUTH-EPOCH-REQUEST-FENCE-HOOK",
     "CAS-R63-INVALID-ENCRYPTED-CONTENT-RECOVERY",
+    "CAS-R63-COMPILE-HARDENING",
+    "fn portableize_input_item_r63(",
     "auth-epoch-r63.json",
     "invalid_encrypted_content_recovery_retry_1",
 ):
     if marker not in forward:
         raise SystemExit(f"r63 generated-source invariant missing in forward.rs: {marker}")
+if "let mut lower = |item:" in forward:
+    raise SystemExit("r63 unified composition still contains the borrow-unsafe item-lowering closure")
 
 compact = COMPACT.read_text(encoding="utf-8")
 for marker in (
@@ -80,4 +85,5 @@ print("- r50 cross-model portable replay remains unchanged")
 print("- auth changes are tracked as privacy-safe persistent epochs per session fingerprint")
 print("- an auth-boundary session gets a sticky portable encrypted-history fence")
 print("- backend-confirmed invalid_encrypted_content is rebuilt and retried at most once")
+print("- generated Rust item lowering is borrow-safe before build/test")
 print("- no rollout mutation, rollback, fork, new thread, or raw account/session/token persistence")

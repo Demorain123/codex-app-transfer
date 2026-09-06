@@ -52,6 +52,7 @@ else:
         raise SystemExit("r63 fast baseline repair completed but required r62 markers are still missing")
 
 run("scripts/apply_r63_auth_epoch_encrypted_history_fence.py")
+run("scripts/apply_r63_compile_hardening.py")
 
 version_before = VERSION.read_text(encoding="utf-8") if VERSION.is_file() else ""
 if "compat_revision=63" not in version_before or "app_version=2.4.5+63" not in version_before:
@@ -67,11 +68,15 @@ for marker in (
     "CAS-R63-AUTH-EPOCH-ENCRYPTED-HISTORY-FENCE",
     "CAS-R63-AUTH-EPOCH-REQUEST-FENCE-HOOK",
     "CAS-R63-INVALID-ENCRYPTED-CONTENT-RECOVERY",
+    "CAS-R63-COMPILE-HARDENING",
+    "fn portableize_input_item_r63(",
     "auth-epoch-r63.json",
     "invalid_encrypted_content_recovery_retry_1",
 ):
     if marker not in forward:
         raise SystemExit(f"r63 fast-current-tree invariant missing in forward.rs: {marker}")
+if "let mut lower = |item:" in forward:
+    raise SystemExit("r63 fast-current-tree still contains the borrow-unsafe item-lowering closure")
 
 compact = COMPACT.read_text(encoding="utf-8")
 if "CAS-R62-COMPACT-SUMMARY-SELF-REPAIR" not in compact:
@@ -96,5 +101,6 @@ if "compat_revision=63" not in version or "app_version=2.4.5+63" not in version:
 
 print("R63 FAST CURRENT-TREE COMPOSITION PASS")
 print("- warm generated r62 tree is reused without historical replay")
-print("- only auth-epoch/encrypted-history fencing + one-shot invalid-content recovery are added")
+print("- auth-epoch/encrypted-history fencing + one-shot invalid-content recovery are added")
+print("- generated Rust item lowering is borrow-safe before any cargo build starts")
 print("- r62/r61/r60/r59/r58/r50 model/session/compact behavior remains inherited")

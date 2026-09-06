@@ -1,0 +1,170 @@
+name: r63 Windows real-use build
+
+on:
+  push:
+    branches:
+      - dev-r63-auth-epoch-encrypted-history-fence-local
+    paths:
+      - 'scripts/apply_r63_*.py'
+      - 'scripts/prepare-r63-fast-builder.py'
+      - 'scripts/Run-r63-FAST-REAL-USE.cmd'
+      - '.github/workflows/r63-windows-real-use-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: r63-windows-real-use-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-real-use:
+    name: Materialize r63 + Windows NSIS/MSI
+    runs-on: windows-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python syntax preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            scripts/apply_r63_auth_epoch_encrypted_history_fence.py \
+            scripts/apply_r63_compile_hardening.py \
+            scripts/apply_r63_fast_current_tree.py \
+            scripts/apply_r63_unified.py \
+            scripts/prepare-r63-fast-builder.py
+
+      - name: Materialize complete r63 overlay stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/apply_r63_unified.py
+          grep -F -q 'CAS-R63-AUTH-EPOCH-ENCRYPTED-HISTORY-FENCE' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-R63-INVALID-ENCRYPTED-CONTENT-RECOVERY' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-R63-COMPILE-HARDENING' crates/proxy/src/forward.rs
+          grep -F -q 'CAS-R62-COMPACT-SUMMARY-SELF-REPAIR' crates/adapters/src/responses/compact.rs
+          grep -F -q 'CAS-R61-LEGACY-COMPACTION-V1' src-tauri/src/admin/services/desktop/process.rs
+          grep -F -q 'CAS-R60-SUB2API-POST-COMPACTION-REPLAY' crates/adapters/src/mapper/sub2api_grok_compat.rs
+          grep -F -q 'CAS-R59-INTERRUPTED-TAIL-SAME-ID-RECOVERY' src-tauri/src/admin/handlers/thread_recovery.rs
+          grep -F -q 'compat_revision=63' SUB2API_GROK_COMPAT_VERSION.txt
+          grep -F -q 'app_version=2.4.5+63' SUB2API_GROK_COMPAT_VERSION.txt
+
+      - name: Resolve build identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="$(python - <<'PY'
+          import json
+          print(json.load(open('src-tauri/tauri.conf.json', encoding='utf-8'))['version'])
+          PY
+          )"
+          test "$APP_VERSION" = '2.4.5+63'
+          SAFE_VERSION='2.4.5-r63'
+          SHORT_SHA="$(git rev-parse --short=12 HEAD)"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "safe_version=$SAFE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "r63 build identity: $APP_VERSION @ $SHORT_SHA"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          key: r63-windows-real-use
+
+      - name: Format and check generated Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git diff --check
+          cargo check -p codex-app-transfer-proxy --lib
+          cargo check -p codex-app-transfer --target x86_64-pc-windows-msvc
+
+      - name: Run r63 focused proxy tests
+        run: cargo test -p codex-app-transfer-proxy --lib r63_ -- --nocapture
+
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: windows-cargo-tauri-cli-v2
+
+      - name: Install tauri-cli
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        timeout-minutes: 25
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          grep -R -F -q 'Sub2API Grok Compat r63' frontend/dist
+          grep -R -F -q 'v2.4.5+63' frontend/dist
+
+      - name: Build Windows NSIS + MSI
+        working-directory: src-tauri
+        env:
+          CODEX_APP_TRANSFER_REPO: ${{ github.repository }}
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Stage r63 bundles
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.identity.outputs.app_version }}
+          SAFE_VERSION: ${{ steps.identity.outputs.safe_version }}
+          SHORT_SHA: ${{ steps.identity.outputs.short_sha }}
+        run: |
+          set -euo pipefail
+          BDIR='target/x86_64-pc-windows-msvc/release/bundle'
+          mkdir -p staging
+          shopt -s nullglob
+          nsis=("$BDIR"/nsis/*-setup.exe)
+          msi=("$BDIR"/msi/*.msi)
+          (( ${#nsis[@]} >= 1 )) || { echo '::error::NSIS bundle missing'; exit 1; }
+          (( ${#msi[@]} >= 1 )) || { echo '::error::MSI bundle missing'; exit 1; }
+          cp "${nsis[0]}" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64-Setup.exe"
+          cp "${msi[0]}" "staging/Codex-App-Transfer-Sub2API-Grok-Compat-${SAFE_VERSION}-Windows-x64.msi"
+          cat > staging/BUILD-INFO.txt <<EOF
+          app_version=${APP_VERSION}
+          compat_revision=63
+          git_commit=$(git rev-parse HEAD)
+          git_short_commit=${SHORT_SHA}
+          composer=scripts/apply_r63_unified.py
+          validation=python-preflight+materialize+proxy-check+windows-check+r63-focused-tests+frontend-build+tauri-bundle
+          EOF
+          ls -lh staging/
+          cat staging/BUILD-INFO.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-grok-compat-2.4.5-r63-windows-x64
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 30

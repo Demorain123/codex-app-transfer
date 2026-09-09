@@ -56,8 +56,8 @@ try {
     # anchors can carry CRLF. Normalize Old/New before IndexOf so semantically
     # identical source anchors match independent of checkout line endings.
     $fixedSignature = $signature + "`r`n" +
-        '    $Old = $Old.Replace("`r`n", "`n")' + "`r`n" +
-        '    $New = $New.Replace("`r`n", "`n")'
+        '    $Old = $Old.Replace("`r`n", "`n")'.Replace('\"','"') + "`r`n" +
+        '    $New = $New.Replace("`r`n", "`n")'.Replace('\"','"')
     $fixed = $src.Replace($signature, $fixedSignature)
 
     $enc = [Text.UTF8Encoding]::new($false)

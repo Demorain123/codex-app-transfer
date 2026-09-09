@@ -59,7 +59,7 @@ mod tests {
         // (2026-07-06 加 grok-build:xAI grok CLI 编码后端,authScheme grok_build_oauth;
         //  responses passthrough,OAuth2 device flow 自建登录 + 自动 refresh,上游
         //  cli-chat-proxy.grok.com/v1;models.default=grok-build 防 Codex gpt-5.x 名透传上游)
-        assert_eq!(builtin_presets().len(), 22);
+        assert_eq!(builtin_presets().len(), 23);
     }
 
     #[test]

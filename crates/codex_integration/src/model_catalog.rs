@@ -215,14 +215,58 @@ pub fn catalog_models_for_provider_with_display_names(
             target_clean.trim(),
             context_window,
             display_names,
+            model_capabilities,
             review_override.clone(),
             is_qoder,
         ));
     }
-    // [MOC-154] 去掉旧 fallback entry(slug = default_model 实际模型名)。列表式下
-    // Codex `model` 字段统一锚到 gpt-5.5 slot(见 apply.rs `ensure_default_model_slot`),
-    // 不再出现 `model = 实际模型名` → 无需该 entry;且它与 gpt-5.5(空槽时 display =
-    // default)的 display 相同,会造成"默认模型显示两次"的重复。
+    // CAS-R70-SIXTH-DEFAULT-CATALOG:
+    // Keep the existing five Codex routing slots, but when `default` is intentionally
+    // a sixth *different* upstream model, expose it with its real model id as the slug.
+    // The proxy resolver already falls back unknown slugs to provider.models.default,
+    // therefore a raw default slug routes to the same raw upstream id without a new
+    // alias table. Existing providers are unchanged when gpt-5.5 already represents
+    // the default target (the common case).
+    if !default_model.is_empty() {
+        let default_already_exposed = MODEL_SLOTS
+            .iter()
+            .filter_map(|slot| {
+                slot.openai_id?;
+                let mapped = mappings.get(slot.key).map(|s| s.trim()).unwrap_or("");
+                let target = if mapped.is_empty() {
+                    if slot.key == "gpt_5_5" {
+                        default_model
+                    } else {
+                        return None;
+                    }
+                } else {
+                    mapped
+                };
+                Some(strip_internal_model_suffix(target))
+            })
+            .any(|target| target.trim() == default_model);
+
+        if !default_already_exposed {
+            let context_window = context_window_for_model(
+                default_model,
+                default_model,
+                default_model,
+                supports_1m,
+                model_capabilities,
+                is_qoder,
+            );
+            models.push(catalog_model(
+                default_model,
+                provider_name,
+                default_model,
+                context_window,
+                display_names,
+                model_capabilities,
+                review_override.clone(),
+                is_qoder,
+            ));
+        }
+    }
     models
 }
 
@@ -300,6 +344,7 @@ fn catalog_model(
     default_model: &str,
     context_window: u64,
     display_names: Option<&Value>,
+    model_capabilities: Option<&Value>,
     auto_review_model_override: Option<String>,
     is_qoder: bool,
 ) -> CatalogModel {
@@ -316,7 +361,7 @@ fn catalog_model(
     // (raw id → "Gemini 3.5 Flash (Medium)"),反查不到 fallback raw id;slug 不变。
     CatalogModel {
         slug: slug.to_owned(),
-        display_name: resolve_display_label(target, display_names),
+        display_name: resolve_display_label(target, display_names, model_capabilities),
         provider_name: provider_name.to_owned(),
         context_window,
         effective_context_window_percent: DEFAULT_EFFECTIVE_CONTEXT_WINDOW_PERCENT,
@@ -331,10 +376,23 @@ fn catalog_model(
 
 /// [MOC-69] 按 model id 在 `display_names`(id → 人类可读名 JSON object)里反查显示名;
 /// 无该字段 / 反查不到 / 空串 → fallback raw id(其他 provider 行为不变)。
-fn resolve_display_label(model_id: &str, display_names: Option<&Value>) -> String {
+fn resolve_display_label(
+    model_id: &str,
+    display_names: Option<&Value>,
+    model_capabilities: Option<&Value>,
+) -> String {
+    // Provider-specific display-name tables remain highest priority. Generic
+    // providers/gateways can declare the same metadata once beside context_window,
+    // avoiding another Transfer-only alias registry.
     display_names
         .and_then(|v| v.get(model_id))
         .and_then(Value::as_str)
+        .or_else(|| {
+            model_capabilities
+                .and_then(|v| v.get(model_id))
+                .and_then(|v| v.get("display_name"))
+                .and_then(Value::as_str)
+        })
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_owned)

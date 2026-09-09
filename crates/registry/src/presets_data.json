@@ -749,5 +749,60 @@
       }
     ],
     "isBuiltin": true
+  },
+  {
+    "id": "sub2api-local",
+    "name": "Sub2API Local Gateway",
+    "baseUrl": "http://127.0.0.1:8089/v1",
+    "docsUrl": "https://github.com/Demorain123/sub2api-xray",
+    "authScheme": "bearer",
+    "apiFormat": "openai_chat",
+    "models": {
+      "default": "q36-35b-a3b",
+      "gpt_5_5": "q38-dt-iq3xxs",
+      "gpt_5_4": "q38-dt-iq2s",
+      "gpt_5_4_mini": "q38-gsq-iq3s",
+      "gpt_5_3_codex": "q38-efficient-q2",
+      "gpt_5_2": "q38-unsloth-iq3xxs"
+    },
+    "modelCapabilities": {
+      "q38-dt-iq3xxs": {
+        "context_window": 131072,
+        "display_name": "Qwen3.8 DT-IQ3 MTP3 128K",
+        "supports_vision": false
+      },
+      "q38-dt-iq2s": {
+        "context_window": 131072,
+        "display_name": "Qwen3.8 DT-IQ2 MTP2 128K",
+        "supports_vision": false
+      },
+      "q38-gsq-iq3s": {
+        "context_window": 131072,
+        "display_name": "Qwen3.8 GSQ IQ3S Ngram 128K",
+        "supports_vision": false
+      },
+      "q38-efficient-q2": {
+        "context_window": 131072,
+        "display_name": "Qwen3.8 Efficient Q2 Ngram 128K",
+        "supports_vision": false
+      },
+      "q38-unsloth-iq3xxs": {
+        "context_window": 131072,
+        "display_name": "Qwen3.8 Unsloth IQ3 Vanilla 128K",
+        "supports_vision": false
+      },
+      "q36-35b-a3b": {
+        "context_window": 131072,
+        "display_name": "Qwen3.6 35B-A3B MoE 128K",
+        "supports_vision": false
+      }
+    },
+    "notices": [
+      {
+        "type": "info",
+        "text": "Local model runtime stays in llama.cpp Router. Sub2API is the canonical local gateway/catalog; Transfer only performs Codex protocol/tool adaptation."
+      }
+    ],
+    "isBuiltin": true
   }
 ]

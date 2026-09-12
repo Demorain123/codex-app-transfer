@@ -68,10 +68,28 @@ if (-not $SkipFocusedTests) {
     if ($LASTEXITCODE -ne 0) { throw "r70 catalog focused test failed" }
 }
 
+$Exe = Join-Path $RepoRoot "target\release\codex-app-transfer.exe"
+$DeployExe = Join-Path $DeployDir "codex-app-transfer.exe"
+
+# Windows locks a running executable. Stop only the r70 build/deploy copies so a
+# rebuild can replace target\release\codex-app-transfer.exe safely. Do not kill
+# unrelated copies installed elsewhere.
+$Running = @(Get-Process codex-app-transfer -ErrorAction SilentlyContinue | Where-Object {
+    try {
+        $ProcessPath = $_.Path
+        ($ProcessPath -eq $Exe) -or ((-not $NoDeploy) -and ($ProcessPath -eq $DeployExe))
+    }
+    catch { $false }
+})
+if ($Running.Count -gt 0) {
+    Write-Host "[r70] stopping running r70 Transfer before rebuild"
+    $Running | Stop-Process -Force
+    Start-Sleep -Milliseconds 500
+}
+
 cargo tauri build --no-bundle
 if ($LASTEXITCODE -ne 0) { throw "Tauri release build failed" }
 
-$Exe = Join-Path $RepoRoot "target\release\codex-app-transfer.exe"
 if (-not (Test-Path $Exe)) {
     throw "release executable was not produced: $Exe"
 }
@@ -85,13 +103,13 @@ if (-not $NoDeploy) {
         New-Item -ItemType Directory -Force -Path $DeployDir | Out-Null
     }
 
-    $DeployExe = Join-Path $DeployDir "codex-app-transfer.exe"
-    $Running = @(Get-Process codex-app-transfer -ErrorAction SilentlyContinue | Where-Object {
+    # Re-check in case the deployed copy was launched while compilation was running.
+    $RunningDeploy = @(Get-Process codex-app-transfer -ErrorAction SilentlyContinue | Where-Object {
         try { $_.Path -eq $DeployExe } catch { $false }
     })
-    if ($Running.Count -gt 0) {
+    if ($RunningDeploy.Count -gt 0) {
         Write-Host "[r70] stopping running deployed Transfer before replacement"
-        $Running | Stop-Process -Force
+        $RunningDeploy | Stop-Process -Force
         Start-Sleep -Milliseconds 300
     }
 

@@ -1,6 +1,8 @@
 param(
     [switch]$SkipFrontend,
-    [switch]$SkipFocusedTests
+    [switch]$SkipFocusedTests,
+    [switch]$NoDeploy,
+    [string]$DeployDir = "V:\Codex App Transfer"
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,3 +79,24 @@ if (-not (Test-Path $Exe)) {
 Write-Host ""
 Write-Host "R70_LOCAL_BUILD_PASS"
 Get-Item $Exe | Select-Object FullName, Length, LastWriteTime
+
+if (-not $NoDeploy) {
+    if (-not (Test-Path $DeployDir)) {
+        New-Item -ItemType Directory -Force -Path $DeployDir | Out-Null
+    }
+
+    $DeployExe = Join-Path $DeployDir "codex-app-transfer.exe"
+    $Running = @(Get-Process codex-app-transfer -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -eq $DeployExe } catch { $false }
+    })
+    if ($Running.Count -gt 0) {
+        Write-Host "[r70] stopping running deployed Transfer before replacement"
+        $Running | Stop-Process -Force
+        Start-Sleep -Milliseconds 300
+    }
+
+    Copy-Item -LiteralPath $Exe -Destination $DeployExe -Force
+    Write-Host ""
+    Write-Host "R70_DEPLOY_PASS"
+    Get-Item $DeployExe | Select-Object FullName, Length, LastWriteTime
+}

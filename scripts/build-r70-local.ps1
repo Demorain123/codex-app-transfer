@@ -1,0 +1,79 @@
+param(
+    [switch]$SkipFrontend,
+    [switch]$SkipFocusedTests
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $RepoRoot
+
+$LLVM_HOME = "V:\Local-Build-Shared\toolchains\llvm\22.1.8"
+$LibClang = Join-Path $LLVM_HOME "bin\libclang.dll"
+if (-not (Test-Path $LibClang)) {
+    throw "r70 build requires shared libclang at: $LibClang"
+}
+
+$VsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $VsWhere)) {
+    throw "vswhere.exe not found; Visual Studio C++ Build Tools are required"
+}
+
+$VS_HOME = (& $VsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+if ([string]::IsNullOrWhiteSpace($VS_HOME)) {
+    throw "Visual Studio C++ Build Tools installation not found"
+}
+$VS_HOME = $VS_HOME.Trim()
+$VcVars = Join-Path $VS_HOME "VC\Auxiliary\Build\vcvars64.bat"
+if (-not (Test-Path $VcVars)) {
+    throw "vcvars64.bat not found: $VcVars"
+}
+
+$DevEnv = & $env:ComSpec /d /s /c "`"$VcVars`" >nul && set"
+foreach ($Line in $DevEnv) {
+    if ($Line -match '^([^=]+)=(.*)$') {
+        Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
+    }
+}
+
+$env:LIBCLANG_PATH = Join-Path $LLVM_HOME "bin"
+$env:Path = "$($env:LIBCLANG_PATH);$($env:Path)"
+
+Write-Host "[r70] VS=$VS_HOME"
+Write-Host "[r70] LIBCLANG_PATH=$env:LIBCLANG_PATH"
+
+if (-not $SkipFrontend) {
+    Push-Location (Join-Path $RepoRoot "frontend")
+    try {
+        if (-not (Test-Path "node_modules")) {
+            npm ci --prefer-offline --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+        }
+        npm run build:nocheck
+        if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+if (-not $SkipFocusedTests) {
+    cargo test -p codex-app-transfer-registry presets_count_matches_python
+    if ($LASTEXITCODE -ne 0) { throw "registry focused test failed" }
+
+    cargo test -p codex-app-transfer-codex-integration --test r70_local_gateway_catalog
+    if ($LASTEXITCODE -ne 0) { throw "r70 catalog focused test failed" }
+}
+
+cargo tauri build --no-bundle
+if ($LASTEXITCODE -ne 0) { throw "Tauri release build failed" }
+
+$Exe = Join-Path $RepoRoot "target\release\codex-app-transfer.exe"
+if (-not (Test-Path $Exe)) {
+    throw "release executable was not produced: $Exe"
+}
+
+Write-Host ""
+Write-Host "R70_LOCAL_BUILD_PASS"
+Get-Item $Exe | Select-Object FullName, Length, LastWriteTime

@@ -37,7 +37,8 @@ const tabs: Tab[] = [
         <span class="tab__label">{{ t(tab.key) }}</span>
       </RouterLink>
     </nav>
-    <div class="compat-build-badge">{{ t('compat.buildBadge') }}</div>
+    <!-- r70 build identity is intentionally explicit so test builds cannot be mistaken for old installed r37 binaries. -->
+    <div class="compat-build-badge">Sub2API Grok Compat r70 · v2.4.5+70</div>
   </header>
 </template>
 

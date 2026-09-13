@@ -66,6 +66,11 @@ if (-not $SkipFocusedTests) {
 
     cargo test -p codex-app-transfer-codex-integration --test r70_local_gateway_catalog
     if ($LASTEXITCODE -ne 0) { throw "r70 catalog focused test failed" }
+
+    # r70 old-session Goal/Responses recovery regression: exact masked Sub2API 400
+    # may trigger one portable retry, but ordinary small/unknown 400 bodies must stay untouched.
+    cargo test -p codex-app-transfer-adapters tool_call_repair::tests
+    if ($LASTEXITCODE -ne 0) { throw "r70 historical-turn recovery focused test failed" }
 }
 
 $Exe = Join-Path $RepoRoot "target\release\codex-app-transfer.exe"

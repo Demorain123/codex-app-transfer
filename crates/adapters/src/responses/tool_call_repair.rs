@@ -187,7 +187,6 @@ mod tests {
         assert!(is_orphan_function_call_error(
             br#"{"error":{"message":"Upstream request failed","type":"upstream_error"}}"#
         ));
-        // 文案相似但不是精确 Sub2API envelope，不进入泛化 recovery。
         assert!(!is_orphan_function_call_error(
             br#"{"error":{"message":"Upstream request failed","type":"bad_request"}}"#
         ));

@@ -4,6 +4,7 @@
 //! `stats` / `log_buffer` 的 Rust 等价转译。
 
 use std::{
+    collections::HashMap,
     fs::{self, OpenOptions},
     io::Write,
     path::PathBuf,
@@ -83,12 +84,21 @@ pub struct ProxyLogEntry {
     pub message: String,
 }
 
+// CAS-R71-OBSERVABILITY-CORRELATION
+// Keep only bounded, already-fingerprinted runtime diagnostic state. Raw request
+// headers and raw thread/session identifiers never enter this map.
+#[derive(Debug, Default)]
+struct DiagCorrelationState {
+    model_by_main_thread: HashMap<String, String>,
+}
+
 #[derive(Debug)]
 pub struct LogBuffer {
     logs: Mutex<Vec<ProxyLogEntry>>,
     max_size: usize,
     file_lock: Mutex<()>,
     log_dir_override: Option<PathBuf>,
+    diag_state: Mutex<DiagCorrelationState>,
 }
 
 impl LogBuffer {
@@ -98,6 +108,7 @@ impl LogBuffer {
             max_size,
             file_lock: Mutex::new(()),
             log_dir_override: None,
+            diag_state: Mutex::new(DiagCorrelationState::default()),
         }
     }
 
@@ -108,6 +119,7 @@ impl LogBuffer {
             max_size,
             file_lock: Mutex::new(()),
             log_dir_override: Some(log_dir),
+            diag_state: Mutex::new(DiagCorrelationState::default()),
         }
     }
 
@@ -115,19 +127,104 @@ impl LogBuffer {
         let now = Local::now();
         let level = level.into();
         let message = message.into();
+        let (message, transition) = self.enrich_runtime_diag(message);
+
+        self.push_entry(&now, &level, &message);
+        if let Some(transition) = transition {
+            self.push_entry(&now, "INFO", &transition);
+        }
+    }
+
+    fn push_entry(&self, now: &DateTime<Local>, level: &str, message: &str) {
         {
             let mut logs = self.logs.lock().unwrap();
             logs.push(ProxyLogEntry {
-                time: now.format("%H:%M:%S").to_string(),
-                level: level.clone(),
-                message: message.clone(),
+                // Milliseconds are necessary to order concurrent main/subagent traffic.
+                time: now.format("%H:%M:%S%.3f").to_string(),
+                level: level.to_owned(),
+                message: message.to_owned(),
             });
             if logs.len() > self.max_size {
                 let keep_from = logs.len() - self.max_size;
                 logs.drain(0..keep_from);
             }
         }
-        self.append_to_file(now, &level, &message);
+        self.append_to_file(now, level, message);
+    }
+
+    // CAS-R71-OBSERVABILITY-CORRELATION
+    // The r18 diagnostic line historically defaulted every non-subagent request to
+    // `target=main`. Capability/helper requests without identity metadata therefore
+    // looked like main assistant turns. Keep the legacy target field for backwards
+    // compatibility, but append an explicit request_class + route_target based only
+    // on privacy-bounded fingerprints already present in the line.
+    fn enrich_runtime_diag(&self, message: String) -> (String, Option<String>) {
+        if !message.starts_with("[retry-runtime-diag]") {
+            return (message, None);
+        }
+
+        let target = diag_field(&message, "target").unwrap_or("-");
+        let model = diag_field(&message, "model").unwrap_or("<unknown>");
+        let thread = diag_field(&message, "thread").unwrap_or("-");
+        let parent = diag_field(&message, "parent").unwrap_or("-");
+        let session = diag_field(&message, "session").unwrap_or("-");
+        let client_request = diag_field(&message, "client_request").unwrap_or("-");
+
+        let (request_class, route_target) = if target == "subagent" || parent != "-" {
+            ("subagent", "subagent")
+        } else if thread != "-" || session != "-" {
+            ("turn", "main")
+        } else {
+            // We intentionally do not call this `capability`: without the route/path
+            // at this layer we cannot prove which helper produced it. The important
+            // fix is that it is no longer asserted to be a main assistant turn.
+            ("aux_or_unidentified", "-")
+        };
+
+        let trace = if thread != "-" {
+            format!("thread-id:{thread}")
+        } else if session != "-" {
+            format!("session-id:{session}")
+        } else {
+            "uncorrelated".to_owned()
+        };
+        let req = if client_request != "-" {
+            format!("client-request:{client_request}")
+        } else {
+            "unavailable".to_owned()
+        };
+
+        let message = if request_class == "aux_or_unidentified" && target == "main" {
+            message.replacen("target=main", "target=unclassified", 1)
+        } else {
+            message
+        };
+        let enriched = format!(
+            "{message} req={req} trace={trace} request_class={request_class} route_target={route_target}"
+        );
+
+        let transition = if request_class == "turn" && thread != "-" && model != "<unknown>" {
+            let mut state = self.diag_state.lock().unwrap_or_else(|p| p.into_inner());
+            if !state.model_by_main_thread.contains_key(thread)
+                && state.model_by_main_thread.len() >= 256
+            {
+                if let Some(oldest_key) = state.model_by_main_thread.keys().next().cloned() {
+                    state.model_by_main_thread.remove(&oldest_key);
+                }
+            }
+            let previous = state
+                .model_by_main_thread
+                .insert(thread.to_owned(), model.to_owned());
+            previous.filter(|old| old.as_str() != model).map(|old| {
+                format!(
+                    "[model-transition] req={req} trace=thread-id:{thread} thread={thread} from={old} to={model} request_class=turn route_target=main"
+                )
+            })
+        } else {
+            None
+        };
+
+        (enriched, transition)
     }
 
     pub fn get_all(&self) -> Vec<ProxyLogEntry> {
@@ -136,10 +233,15 @@ impl LogBuffer {
 
     pub fn clear(&self) {
         self.logs.lock().unwrap().clear();
+        self.diag_state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .model_by_main_thread
+            .clear();
         self.archive_logs();
     }
 
-    fn append_to_file(&self, now: DateTime<Local>, level: &str, message: &str) {
+    fn append_to_file(&self, now: &DateTime<Local>, level: &str, message: &str) {
         let Some(dir) = self.log_dir() else {
             return;
         };
@@ -154,7 +256,7 @@ impl LogBuffer {
         let _ = writeln!(
             file,
             "{}\t{}\t{}",
-            now.format("%Y-%m-%d %H:%M:%S"),
+            now.format("%Y-%m-%d %H:%M:%S%.3f"),
             level,
             message
         );
@@ -204,6 +306,13 @@ impl LogBuffer {
             .unwrap_or_else(|| PathBuf::from(".codex-app-transfer").join("logs"))
             .join("backup")
     }
+}
+
+fn diag_field<'a>(message: &'a str, key: &str) -> Option<&'a str> {
+    let prefix = format!("{key}=");
+    message
+        .split_ascii_whitespace()
+        .find_map(|token| token.strip_prefix(&prefix))
 }
 
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
@@ -277,15 +386,18 @@ impl RequestLifecycleTracker {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let correlation = correlation.into();
+        let provider = provider.into();
+        let model = model.into();
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         while inner.len() >= self.max_size {
             inner.pop_front();
         }
         inner.push_back(RequestLifecycleSnapshot {
             id,
-            correlation: correlation.into(),
-            provider: provider.into(),
-            model: model.into(),
+            correlation: correlation.clone(),
+            provider: provider.clone(),
+            model: model.clone(),
             accepted_at_ms: Self::now_ms(),
             forwarded_at_ms: None,
             headers_at_ms: None,
@@ -303,20 +415,49 @@ impl RequestLifecycleTracker {
             bytes: 0,
             terminal: None,
         });
+        drop(inner);
+        emit_lifecycle_event(
+            self,
+            "INFO",
+            format!(
+                "[request-start] req={} trace={} provider={} model_effective={} request_bytes={}",
+                lifecycle_req_id(id),
+                correlation,
+                provider,
+                model,
+                request_bytes
+            ),
+        );
         id
     }
 
-    fn update(&self, id: u64, f: impl FnOnce(&mut RequestLifecycleSnapshot)) {
+    fn update(
+        &self,
+        id: u64,
+        f: impl FnOnce(&mut RequestLifecycleSnapshot),
+    ) -> Option<RequestLifecycleSnapshot> {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(record) = inner.iter_mut().rev().find(|record| record.id == id) {
-            f(record);
-        }
+        let record = inner.iter_mut().rev().find(|record| record.id == id)?;
+        f(record);
+        Some(record.clone())
     }
 
     pub fn mark_forwarded(&self, id: u64) {
-        self.update(id, |record| {
+        if let Some(record) = self.update(id, |record| {
             record.forwarded_at_ms.get_or_insert_with(Self::now_ms);
-        });
+        }) {
+            emit_lifecycle_event(
+                self,
+                "INFO",
+                format!(
+                    "[upstream-start] req={} trace={} provider={} model_effective={}",
+                    lifecycle_req_id(id),
+                    record.correlation,
+                    record.provider,
+                    record.model
+                ),
+            );
+        }
     }
 
     pub fn mark_headers(&self, id: u64, status: u16) {
@@ -357,12 +498,26 @@ impl RequestLifecycleTracker {
     }
 
     pub fn mark_client_status(&self, id: u64, status: u16) {
-        self.update(id, |record| {
+        if let Some(record) = self.update(id, |record| {
             record.client_status = Some(status);
             // Keep legacy `status` as the client-facing value for old
             // diagnostic consumers; r35 health uses raw_upstream_status.
             record.status = Some(status);
-        });
+        }) {
+            emit_lifecycle_event(
+                self,
+                if status < 400 { "INFO" } else { "ERROR" },
+                format!(
+                    "[client-status] req={} trace={} raw_upstream_status={} client_status={status}",
+                    lifecycle_req_id(id),
+                    record.correlation,
+                    record
+                        .raw_upstream_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned())
+                ),
+            );
+        }
     }
 
     pub fn mark_first_event(&self, id: u64) {
@@ -372,8 +527,10 @@ impl RequestLifecycleTracker {
     }
 
     pub fn mark_completed(&self, id: u64, status: u16, bytes: u64) {
-        self.update(id, |record| {
+        let mut changed = false;
+        if let Some(record) = self.update(id, |record| {
             if record.terminal.is_none() {
+                changed = true;
                 record.completed_at_ms = Some(Self::now_ms());
                 record.client_status = Some(status);
                 record.status = Some(status);
@@ -387,25 +544,99 @@ impl RequestLifecycleTracker {
                     .to_owned(),
                 );
             }
-        });
+        }) {
+            if !changed {
+                return;
+            }
+            emit_lifecycle_event(
+                self,
+                if record.terminal.as_deref() == Some("completed") {
+                    "INFO"
+                } else {
+                    "ERROR"
+                },
+                format!(
+                    "[request-end] req={} trace={} outcome={} raw_upstream_status={} client_status={} bytes={}",
+                    lifecycle_req_id(id),
+                    record.correlation,
+                    record.terminal.as_deref().unwrap_or("unknown"),
+                    record
+                        .raw_upstream_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned()),
+                    record
+                        .client_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned()),
+                    record.bytes
+                ),
+            );
+        }
     }
 
     pub fn mark_failed(&self, id: u64, stage: &'static str) {
-        self.update(id, |record| {
+        let mut changed = false;
+        if let Some(record) = self.update(id, |record| {
             if record.terminal.is_none() {
+                changed = true;
                 record.completed_at_ms = Some(Self::now_ms());
                 record.terminal = Some(format!("failed:{stage}"));
             }
-        });
+        }) {
+            if !changed {
+                return;
+            }
+            emit_lifecycle_event(
+                self,
+                "ERROR",
+                format!(
+                    "[request-end] req={} trace={} outcome={} raw_upstream_status={} client_status={}",
+                    lifecycle_req_id(id),
+                    record.correlation,
+                    record.terminal.as_deref().unwrap_or("failed"),
+                    record
+                        .raw_upstream_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned()),
+                    record
+                        .client_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned())
+                ),
+            );
+        }
     }
 
     pub fn mark_cancelled(&self, id: u64) {
-        self.update(id, |record| {
+        let mut changed = false;
+        if let Some(record) = self.update(id, |record| {
             if record.terminal.is_none() {
+                changed = true;
                 record.completed_at_ms = Some(Self::now_ms());
                 record.terminal = Some("cancelled".to_owned());
             }
-        });
+        }) {
+            if !changed {
+                return;
+            }
+            emit_lifecycle_event(
+                self,
+                "WARN",
+                format!(
+                    "[request-end] req={} trace={} outcome=cancelled raw_upstream_status={} client_status={}",
+                    lifecycle_req_id(id),
+                    record.correlation,
+                    record
+                        .raw_upstream_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned()),
+                    record
+                        .client_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_owned())
+                ),
+            );
+        }
     }
 
     pub fn snapshot(&self) -> Vec<RequestLifecycleSnapshot> {
@@ -415,6 +646,20 @@ impl RequestLifecycleTracker {
             .iter()
             .cloned()
             .collect()
+    }
+}
+
+fn lifecycle_req_id(id: u64) -> String {
+    format!("R{id:08}")
+}
+
+fn emit_lifecycle_event(tracker: &RequestLifecycleTracker, level: &str, message: String) {
+    // Only the tracker owned by the process-global ProxyTelemetry emits UI/file logs.
+    // Standalone trackers used by tests stay side-effect free.
+    if let Some(telemetry) = TELEMETRY.get() {
+        if std::ptr::eq(tracker, &telemetry.lifecycles) {
+            telemetry.logs.add(level, message);
+        }
     }
 }
 
@@ -493,6 +738,8 @@ mod tests {
         assert_eq!(entries[0].message, "failed request");
         assert_eq!(entries[1].level, "SUCCESS");
         assert_eq!(entries[1].message, "finished request");
+        assert_eq!(entries[1].time.len(), 12);
+        assert_eq!(entries[1].time.as_bytes()[8], b'.');
 
         let today = Local::now().format("%Y-%m-%d").to_string();
         let log_path = dir.join(format!("proxy-{today}.log"));
@@ -500,6 +747,75 @@ mod tests {
         assert!(content.contains("\tINFO\tfirst request"));
         assert!(content.contains("\tERROR\tfailed request"));
         assert!(content.contains("\tSUCCESS\tfinished request"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retry_runtime_diag_without_identity_is_not_asserted_as_main_turn() {
+        let dir = unique_temp_dir("logs-r71-aux");
+        let buffer = LogBuffer::new_in_dir(20, dir.clone());
+        buffer.add(
+            "INFO",
+            "[retry-runtime-diag] target=main model=gpt-5.6-luna provider=test thread=- parent=- session=- client_request=- subagent_header=false parent_thread_header=false",
+        );
+
+        let entries = buffer.get_all();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].message.contains("target=unclassified"));
+        assert!(!entries[0].message.contains("target=main"));
+        assert!(entries[0]
+            .message
+            .contains("request_class=aux_or_unidentified"));
+        assert!(entries[0].message.contains("route_target=-"));
+        assert!(entries[0].message.contains("trace=uncorrelated"));
+        assert!(entries[0].message.contains("req=unavailable"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retry_runtime_diag_emits_model_transition_for_same_main_thread() {
+        let dir = unique_temp_dir("logs-r71-transition");
+        let buffer = LogBuffer::new_in_dir(20, dir.clone());
+        buffer.add(
+            "INFO",
+            "[retry-runtime-diag] target=main model=gpt-5.6-terra provider=test thread=0d0f19d1 parent=- session=0d0f19d1 client_request=aaaa1111 subagent_header=false parent_thread_header=false",
+        );
+        buffer.add(
+            "INFO",
+            "[retry-runtime-diag] target=main model=gpt-5.6-luna provider=test thread=0d0f19d1 parent=- session=0d0f19d1 client_request=bbbb2222 subagent_header=false parent_thread_header=false",
+        );
+
+        let entries = buffer.get_all();
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].message.contains("request_class=turn"));
+        assert!(entries[0].message.contains("route_target=main"));
+        assert!(entries[0].message.contains("trace=thread-id:0d0f19d1"));
+        assert!(entries[1]
+            .message
+            .contains("req=client-request:bbbb2222"));
+        assert!(entries[2].message.starts_with("[model-transition]"));
+        assert!(entries[2].message.contains("from=gpt-5.6-terra"));
+        assert!(entries[2].message.contains("to=gpt-5.6-luna"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retry_runtime_diag_subagent_keeps_subagent_classification() {
+        let dir = unique_temp_dir("logs-r71-subagent");
+        let buffer = LogBuffer::new_in_dir(20, dir.clone());
+        buffer.add(
+            "INFO",
+            "[retry-runtime-diag] target=subagent model=gpt-5.6-luna provider=test thread=658a2dca parent=0d0f19d1 session=0d0f19d1 client_request=cccc3333 subagent_header=true parent_thread_header=true",
+        );
+
+        let entries = buffer.get_all();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].message.contains("request_class=subagent"));
+        assert!(entries[0].message.contains("route_target=subagent"));
+        assert!(!entries[0].message.contains("[model-transition]"));
 
         let _ = fs::remove_dir_all(dir);
     }

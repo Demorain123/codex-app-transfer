@@ -428,7 +428,12 @@ fn structured_fields(message: &str) -> BTreeMap<&'static str, String> {
     let mut fields = BTreeMap::new();
     for &key in &SAFE_FIELDS {
         if let Some(value) = diag_field(message, key) {
-            fields.insert(key, value.trim_end_matches([',', ';']).to_owned());
+            fields.insert(
+                key,
+                value
+                    .trim_end_matches(|ch| ch == ',' || ch == ';')
+                    .to_owned(),
+            );
         }
     }
     fields
@@ -569,7 +574,7 @@ impl RequestLifecycleTracker {
                 self,
                 "INFO",
                 format!(
-                    "[upstream-start] req={} trace={} provider={} model_effective={} attempt=0",
+                    "[upstream-start] req={} trace={} provider={} model_effective={}",
                     lifecycle_req_id(id),
                     record.correlation,
                     record.provider,
@@ -580,20 +585,10 @@ impl RequestLifecycleTracker {
     }
 
     pub fn mark_headers(&self, id: u64, status: u16) {
-        if let Some(record) = self.update(id, |record| {
+        self.update(id, |record| {
             record.headers_at_ms.get_or_insert_with(Self::now_ms);
             record.raw_upstream_status = Some(status);
-        }) {
-            emit_lifecycle_event(
-                self,
-                if status < 400 { "INFO" } else { "WARN" },
-                format!(
-                    "[upstream-status] req={} trace={} status={status}",
-                    lifecycle_req_id(id),
-                    record.correlation,
-                ),
-            );
-        }
+        });
     }
 
     // CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD: update quota metadata without

@@ -34,7 +34,7 @@ function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$La
     return $Text.Replace($Old, $New)
 }
 
-# r75 is deliberately a tiny local finalizer layered on r74.  It keeps the
+# r75 is deliberately a tiny local finalizer layered on r74. It keeps the
 # existing context/cache/speed/session telemetry and only replaces the output
 # timestamp segmentation/placement path that was too easy to miss in r74.
 $NewSegmentation = @'
@@ -179,9 +179,9 @@ $NewStamp = @'
     badge.setAttribute('aria-label', 'Assistant output timestamp');
     badge.textContent = clock(when);
     badge.title = fullTime(when) + ' · ' + ((Number.isFinite(remembered) && remembered > 0) ? 'remembered local output time' : source);
-    // r74 used an absolute top-right chip.  On current Codex many progress
+    // r74 used an absolute top-right chip. On current Codex many progress
     // surfaces live inside clipped/virtualized containers, so the chip could
-    // exist but be invisible.  r75 keeps it inside normal flow as a tiny
+    // exist but be invisible. r75 keeps it inside normal flow as a tiny
     // right-aligned rail; this costs ~10px but survives overflow clipping.
     badge.style.cssText = 'position:relative;top:auto;right:auto;z-index:2;display:flex;width:100%;box-sizing:border-box;align-items:center;justify-content:flex-end;margin:0 0 1px 0;padding:0 2px;border:0;background:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;color:color-mix(in srgb,CanvasText 52%,transparent);font:9px/1.15 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;pointer-events:auto;user-select:text;opacity:.72;';
     segment.insertBefore(badge, segment.firstChild);
@@ -305,30 +305,13 @@ $NewObserver = @'
 
 try {
     # Build r75 from the already-reviewed r74 local builder without copying its
-    # ~900 lines into another tracked file.  The generated builder stays in the
+    # ~900 lines into another tracked file. The generated builder stays in the
     # same scripts directory so $PSScriptRoot semantics remain identical.
     $Patched = $Original.Replace('r74', 'r75').Replace('R74', 'R75').Replace('+74', '+75')
 
-    $Patched = Replace-BlockRequired \
-        $Patched \
-        '  function structuralProgressSurface(node, root) {' \
-        '  function stampSegment(segment, root, epoch, source) {' \
-        $NewSegmentation \
-        'segmentation + stable structural key'
-
-    $Patched = Replace-BlockRequired \
-        $Patched \
-        '  function stampSegment(segment, root, epoch, source) {' \
-        '  function baselineExistingDom() {' \
-        $NewStamp \
-        'visible in-flow timestamp rail'
-
-    $Patched = Replace-BlockRequired \
-        $Patched \
-        '  function baselineExistingDom() {' \
-        '  function numberAt(obj, paths) {' \
-        $NewObserver \
-        'observer + periodic segment sweep'
+    $Patched = Replace-BlockRequired $Patched '  function structuralProgressSurface(node, root) {' '  function stampSegment(segment, root, epoch, source) {' $NewSegmentation 'segmentation + stable structural key'
+    $Patched = Replace-BlockRequired $Patched '  function stampSegment(segment, root, epoch, source) {' '  function baselineExistingDom() {' $NewStamp 'visible in-flow timestamp rail'
+    $Patched = Replace-BlockRequired $Patched '  function baselineExistingDom() {' '  function numberAt(obj, paths) {' $NewObserver 'observer + periodic segment sweep'
 
     $OldPoll = @'
   function poll() {

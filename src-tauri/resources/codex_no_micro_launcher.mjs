@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const MODE = "micro-disabled-worker-safe"; // CAS-NO-LAGGING-R32-MICRO-ACCESSORY-GUARD
 const EXPECTED_MARKER = "codex-micro-disabled-worker-safe";
+const OUTPUT_TELEMETRY_RUNTIME = "r73.1";
 const fixDirectory = path.dirname(fileURLToPath(import.meta.url));
 const statusPath = process.env.CAS_NO_MICRO_STATUS_PATH || path.join(fixDirectory, "last-launch.json");
 const packageVersion = process.env.CAS_NO_MICRO_PACKAGE_VERSION || "unknown";
@@ -44,7 +45,7 @@ try {
   phase = "child-alive-verified";
   child.unref();
   const status = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     mode: MODE,
     packageName: "OpenAI.Codex",
     packageVersion,
@@ -62,6 +63,12 @@ try {
       evaluation,
       globalMarker: true,
     },
+    outputTelemetry: {
+      status: "armed",
+      runtime: OUTPUT_TELEMETRY_RUNTIME,
+      timestampMode: "per-assistant-output",
+      metricMode: "best-effort-live-stream",
+    },
     cleanup: "not-needed",
     statusFile: { status: "success" },
   };
@@ -74,7 +81,7 @@ try {
 } catch (error) {
   const cleanup = await cleanupOwnChild(child, executable);
   const status = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     mode: MODE,
     packageName: "OpenAI.Codex",
     packageVersion,
@@ -89,6 +96,10 @@ try {
       status: "failed",
       phase,
       error: safeError(error),
+    },
+    outputTelemetry: {
+      status: "not-armed",
+      runtime: OUTPUT_TELEMETRY_RUNTIME,
     },
     cleanup,
     statusFile: { status: "success" },
@@ -110,8 +121,391 @@ function safeError(error) {
   return text.replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]{16,}={0,2}/gi, "$1***").slice(0, 1500);
 }
 
+// CAS-R73-PER-OUTPUT-TIMESTAMP
+// This renderer runtime is intentionally local/read-only: it adds presentation-only DOM nodes
+// and observes cloned response streams. It never edits Codex session JSONL, app.asar, prompts,
+// auth, or model responses. Stable assistant selectors / MutationObserver ideas were informed by
+// MIT-licensed KevinKE93/Codex-Monitor and Minghou-Lei/codex-context-used-meter; the optional
+// output-rate concept was informed by MIT-licensed petergpt/codex-speed-monitor.
+function outputTelemetryRuntimeSource() {
+  return String.raw`
+(() => {
+  'use strict';
+
+  const VERSION = 'r73.1';
+  const ROOT_KEY = '__casOutputTelemetryRuntime';
+  const STYLE_ID = 'cas-output-telemetry-style';
+  const BADGE_ATTR = 'data-cas-output-timestamp';
+  const HOST_ATTR = 'data-cas-output-stamped';
+  const FIRST_SEEN_ATTR = 'data-cas-output-first-seen';
+  const HUD_ID = 'cas-output-telemetry-hud';
+  const APPLY_KEY = '__casOutputTelemetryApplying';
+
+  const old = window[ROOT_KEY];
+  if (old && old.version === VERSION) {
+    try { old.rescan(); } catch {}
+    return { ok: true, version: VERSION, reused: true };
+  }
+  try { old && old.observer && old.observer.disconnect(); } catch {}
+  try { old && old.cleanup && old.cleanup(); } catch {}
+
+  const state = {
+    version: VERSION,
+    observer: null,
+    timer: null,
+    fetchInstalled: false,
+    metrics: {
+      seen: false,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      reasoningTokens: null,
+      outputBase: 0,
+      startedAt: null,
+      done: false,
+    },
+  };
+
+  function pad2(v) { return String(v).padStart(2, '0'); }
+  function clock(epoch) {
+    const d = new Date(epoch);
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+  function fullTime(epoch) {
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }).format(new Date(epoch));
+    } catch {
+      return new Date(epoch).toLocaleString();
+    }
+  }
+  function shortNumber(value) {
+    if (!Number.isFinite(value)) return '--';
+    if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+    if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'K';
+    return String(Math.round(value));
+  }
+
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = [
+      '[' + HOST_ATTR + '=\"true\"]{position:relative!important;}',
+      '[' + BADGE_ATTR + ']{position:absolute;top:2px;right:4px;z-index:20;display:inline-flex;align-items:center;padding:1px 5px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:999px;background:color-mix(in srgb,Canvas 88%,transparent);color:color-mix(in srgb,CanvasText 58%,transparent);box-shadow:0 1px 4px color-mix(in srgb,CanvasText 8%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font:9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.01em;white-space:nowrap;pointer-events:auto;cursor:default;user-select:text;opacity:.80;}',
+      '[' + BADGE_ATTR + ']:hover{opacity:1;}',
+      '#' + HUD_ID + '{position:fixed;right:10px;bottom:10px;z-index:2147483646;display:none;align-items:center;gap:7px;padding:3px 7px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:999px;background:color-mix(in srgb,Canvas 88%,transparent);color:color-mix(in srgb,CanvasText 64%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 8px color-mix(in srgb,CanvasText 10%,transparent);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;pointer-events:none;}',
+      '#' + HUD_ID + '[data-visible=\"true\"]{display:inline-flex;}',
+    ].join('\n');
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function assistantNodes() {
+    const selectors = [
+      '[data-content-search-assistant-turn-key]',
+      '[data-local-conversation-final-assistant]',
+    ];
+    const seen = new Set();
+    const nodes = [];
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach(function(raw) {
+        const node = raw.closest('[data-content-search-assistant-turn-key]') ||
+          raw.closest('[data-local-conversation-final-assistant]') || raw;
+        if (seen.has(node) || node.closest('#' + HUD_ID)) return;
+        seen.add(node);
+        nodes.push(node);
+      });
+    }
+    document.querySelectorAll('[data-chatgpt-conversation-turn=\"true\"]').forEach(function(turn) {
+      if (seen.has(turn)) return;
+      const assistantMarker = turn.querySelector('[data-assistant-message-sent-time],[data-message-author-role=\"assistant\"],[data-local-conversation-final-assistant]');
+      if (!assistantMarker) return;
+      seen.add(turn);
+      nodes.push(turn);
+    });
+    return nodes;
+  }
+
+  function nativeTime(node) {
+    const sent = node.querySelector('[data-assistant-message-sent-time]') || node.querySelector('time[datetime]');
+    if (!sent) return null;
+    const values = [
+      sent.getAttribute('datetime'),
+      sent.getAttribute('data-timestamp'),
+      sent.getAttribute('title'),
+      sent.getAttribute('aria-label'),
+      sent.textContent,
+    ].filter(Boolean).map(function(v) { return String(v).trim(); }).filter(Boolean);
+    for (const value of values) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 1000000000) {
+        const epoch = numeric > 10000000000 ? numeric : numeric * 1000;
+        return { epoch: epoch, label: clock(epoch), source: 'Codex message time' };
+      }
+      const parsed = Date.parse(value);
+      if (Number.isFinite(parsed)) return { epoch: parsed, label: clock(parsed), source: 'Codex message time' };
+      const match = value.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\s?(AM|PM)?\b/i);
+      if (match) return { epoch: null, label: match[0], source: 'Codex message time' };
+    }
+    return null;
+  }
+
+  function outputSpeed() {
+    const m = state.metrics;
+    if (!Number.isFinite(m.outputTokens) || !Number.isFinite(m.outputBase) || !m.startedAt) return null;
+    const delta = Math.max(0, m.outputTokens - m.outputBase);
+    if (delta <= 0) return null;
+    const seconds = Math.max((performance.now() - m.startedAt) / 1000, 0.25);
+    return delta / seconds;
+  }
+
+  function metricTitle() {
+    const m = state.metrics;
+    if (!m.seen) return '';
+    const lines = [];
+    if (Number.isFinite(m.contextPercent)) lines.push('Context: ' + m.contextPercent.toFixed(1) + '% (' + shortNumber(m.contextTokens) + '/' + shortNumber(m.contextWindow) + ')');
+    if (Number.isFinite(m.inputTokens)) lines.push('Input: ' + shortNumber(m.inputTokens));
+    if (Number.isFinite(m.cachedInputTokens)) lines.push('Cached input: ' + shortNumber(m.cachedInputTokens));
+    if (Number.isFinite(m.outputTokens)) lines.push('Output: ' + shortNumber(m.outputTokens));
+    if (Number.isFinite(m.reasoningTokens)) lines.push('Reasoning: ' + shortNumber(m.reasoningTokens));
+    const speed = outputSpeed();
+    if (Number.isFinite(speed)) lines.push('Speed: ' + speed.toFixed(1) + ' tok/s');
+    return lines.join('\n');
+  }
+
+  function stamp(node) {
+    if (!(node instanceof Element)) return;
+    ensureStyle();
+    let firstSeen = Number(node.getAttribute(FIRST_SEEN_ATTR));
+    if (!Number.isFinite(firstSeen) || firstSeen <= 0) {
+      firstSeen = Date.now();
+      node.setAttribute(FIRST_SEEN_ATTR, String(firstSeen));
+    }
+    const native = nativeTime(node);
+    const epoch = native && native.epoch ? native.epoch : firstSeen;
+    const label = native && native.label ? native.label : clock(firstSeen);
+    const source = native && native.source ? native.source : 'first observed locally';
+    let badge = Array.from(node.children || []).find(function(child) { return child.hasAttribute && child.hasAttribute(BADGE_ATTR); });
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.setAttribute(BADGE_ATTR, 'true');
+      badge.setAttribute('aria-label', 'Assistant output timestamp');
+      node.appendChild(badge);
+    }
+    if (badge.textContent !== label) badge.textContent = label;
+    const metrics = metricTitle();
+    const title = fullTime(epoch) + ' · ' + source + (metrics ? '\n' + metrics : '');
+    if (badge.getAttribute('title') !== title) badge.setAttribute('title', title);
+    node.setAttribute(HOST_ATTR, 'true');
+  }
+
+  function ensureHud() {
+    let hud = document.getElementById(HUD_ID);
+    if (!hud && document.body) {
+      hud = document.createElement('div');
+      hud.id = HUD_ID;
+      hud.setAttribute('aria-label', 'Codex live token telemetry');
+      document.body.appendChild(hud);
+    }
+    return hud;
+  }
+
+  function updateHud() {
+    const hud = ensureHud();
+    if (!hud) return;
+    const m = state.metrics;
+    if (!m.seen) {
+      hud.removeAttribute('data-visible');
+      return;
+    }
+    const parts = [];
+    if (Number.isFinite(m.contextPercent)) parts.push('ctx ' + m.contextPercent.toFixed(1) + '%');
+    const speed = outputSpeed();
+    if (Number.isFinite(speed) && !m.done) parts.push(speed.toFixed(1) + ' tok/s');
+    if (Number.isFinite(m.outputTokens)) parts.push('out ' + shortNumber(m.outputTokens));
+    if (!parts.length) {
+      hud.removeAttribute('data-visible');
+      return;
+    }
+    const text = parts.join(' · ');
+    if (hud.textContent !== text) hud.textContent = text;
+    hud.setAttribute('data-visible', 'true');
+  }
+
+  function scan() {
+    if (!document.body || window[APPLY_KEY]) return;
+    window[APPLY_KEY] = true;
+    try {
+      assistantNodes().forEach(stamp);
+      updateHud();
+    } finally {
+      queueMicrotask(function() { window[APPLY_KEY] = false; });
+    }
+  }
+
+  function schedule(delay) {
+    if (state.timer) clearTimeout(state.timer);
+    state.timer = setTimeout(function() {
+      state.timer = null;
+      scan();
+    }, typeof delay === 'number' ? delay : 80);
+  }
+
+  function installObserver() {
+    if (!document.body) {
+      setTimeout(installObserver, 50);
+      return;
+    }
+    const observer = new MutationObserver(function(records) {
+      if (window[APPLY_KEY]) return;
+      const meaningful = records.some(function(record) { return record.addedNodes && record.addedNodes.length; });
+      if (meaningful) schedule(80);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    state.observer = observer;
+    scan();
+  }
+
+  function numberAt(obj, paths) {
+    for (const path of paths) {
+      let value = obj;
+      for (const key of path) value = value && value[key];
+      const number = Number(value);
+      if (Number.isFinite(number)) return number;
+    }
+    return null;
+  }
+
+  function consumeTokenObject(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
+    const type = String(obj.type || payload.type || '');
+    let usage = obj.last_token_usage || obj.lastTokenUsage || obj.usage || payload.last_token_usage || payload.lastTokenUsage || payload.usage;
+    if ((!usage || typeof usage !== 'object') && type !== 'token_count') return false;
+    usage = usage && typeof usage === 'object' ? usage : payload;
+
+    const input = numberAt(usage, [['input_tokens'], ['inputTokens']]);
+    const cached = numberAt(usage, [['cached_input_tokens'], ['cachedInputTokens']]);
+    const output = numberAt(usage, [['output_tokens'], ['outputTokens']]);
+    const reasoning = numberAt(usage, [['reasoning_output_tokens'], ['reasoningTokens']]);
+    const contextWindow = numberAt(obj, [['model_context_window'], ['modelContextWindow'], ['payload', 'model_context_window'], ['payload', 'modelContextWindow']]) ||
+      numberAt(payload, [['model_context_window'], ['modelContextWindow']]);
+    if (![input, cached, output, reasoning, contextWindow].some(Number.isFinite)) return false;
+
+    const m = state.metrics;
+    m.seen = true;
+    if (Number.isFinite(output)) {
+      if (!Number.isFinite(m.outputTokens) || output < m.outputTokens || m.done) {
+        m.outputBase = Math.max(0, output - 1);
+        m.startedAt = performance.now();
+        m.done = false;
+      } else if (!m.startedAt && output > 0) {
+        m.outputBase = 0;
+        m.startedAt = performance.now();
+      }
+      m.outputTokens = output;
+    }
+    if (Number.isFinite(input)) m.inputTokens = input;
+    if (Number.isFinite(cached)) m.cachedInputTokens = cached;
+    if (Number.isFinite(reasoning)) m.reasoningTokens = reasoning;
+    if (Number.isFinite(contextWindow) && contextWindow > 0) m.contextWindow = contextWindow;
+    // Codex-Monitor and rollout JSONL both treat current context pressure as
+    // last_token_usage.input_tokens / model_context_window, not cumulative session total.
+    if (Number.isFinite(m.inputTokens)) m.contextTokens = m.inputTokens;
+    if (Number.isFinite(m.contextTokens) && Number.isFinite(m.contextWindow) && m.contextWindow > 0) {
+      m.contextPercent = Math.max(0, Math.min(100, (m.contextTokens / m.contextWindow) * 100));
+    }
+    schedule(0);
+    return true;
+  }
+
+  function consumeValue(value, depth) {
+    depth = depth || 0;
+    if (depth > 5 || value == null) return false;
+    if (Array.isArray(value)) return value.some(function(item) { return consumeValue(item, depth + 1); });
+    if (typeof value !== 'object') return false;
+    let hit = consumeTokenObject(value);
+    for (const key of Object.keys(value)) {
+      if (key === 'last_token_usage' || key === 'lastTokenUsage' || key === 'usage') continue;
+      if (value[key] && typeof value[key] === 'object') hit = consumeValue(value[key], depth + 1) || hit;
+    }
+    return hit;
+  }
+
+  function consumeText(text) {
+    if (!text || typeof text !== 'string') return;
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.replace(/^data:\s*/, '').trim();
+      if (!line || line === '[DONE]') continue;
+      if (line.includes('task_complete')) state.metrics.done = true;
+      if (!line.includes('token_count') && !line.includes('last_token_usage') && !line.includes('model_context_window')) continue;
+      try { consumeValue(JSON.parse(line), 0); } catch {}
+    }
+  }
+
+  function installFetchObserver() {
+    if (state.fetchInstalled || typeof window.fetch !== 'function') return;
+    state.fetchInstalled = true;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async function(input, init) {
+      const response = await nativeFetch(input, init);
+      try {
+        const url = String(typeof input === 'string' ? input : (input && input.url) || response.url || '');
+        const type = String(response.headers && response.headers.get ? response.headers.get('content-type') || '' : '');
+        if (/responses|conversation|codex|backend-api|event-stream/i.test(url + ' ' + type) && response.body && response.clone) {
+          const clone = response.clone();
+          void (async function() {
+            try {
+              const reader = clone.body && clone.body.getReader ? clone.body.getReader() : null;
+              if (!reader) return;
+              const decoder = new TextDecoder();
+              while (true) {
+                const result = await reader.read();
+                if (result.done) break;
+                consumeText(decoder.decode(result.value, { stream: true }));
+              }
+              consumeText(decoder.decode());
+            } catch {}
+          })();
+        }
+      } catch {}
+      return response;
+    };
+  }
+
+  function cleanup() {
+    try { state.observer && state.observer.disconnect(); } catch {}
+    if (state.timer) clearTimeout(state.timer);
+    const hud = document.getElementById(HUD_ID);
+    if (hud) hud.remove();
+    const style = document.getElementById(STYLE_ID);
+    if (style) style.remove();
+    document.querySelectorAll('[' + BADGE_ATTR + ']').forEach(function(node) { node.remove(); });
+    document.querySelectorAll('[' + HOST_ATTR + ']').forEach(function(node) {
+      node.removeAttribute(HOST_ATTR);
+      node.removeAttribute(FIRST_SEEN_ATTR);
+    });
+  }
+
+  state.rescan = scan;
+  state.cleanup = cleanup;
+  window[ROOT_KEY] = state;
+  ensureStyle();
+  installFetchObserver();
+  installObserver();
+  return { ok: true, version: VERSION, reused: false };
+})()
+`;
+}
+
 function stubExpression(expectedPid, expectedExecutable) {
   const expectedPath = JSON.stringify(normalizedExecutable(expectedExecutable));
+  const telemetrySource = JSON.stringify(outputTelemetryRuntimeSource());
   return String.raw`
 (() => {
   const actualPath = String(process.execPath || "").replaceAll("\\", "/").toLowerCase();
@@ -124,6 +518,7 @@ function stubExpression(expectedPid, expectedExecutable) {
 
   const Module = process.getBuiltinModule("module");
   const originalLoad = Module._load;
+  const telemetrySource = ${telemetrySource};
   const isInspectorArgument = (argument) =>
     typeof argument === "string" && /^--inspect(?:-brk)?(?:=|$)/.test(argument);
 
@@ -182,9 +577,48 @@ function stubExpression(expectedPid, expectedExecutable) {
     },
   };
 
+  let outputTelemetryArmed = false;
+  const telemetryBoundContents = new WeakSet();
+  const attachOutputTelemetry = (contents) => {
+    if (!contents || telemetryBoundContents.has(contents)) return;
+    try {
+      const type = contents.getType?.();
+      if (type && type !== "window" && type !== "webview") return;
+    } catch {}
+    telemetryBoundContents.add(contents);
+    const inject = () => {
+      try {
+        if (contents.isDestroyed?.()) return;
+        const promise = contents.executeJavaScript?.(telemetrySource, true);
+        promise?.catch?.(() => {});
+      } catch {}
+    };
+    try { contents.on?.("dom-ready", inject); } catch {}
+    try { inject(); } catch {}
+  };
+  const armOutputTelemetry = (electron) => {
+    if (outputTelemetryArmed || !electron?.app || !electron?.webContents) return;
+    outputTelemetryArmed = true;
+    globalThis.__CODEX_OUTPUT_TELEMETRY_R73__ = true;
+    try {
+      electron.app.on("web-contents-created", (_event, contents) => attachOutputTelemetry(contents));
+    } catch {}
+    const attachExisting = () => {
+      try { electron.webContents.getAllWebContents().forEach(attachOutputTelemetry); } catch {}
+    };
+    try {
+      if (electron.app.isReady?.()) attachExisting();
+      else electron.app.whenReady?.().then(attachExisting).catch(() => {});
+    } catch {}
+  };
+
   Module._load = function codexMicroDisabledLoader(request, parent, isMain) {
     if (request === "@worklouder/device-kit-oai") return stub;
-    return Reflect.apply(originalLoad, this, arguments);
+    const loaded = Reflect.apply(originalLoad, this, arguments);
+    if (request === "electron" || loaded?.app?.on && loaded?.webContents) {
+      try { armOutputTelemetry(loaded); } catch {}
+    }
+    return loaded;
   };
 
   globalThis.__CODEX_MICRO_DISABLED_LOCAL__ = true;
@@ -372,7 +806,7 @@ async function installStub(webSocketUrl, expectedPid, expectedExecutable) {
           method: "Debugger.evaluateOnCallFrame",
           params: {
             callFrameId,
-            expression: "globalThis.__CODEX_MICRO_DISABLED_LOCAL__ === true",
+            expression: "globalThis.__CODEX_MICRO_DISABLED_LOCAL__ === true && globalThis.__CODEX_OUTPUT_TELEMETRY_R73__ === true",
             returnByValue: true,
             silent: true,
           },
@@ -382,7 +816,7 @@ async function installStub(webSocketUrl, expectedPid, expectedExecutable) {
 
       if (message.id === 5) {
         if (message.result?.result?.value !== true) {
-          finishError(new Error("global No Micro marker was not set"));
+          finishError(new Error("global No Lagging / output telemetry marker was not set"));
           return;
         }
         socket.send(JSON.stringify({ id: 6, method: "Debugger.resume" }));

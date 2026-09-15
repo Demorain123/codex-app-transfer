@@ -38,61 +38,63 @@ const copy = computed(() =>
   zh.value
     ? {
         title: 'Codex No Lagging A/B（实验性）',
-        desc: 'r32 在原 r23 No Micro A/B 上扩展为 No Lagging：B 仍只在顶层拦截 @worklouder/device-kit-oai，从而同时避开旧 serialport 与新 HID/accessory native 路径；并启动 MCP Exit Guard，仅在 Codex Desktop 真正退出后回收本 generation 已跟踪的残留 helper。不会减少 MCP、不会限制 subagent，也不会处理 429/503/agent-loop 类网络或会话故障。',
+        desc: 'r73 在 r32 No Lagging 上增加输出观测：B 启动后给 Codex Desktop 每个 assistant/model 输出段加本地时间戳角标；优先使用 Codex 自带 sent-time，缺失时明确回退为“首次本地观察时间”。若当前 renderer 能观察到 token_count 流，还会额外显示 ctx%、输出 token 与 tok/s；拿不到数据就不显示，不会伪造。Micro/Accessory Guard 与 MCP Exit Guard 行为保持不变。',
         doctor: '兼容性检查',
         checking: '检查中…',
         normalLaunch: '普通启动（A）',
         normalLaunching: 'A 启动中…',
         noMicroLaunch: 'No Lagging 启动（B）',
         noMicroLaunching: 'B 启动中…',
-        ready: '环境兼容，可以进行 A/B。Codex 即使正在运行也可以点击；r23 会先复用原“重启 Codex App”的安全关闭/清理流程。',
-        running: 'Codex 当前正在运行；可以直接开始下一轮，r23 会先按原“重启 Codex App”流程关闭并重新启动。',
+        ready: '环境兼容，可以进行 A/B。B 会在原 No Lagging 启动钩子中同时武装 r73 每段输出时间戳；Codex 即使正在运行也可以点击，会先复用原安全关闭/清理流程。',
+        running: 'Codex 当前正在运行；可以直接开始下一轮，会先按原“重启 Codex App”流程关闭并重新启动，再武装 r73 输出时间戳。',
         incompatible: 'No Lagging 的 Micro/Accessory Guard 兼容性未通过；A 仍可用于对照。',
         unknown: '无法可靠确认 Codex 进程状态。为避免误操作，A/B 暂时禁用，请重新兼容性检查。',
         normalConfirmTitle: '普通启动 Codex（A）？',
         normalConfirmMessage:
-          'A 会复用原有“重启 Codex App”的配置同步、关闭/清理和正常启动路径，Micro 正常加载；额外只写入 mode=normal 的 A/B 日志标识。',
+          'A 会复用原有“重启 Codex App”的配置同步、关闭/清理和正常启动路径，Micro 正常加载；额外只写入 mode=normal 的 A/B 日志标识。A 不注入 r73 输出角标，便于与 B 做对照。',
         normalConfirmLabel: '启动 A',
         noMicroConfirmTitle: '以 No Lagging 模式启动 Codex（B）？',
         noMicroConfirmMessage:
-          'B 会复用与 A 相同的配置同步和关闭/清理流程；最终启动使用 Micro/Accessory Guard，并在后台启动 MCP Exit Guard。Exit Guard 只在 Codex Desktop 已退出时处理本 generation 的残留，不会动正在工作的 MCP/subagent。',
+          'B 会复用与 A 相同的配置同步和关闭/清理流程；最终启动使用 Micro/Accessory Guard、MCP Exit Guard，并在 Electron renderer 创建时注入 r73 输出观测 runtime：每个 assistant/model 输出段显示本地时间戳角标；token/context/tok/s 仅在确有可观测数据时显示。',
         noMicroConfirmLabel: '启动 B',
         normalLaunchOk: '普通 A 已按原重启流程启动并写入日志标识',
-        noMicroLaunchOk: 'No Lagging B：Micro/Accessory Guard 已验证，MCP Exit Guard 已请求后台监控',
+        noMicroLaunchOk: 'No Lagging B：Guard 已验证，r73 每段输出时间戳 runtime 已武装',
         lastSuccess: '最近一次 B：Micro/Accessory Guard 注入成功',
+        lastSuccessTelemetry: '最近一次 B：Guard 注入成功 · r73 每段输出时间戳已武装',
         lastFailed: '最近一次 B：Micro/Accessory Guard 注入失败',
         never: '尚无 No Lagging B 启动记录',
         unsupported: '当前平台暂不支持（仅 Windows Store/MSIX Codex）。',
-        logHint: '日志关键字：[codex-ab]。A：mode=normal；B：mode=no-lagging + injection_success。MCP Exit Guard 另写 %LOCALAPPDATA%\\CodexMcpJanitorR32\\events.jsonl。',
+        logHint: '日志关键字：[codex-ab]。B：mode=no-lagging + injection_success。r73 启动状态同时写 outputTelemetry.status=armed/runtime=r73.1；MCP Exit Guard 另写 %LOCALAPPDATA%\\CodexMcpJanitorR32\\events.jsonl。',
       }
     : {
         title: 'Codex No Lagging A/B (experimental)',
-        desc: 'r32 extends the proven r23 No Micro A/B into No Lagging. B still intercepts only @worklouder/device-kit-oai, covering both the old serialport path and newer HID/accessory native path, and starts an MCP Exit Guard that cleans only tracked helpers after Codex Desktop has exited. It does not reduce MCPs, limit subagents, or claim to fix 429/503/agent-loop failures.',
+        desc: 'r73 adds output observability on top of r32 No Lagging. B adds a local timestamp badge to every assistant/model output segment in Codex Desktop, preferring Codex native sent-time and explicitly falling back to first-local-observation time. When a token_count stream is observable, it also shows ctx%, output tokens and tok/s; unavailable metrics stay hidden rather than guessed. Micro/Accessory Guard and MCP Exit Guard behavior is unchanged.',
         doctor: 'Compatibility check',
         checking: 'Checking…',
         normalLaunch: 'Normal launch (A)',
         normalLaunching: 'Launching A…',
         noMicroLaunch: 'No Lagging launch (B)',
         noMicroLaunching: 'Launching B…',
-        ready: 'Environment is compatible and ready for A/B. Codex may already be running; r23 will reuse the legacy safe quit/restart flow first.',
-        running: 'Codex is currently running. You may start the next run directly; r23 will first reuse the legacy safe quit/restart flow.',
+        ready: 'Environment is compatible and ready for A/B. B also arms the r73 per-output timestamp runtime through the existing No Lagging startup hook.',
+        running: 'Codex is currently running. You may start the next run directly; the legacy safe quit/restart flow runs first and then r73 output timestamps are armed.',
         incompatible: 'No Lagging Micro/Accessory Guard compatibility did not pass; A remains available as the control path.',
         unknown: 'Codex process state cannot be verified reliably. A/B is disabled until compatibility is checked again.',
         normalConfirmTitle: 'Launch normal Codex (A)?',
         normalConfirmMessage:
-          'A reuses the existing Restart Codex App config sync, safe quit/reap, and normal launch path with Micro enabled. The only addition is an explicit mode=normal A/B log marker.',
+          'A reuses the existing Restart Codex App config sync, safe quit/reap, and normal launch path with Micro enabled. A intentionally does not inject the r73 output badges, so it remains the control path.',
         normalConfirmLabel: 'Launch A',
         noMicroConfirmTitle: 'Launch Codex with No Lagging (B)?',
         noMicroConfirmMessage:
-          'B reuses the same config sync and safe quit/reap path as A, adds the Micro/Accessory Guard, and starts the background MCP Exit Guard. The exit guard never kills MCP/subagent helpers while Codex Desktop is still running.',
+          'B reuses the same config sync and safe quit/reap path as A, adds the Micro/Accessory Guard and MCP Exit Guard, and injects the r73 output-observability runtime into Electron renderers. Every assistant/model output segment gets a local timestamp; token/context/tok/s appear only when real data is observable.',
         noMicroConfirmLabel: 'Launch B',
         normalLaunchOk: 'Normal A launched through the legacy restart path and its marker was written',
-        noMicroLaunchOk: 'No Lagging B Micro/Accessory Guard verified; MCP Exit Guard start requested',
+        noMicroLaunchOk: 'No Lagging B guards verified; r73 per-output timestamp runtime armed',
         lastSuccess: 'Last B: Micro/Accessory Guard injection succeeded',
+        lastSuccessTelemetry: 'Last B: guard succeeded · r73 per-output timestamps armed',
         lastFailed: 'Last B: Micro/Accessory Guard injection failed',
         never: 'No No Lagging B launch has been recorded yet',
         unsupported: 'This feature currently supports Windows Store/MSIX Codex only.',
-        logHint: 'Log key: [codex-ab]. A: mode=normal. B: mode=no-lagging + injection_success. MCP Exit Guard writes %LOCALAPPDATA%\\CodexMcpJanitorR32\\events.jsonl.',
+        logHint: 'Log key: [codex-ab]. B: mode=no-lagging + injection_success. r73 launch state also records outputTelemetry.status=armed/runtime=r73.1. MCP Exit Guard writes %LOCALAPPDATA%\\CodexMcpJanitorR32\\events.jsonl.',
       },
 )
 
@@ -121,9 +123,11 @@ const metaText = computed(() => {
 })
 
 const lastText = computed(() => {
-  const last = doctor.value?.lastLaunch
+  const last = doctor.value?.lastLaunch as any
   if (!last?.injection?.status) return copy.value.never
-  if (last.injection.status === 'success') return copy.value.lastSuccess
+  if (last.injection.status === 'success') {
+    return last?.outputTelemetry?.status === 'armed' ? copy.value.lastSuccessTelemetry : copy.value.lastSuccess
+  }
   const detail = [last.injection.phase, last.injection.error].filter(Boolean).join(' — ')
   return `${copy.value.lastFailed}${detail ? ` (${detail})` : ''}`
 })
@@ -187,7 +191,7 @@ onMounted(() => void refresh())
 </script>
 
 <template>
-  <section class="no-micro-panel" data-compat="CAS-NO-LAGGING-R32-UI">
+  <section class="no-micro-panel" data-compat="CAS-R73-OUTPUT-TIMESTAMPS">
     <div class="no-micro-panel__header">
       <div>
         <div class="no-micro-panel__title">{{ copy.title }}</div>

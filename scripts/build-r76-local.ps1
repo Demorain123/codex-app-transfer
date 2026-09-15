@@ -51,6 +51,19 @@ $NewBar = @'
 $AdaptiveR74 = Replace-Required $OriginalR74 $OldSpacer $NewSpacer 'status container-query rules'
 $AdaptiveR74 = Replace-Required $AdaptiveR74 $OldBar $NewBar 'status container type'
 
+# OpenAI's current token accounting distinguishes active request/context usage
+# (last_token_usage) from lifetime cumulative thread usage (total_token_usage).
+# Calling the latter merely "session" is easy to misread when it reaches tens or
+# hundreds of millions, so r76 labels it explicitly as cumulative total.
+$AdaptiveR74 = Replace-Required $AdaptiveR74 `
+    "    const session = 'session ' + shortNumber(effectiveSessionTotal());" `
+    "    const session = 'total ' + shortNumber(effectiveSessionTotal());" `
+    'status cumulative total label'
+$AdaptiveR74 = Replace-Required $AdaptiveR74 `
+    '<span>Session</span><span>' `
+    '<span>Session total</span><span>' `
+    'mirror cumulative total label'
+
 try {
     [System.IO.File]::WriteAllText($R74Builder, $AdaptiveR74, $Utf8NoBom)
     [System.IO.File]::WriteAllText($Driver, $Text, $Utf8NoBom)
@@ -62,8 +75,9 @@ try {
 
     Write-Host 'R76_LOCAL_ENTRYPOINT_PASS' -ForegroundColor Green
     Write-Host '  - status density follows the actual composer width via CSS container queries'
-    Write-Host '  - <=720px hides cache/model; <=560px also hides cumulative session total'
+    Write-Host '  - <=720px hides cache/model; <=560px also hides cumulative total'
     Write-Host '  - ctx/in/out/tok-s remain the compact core metrics'
+    Write-Host '  - lifetime total is labeled total, not context/session occupancy'
 }
 finally {
     [System.IO.File]::WriteAllText($R74Builder, $OriginalR74, $Utf8NoBom)

@@ -4,14 +4,17 @@
 //! `stats` / `log_buffer` 的 Rust 等价转译。
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::{self, OpenOptions},
     io::Write,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
 };
 
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, SecondsFormat};
 use codex_app_transfer_registry::config_dir;
 use serde::Serialize;
 
@@ -79,9 +82,26 @@ impl ProxyStats {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProxyLogEntry {
+    pub seq: u64,
+    pub timestamp: String,
     pub time: String,
     pub level: String,
     pub message: String,
+}
+
+// CAS-R72-STRUCTURED-OBSERVABILITY
+// Machine-readable local sidecar for forensic correlation. `fields` is built only
+// from a strict allowlist of tokens that are already present in the human log line;
+// arbitrary error text, URLs, prompt/body content and raw identity headers are never
+// promoted into structured attributes.
+#[derive(Debug, Serialize)]
+struct StructuredLogRecord<'a> {
+    seq: u64,
+    timestamp: &'a str,
+    level: &'a str,
+    event: Option<&'a str>,
+    message: &'a str,
+    fields: BTreeMap<&'static str, String>,
 }
 
 // CAS-R71-OBSERVABILITY-CORRELATION
@@ -99,6 +119,7 @@ pub struct LogBuffer {
     file_lock: Mutex<()>,
     log_dir_override: Option<PathBuf>,
     diag_state: Mutex<DiagCorrelationState>,
+    next_seq: AtomicU64,
 }
 
 impl LogBuffer {
@@ -109,6 +130,7 @@ impl LogBuffer {
             file_lock: Mutex::new(()),
             log_dir_override: None,
             diag_state: Mutex::new(DiagCorrelationState::default()),
+            next_seq: AtomicU64::new(1),
         }
     }
 
@@ -120,6 +142,7 @@ impl LogBuffer {
             file_lock: Mutex::new(()),
             log_dir_override: Some(log_dir),
             diag_state: Mutex::new(DiagCorrelationState::default()),
+            next_seq: AtomicU64::new(1),
         }
     }
 
@@ -136,9 +159,13 @@ impl LogBuffer {
     }
 
     fn push_entry(&self, now: &DateTime<Local>, level: &str, message: &str) {
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
+        let timestamp = now.to_rfc3339_opts(SecondsFormat::Millis, false);
         {
             let mut logs = self.logs.lock().unwrap();
             logs.push(ProxyLogEntry {
+                seq,
+                timestamp: timestamp.clone(),
                 // Milliseconds are necessary to order concurrent main/subagent traffic.
                 time: now.format("%H:%M:%S%.3f").to_string(),
                 level: level.to_owned(),
@@ -149,7 +176,7 @@ impl LogBuffer {
                 logs.drain(0..keep_from);
             }
         }
-        self.append_to_file(now, level, message);
+        self.append_to_files(now, seq, &timestamp, level, message);
     }
 
     // CAS-R71-OBSERVABILITY-CORRELATION
@@ -245,25 +272,57 @@ impl LogBuffer {
         self.archive_logs();
     }
 
-    fn append_to_file(&self, now: &DateTime<Local>, level: &str, message: &str) {
+    fn append_to_files(
+        &self,
+        now: &DateTime<Local>,
+        seq: u64,
+        timestamp: &str,
+        level: &str,
+        message: &str,
+    ) {
         let Some(dir) = self.log_dir() else {
             return;
         };
         if fs::create_dir_all(&dir).is_err() {
             return;
         }
-        let path = dir.join(format!("proxy-{}.log", now.format("%Y-%m-%d")));
+
+        // One lock covers both outputs so the human-readable TSV and JSONL sidecar
+        // cannot be reordered relative to one another by concurrent requests.
         let _guard = self.file_lock.lock().unwrap();
-        let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
-            return;
-        };
-        let _ = writeln!(
-            file,
-            "{}\t{}\t{}",
-            now.format("%Y-%m-%d %H:%M:%S%.3f"),
-            level,
-            message
-        );
+
+        let human_path = dir.join(format!("proxy-{}.log", now.format("%Y-%m-%d")));
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(human_path) {
+            let _ = writeln!(
+                file,
+                "{}\t{}\t{}",
+                now.format("%Y-%m-%d %H:%M:%S%.3f"),
+                level,
+                message
+            );
+        }
+
+        let structured_path = dir.join(format!(
+            "proxy-events-{}.jsonl",
+            now.format("%Y-%m-%d")
+        ));
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(structured_path)
+        {
+            let record = StructuredLogRecord {
+                seq,
+                timestamp,
+                level,
+                event: structured_event_name(message),
+                message,
+                fields: structured_fields(message),
+            };
+            if serde_json::to_writer(&mut file, &record).is_ok() {
+                let _ = file.write_all(b"\n");
+            }
+        }
     }
 
     fn archive_logs(&self) {
@@ -287,14 +346,22 @@ impl LogBuffer {
             let Some(name) = src.file_name().and_then(|v| v.to_str()) else {
                 continue;
             };
-            if !name.starts_with("proxy-") || !name.ends_with(".log") || !src.is_file() {
+            if !src.is_file() {
                 continue;
             }
-            let base = name.trim_end_matches(".log");
-            let mut dst = backup_dir.join(format!("{base}_{tag}.log"));
+
+            let (base, ext) = if name.starts_with("proxy-events-") && name.ends_with(".jsonl") {
+                (name.trim_end_matches(".jsonl"), "jsonl")
+            } else if name.starts_with("proxy-") && name.ends_with(".log") {
+                (name.trim_end_matches(".log"), "log")
+            } else {
+                continue;
+            };
+
+            let mut dst = backup_dir.join(format!("{base}_{tag}.{ext}"));
             let mut counter = 1;
             while dst.exists() {
-                dst = backup_dir.join(format!("{base}_{tag}_{counter}.log"));
+                dst = backup_dir.join(format!("{base}_{tag}_{counter}.{ext}"));
                 counter += 1;
             }
             let _ = fs::rename(&src, dst);
@@ -317,6 +384,54 @@ fn diag_field<'a>(message: &'a str, key: &str) -> Option<&'a str> {
     message
         .split_ascii_whitespace()
         .find_map(|token| token.strip_prefix(&prefix))
+}
+
+fn structured_event_name(message: &str) -> Option<&str> {
+    let rest = message.strip_prefix('[')?;
+    let end = rest.find(']')?;
+    let event = &rest[..end];
+    (!event.is_empty()
+        && event
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+    .then_some(event)
+}
+
+fn structured_fields(message: &str) -> BTreeMap<&'static str, String> {
+    const SAFE_FIELDS: [&str; 24] = [
+        "req",
+        "trace",
+        "client_req",
+        "target",
+        "request_class",
+        "route_target",
+        "model",
+        "model_effective",
+        "provider",
+        "thread",
+        "parent",
+        "session",
+        "from",
+        "to",
+        "raw_upstream_status",
+        "client_status",
+        "status",
+        "outcome",
+        "request_bytes",
+        "bytes",
+        "subagent_header",
+        "parent_thread_header",
+        "client_request",
+        "attempt",
+    ];
+
+    let mut fields = BTreeMap::new();
+    for &key in &SAFE_FIELDS {
+        if let Some(value) = diag_field(message, key) {
+            fields.insert(key, value.trim_end_matches([',', ';']).to_owned());
+        }
+    }
+    fields
 }
 
 // CAS-R34-RUNTIME-BEHAVIOR-HEALTH
@@ -454,7 +569,7 @@ impl RequestLifecycleTracker {
                 self,
                 "INFO",
                 format!(
-                    "[upstream-start] req={} trace={} provider={} model_effective={}",
+                    "[upstream-start] req={} trace={} provider={} model_effective={} attempt=0",
                     lifecycle_req_id(id),
                     record.correlation,
                     record.provider,
@@ -465,10 +580,20 @@ impl RequestLifecycleTracker {
     }
 
     pub fn mark_headers(&self, id: u64, status: u16) {
-        self.update(id, |record| {
+        if let Some(record) = self.update(id, |record| {
             record.headers_at_ms.get_or_insert_with(Self::now_ms);
             record.raw_upstream_status = Some(status);
-        });
+        }) {
+            emit_lifecycle_event(
+                self,
+                if status < 400 { "INFO" } else { "WARN" },
+                format!(
+                    "[upstream-status] req={} trace={} status={status}",
+                    lifecycle_req_id(id),
+                    record.correlation,
+                ),
+            );
+        }
     }
 
     // CAS-R37-FAULT-ATTRIBUTION-QUOTA-GUARD: update quota metadata without
@@ -728,7 +853,7 @@ mod tests {
     }
 
     #[test]
-    fn log_buffer_keeps_recent_entries_and_writes_daily_file() {
+    fn log_buffer_keeps_recent_entries_and_writes_daily_files() {
         let dir = unique_temp_dir("logs-write");
         let buffer = LogBuffer::new_in_dir(2, dir.clone());
 
@@ -742,8 +867,10 @@ mod tests {
         assert_eq!(entries[0].message, "failed request");
         assert_eq!(entries[1].level, "SUCCESS");
         assert_eq!(entries[1].message, "finished request");
+        assert_eq!(entries[0].seq + 1, entries[1].seq);
         assert_eq!(entries[1].time.len(), 12);
         assert_eq!(entries[1].time.as_bytes()[8], b'.');
+        assert!(entries[1].timestamp.contains('T'));
 
         let today = Local::now().format("%Y-%m-%d").to_string();
         let log_path = dir.join(format!("proxy-{today}.log"));
@@ -751,6 +878,17 @@ mod tests {
         assert!(content.contains("\tINFO\tfirst request"));
         assert!(content.contains("\tERROR\tfailed request"));
         assert!(content.contains("\tSUCCESS\tfinished request"));
+
+        let jsonl_path = dir.join(format!("proxy-events-{today}.jsonl"));
+        let lines: Vec<_> = fs::read_to_string(jsonl_path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0]["seq"].as_u64(), Some(1));
+        assert_eq!(lines[2]["seq"].as_u64(), Some(3));
+        assert_eq!(lines[2]["message"].as_str(), Some("finished request"));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -823,19 +961,44 @@ mod tests {
     }
 
     #[test]
-    fn log_buffer_clear_archives_proxy_log_files() {
+    fn structured_jsonl_extracts_only_safe_correlation_fields() {
+        let dir = unique_temp_dir("logs-r72-structured");
+        let buffer = LogBuffer::new_in_dir(20, dir.clone());
+        buffer.add(
+            "INFO",
+            "[retry-runtime-diag] target=main model=gpt-5.6-terra provider=test thread=0d0f19d1 parent=- session=0d0f19d1 client_request=aaaa1111 subagent_header=false parent_thread_header=false secret=must-not-promote",
+        );
+
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let jsonl_path = dir.join(format!("proxy-events-{today}.jsonl"));
+        let raw = fs::read_to_string(jsonl_path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(raw.trim()).unwrap();
+        assert_eq!(value["event"].as_str(), Some("retry-runtime-diag"));
+        assert_eq!(value["fields"]["model"].as_str(), Some("gpt-5.6-terra"));
+        assert_eq!(value["fields"]["request_class"].as_str(), Some("turn"));
+        assert_eq!(value["fields"]["route_target"].as_str(), Some("main"));
+        assert!(value["fields"].get("secret").is_none());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn log_buffer_clear_archives_human_and_structured_proxy_logs() {
         let dir = unique_temp_dir("logs-clear");
         let buffer = LogBuffer::new_in_dir(20, dir.clone());
 
         buffer.add("INFO", "before clear");
         let today = Local::now().format("%Y-%m-%d").to_string();
         let log_path = dir.join(format!("proxy-{today}.log"));
+        let jsonl_path = dir.join(format!("proxy-events-{today}.jsonl"));
         assert!(log_path.exists());
+        assert!(jsonl_path.exists());
 
         buffer.clear();
 
         assert!(buffer.get_all().is_empty());
         assert!(!log_path.exists());
+        assert!(!jsonl_path.exists());
 
         let backup_dir = dir.join("backup");
         let archived: Vec<PathBuf> = fs::read_dir(&backup_dir)
@@ -843,14 +1006,20 @@ mod tests {
             .flatten()
             .map(|entry| entry.path())
             .collect();
-        assert_eq!(archived.len(), 1);
-        assert!(archived[0]
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("")
-            .starts_with(&format!("proxy-{today}_")));
-        let content = fs::read_to_string(&archived[0]).unwrap();
-        assert!(content.contains("\tINFO\tbefore clear"));
+        assert_eq!(archived.len(), 2);
+        assert!(archived.iter().any(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&format!("proxy-{today}_")) && name.ends_with(".log"))
+        }));
+        assert!(archived.iter().any(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with(&format!("proxy-events-{today}_"))
+                        && name.ends_with(".jsonl")
+                })
+        }));
 
         let _ = fs::remove_dir_all(dir);
     }

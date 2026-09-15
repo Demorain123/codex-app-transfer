@@ -155,20 +155,24 @@ impl LogBuffer {
     // CAS-R71-OBSERVABILITY-CORRELATION
     // The r18 diagnostic line historically defaulted every non-subagent request to
     // `target=main`. Capability/helper requests without identity metadata therefore
-    // looked like main assistant turns. Keep the legacy target field for backwards
-    // compatibility, but append an explicit request_class + route_target based only
-    // on privacy-bounded fingerprints already present in the line.
+    // looked like main assistant turns. Preserve normal main/subagent values, but
+    // rewrite identity-less `target=main` to `target=unclassified` and append explicit
+    // request_class + route_target fields based only on privacy-bounded fingerprints.
     fn enrich_runtime_diag(&self, message: String) -> (String, Option<String>) {
         if !message.starts_with("[retry-runtime-diag]") {
             return (message, None);
         }
 
-        let target = diag_field(&message, "target").unwrap_or("-");
-        let model = diag_field(&message, "model").unwrap_or("<unknown>");
-        let thread = diag_field(&message, "thread").unwrap_or("-");
-        let parent = diag_field(&message, "parent").unwrap_or("-");
-        let session = diag_field(&message, "session").unwrap_or("-");
-        let client_request = diag_field(&message, "client_request").unwrap_or("-");
+        let target = diag_field(&message, "target").unwrap_or("-").to_owned();
+        let model = diag_field(&message, "model")
+            .unwrap_or("<unknown>")
+            .to_owned();
+        let thread = diag_field(&message, "thread").unwrap_or("-").to_owned();
+        let parent = diag_field(&message, "parent").unwrap_or("-").to_owned();
+        let session = diag_field(&message, "session").unwrap_or("-").to_owned();
+        let client_request = diag_field(&message, "client_request")
+            .unwrap_or("-")
+            .to_owned();
 
         let (request_class, route_target) = if target == "subagent" || parent != "-" {
             ("subagent", "subagent")
@@ -188,8 +192,8 @@ impl LogBuffer {
         } else {
             "uncorrelated".to_owned()
         };
-        let req = if client_request != "-" {
-            format!("client-request:{client_request}")
+        let client_req = if client_request != "-" {
+            client_request.clone()
         } else {
             "unavailable".to_owned()
         };
@@ -200,12 +204,12 @@ impl LogBuffer {
             message
         };
         let enriched = format!(
-            "{message} req={req} trace={trace} request_class={request_class} route_target={route_target}"
+            "{message} client_req={client_req} trace={trace} request_class={request_class} route_target={route_target}"
         );
 
         let transition = if request_class == "turn" && thread != "-" && model != "<unknown>" {
             let mut state = self.diag_state.lock().unwrap_or_else(|p| p.into_inner());
-            if !state.model_by_main_thread.contains_key(thread)
+            if !state.model_by_main_thread.contains_key(&thread)
                 && state.model_by_main_thread.len() >= 256
             {
                 if let Some(oldest_key) = state.model_by_main_thread.keys().next().cloned() {
@@ -214,10 +218,10 @@ impl LogBuffer {
             }
             let previous = state
                 .model_by_main_thread
-                .insert(thread.to_owned(), model.to_owned());
-            previous.filter(|old| old.as_str() != model).map(|old| {
+                .insert(thread.clone(), model.clone());
+            previous.filter(|old| old != &model).map(|old| {
                 format!(
-                    "[model-transition] req={req} trace=thread-id:{thread} thread={thread} from={old} to={model} request_class=turn route_target=main"
+                    "[model-transition] client_req={client_req} trace=thread-id:{thread} thread={thread} from={old} to={model} request_class=turn route_target=main"
                 )
             })
         } else {
@@ -769,7 +773,7 @@ mod tests {
             .contains("request_class=aux_or_unidentified"));
         assert!(entries[0].message.contains("route_target=-"));
         assert!(entries[0].message.contains("trace=uncorrelated"));
-        assert!(entries[0].message.contains("req=unavailable"));
+        assert!(entries[0].message.contains("client_req=unavailable"));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -792,9 +796,7 @@ mod tests {
         assert!(entries[0].message.contains("request_class=turn"));
         assert!(entries[0].message.contains("route_target=main"));
         assert!(entries[0].message.contains("trace=thread-id:0d0f19d1"));
-        assert!(entries[1]
-            .message
-            .contains("req=client-request:bbbb2222"));
+        assert!(entries[1].message.contains("client_req=bbbb2222"));
         assert!(entries[2].message.starts_with("[model-transition]"));
         assert!(entries[2].message.contains("from=gpt-5.6-terra"));
         assert!(entries[2].message.contains("to=gpt-5.6-luna"));

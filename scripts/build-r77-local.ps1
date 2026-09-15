@@ -57,6 +57,9 @@ $NewAssistantRoots = @'
     const element = node instanceof Element ? node : node && node.parentElement;
     if (!(element instanceof Element) || insideComposer(element) || insideOwnUi(element)) return null;
 
+    const footer = document.querySelector('[data-thread-scroll-footer="true"]');
+    const threadHost = footer && footer.parentElement;
+
     const authored = element.closest('[data-message-author-role="assistant"]');
     if (authored) return authored;
 
@@ -67,15 +70,15 @@ $NewAssistantRoots = @'
       return turn || sent.parentElement || sent;
     }
 
-    const semantic = element.closest('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"],[data-message-id]');
+    const semantic = element.closest('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
     if (semantic) {
       const turn = semantic.closest('[data-turn-key],[data-chatgpt-conversation-turn="true"],[data-content-search-assistant-turn-key]');
       if (turn) return turn;
-      if (!semantic.closest('[data-thread-scroll-footer="true"]')) return semantic.parentElement || semantic;
+      if (threadHost && threadHost.contains(semantic) && !(footer && footer.contains(semantic))) {
+        return semantic.parentElement || semantic;
+      }
     }
 
-    const footer = document.querySelector('[data-thread-scroll-footer="true"]');
-    const threadHost = footer && footer.parentElement;
     if (threadHost && threadHost.contains(element)) {
       let current = element;
       while (current && current.parentElement && current.parentElement !== threadHost) current = current.parentElement;

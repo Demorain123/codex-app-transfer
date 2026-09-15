@@ -38,7 +38,7 @@ const tabs: Tab[] = [
       </RouterLink>
     </nav>
     <!-- Build identity is intentionally explicit so local test builds cannot be mistaken for an older installed binary. -->
-    <div class="compat-build-badge">Sub2API Grok Compat r72 · v2.4.5+72</div>
+    <div class="compat-build-badge">Sub2API Grok Compat r73 · v2.4.5+73</div>
   </header>
 </template>
 

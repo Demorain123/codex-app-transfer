@@ -63,10 +63,15 @@ foreach ($Forbidden in @('fetch(', 'providersApi.', 'invoke(', 'axios.', '$http.
 }
 
 # Exercise the historical generated-text layers before starting any expensive
-# carry-forward/package work. Each sub-preflight must be no-write.
-& pwsh -NoProfile -ExecutionPolicy Bypass -File $R75Builder -PreflightOnly
+# carry-forward/package work. r75 is checked twice in one invocation: its native
+# legacy observer plus the exact r86 strict/live-only observer that replaces it
+# in the real r78 generation layer.
+& pwsh -NoProfile -ExecutionPolicy Bypass `
+    -File $R75Builder `
+    -PreflightOnly `
+    -StrictObserverSourcePath $R86Observer
 if ($LASTEXITCODE -ne 0) { throw "r87 r75 transform preflight failed with exit code $LASTEXITCODE" }
-Write-Host 'R87_R75_TEXT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R87_R75_LEGACY_AND_STRICT_PROFILE_PREFLIGHT_PASS' -ForegroundColor Green
 
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $R76OutputBuilder -PreflightOnly
 if ($LASTEXITCODE -ne 0) { throw "r87 r76 output preflight failed with exit code $LASTEXITCODE" }
@@ -172,7 +177,8 @@ Write-Host '  - no /health, /models, /responses probe is issued by the guard'
 Write-Host '  - generic 502/503/timeout turn replay is not added'
 Write-Host '  - transport fallback remains explicitly Sub2API-owned / not probed'
 Write-Host '  - r86 timestamp correctness pipeline is inherited and retargeted, not rewritten'
-Write-Host '  - r75/r76 generated text transforms are exercised in no-write preflight before carry-forward'
+Write-Host '  - r75 verification accepts only a complete legacy observer or complete r86+ strict/live-only observer'
+Write-Host '  - r75 deep preflight now simulates the exact strict observer source used by the real nested build'
 Write-Host '  - r77 legacy timestamp-root recovery safely yields to the r86+ strict observer during full builds'
 Write-Host '  - r76 entrypoint UI migration is preflighted across native/LF/CRLF before carry-forward starts'
 Write-Host '  - generator preflights must leave tracked worktree clean'

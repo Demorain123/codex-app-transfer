@@ -1,6 +1,7 @@
 param(
     [switch]$RunFocusedTests,
-    [switch]$PreflightOnly
+    [switch]$PreflightOnly,
+    [string]$StrictObserverSourcePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,39 @@ function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$La
     $NormalizedNew = Normalize-Eol $New
     if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r75 expected text missing: $Label" }
     return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
+}
+
+function Assert-GeneratedTimestampProfile([string]$Text) {
+    foreach ($Marker in @(
+        "const VERSION = 'r75.0';",
+        'function topLevelSegments(root) {',
+        'R75_OUTPUT_UI_LOCAL_PASS'
+    )) {
+        if (-not $Text.Contains($Marker)) { throw "r75 generated builder verification failed: $Marker" }
+    }
+
+    $HasLegacyProfile =
+        $Text.Contains('first observed output change locally') -and
+        $Text.Contains('sweepOutputSegments(true)')
+
+    $HasStrictProfile =
+        $Text.Contains('first observed live output mutation locally') -and
+        $Text.Contains('state.timestampBaselineElements = new WeakSet();') -and
+        $Text.Contains('if (!hasRecentLiveUsage()) return;') -and
+        $Text.Contains('sweepOutputSegments(false)')
+
+    if ($HasLegacyProfile -and $HasStrictProfile) {
+        throw 'r75 generated builder contains mixed legacy/strict timestamp observer profiles'
+    }
+    if (-not $HasLegacyProfile -and -not $HasStrictProfile) {
+        throw 'r75 generated builder contains neither a complete legacy nor strict timestamp observer profile'
+    }
+
+    if ($HasStrictProfile) {
+        Write-Host 'R75_STRICT_OBSERVER_PROFILE_PASS' -ForegroundColor Green
+    } else {
+        Write-Host 'R75_LEGACY_OBSERVER_PROFILE_PASS' -ForegroundColor Green
+    }
 }
 
 # r75 is deliberately a tiny local finalizer layered on r74. It keeps the
@@ -340,14 +374,25 @@ try {
 '@
     $Patched = Replace-Required $Patched $OldPoll $NewPoll 'poll fallback timestamp sweep'
 
-    foreach ($Marker in @(
-        "const VERSION = 'r75.0';",
-        'function topLevelSegments(root) {',
-        'first observed output change locally',
-        'sweepOutputSegments(true)',
-        'R75_OUTPUT_UI_LOCAL_PASS'
-    )) {
-        if (-not $Patched.Contains($Marker)) { throw "r75 generated builder verification failed: $Marker" }
+    Assert-GeneratedTimestampProfile $Patched
+
+    if ($PreflightOnly -and $StrictObserverSourcePath) {
+        if (-not (Test-Path -LiteralPath $StrictObserverSourcePath)) {
+            throw "r75 strict observer preflight source missing: $StrictObserverSourcePath"
+        }
+        $StrictObserver = [System.IO.File]::ReadAllText($StrictObserverSourcePath)
+        $StrictProbe = Replace-BlockRequired `
+            $Patched `
+            '  function assistantRootsNow() {' `
+            '  function numberAt(obj, paths) {' `
+            $StrictObserver `
+            'strict observer profile simulation'
+        $StrictProbe = $StrictProbe.Replace(
+            'try { sweepOutputSegments(true); } catch {}',
+            'try { sweepOutputSegments(false); } catch {}'
+        )
+        Assert-GeneratedTimestampProfile $StrictProbe
+        Write-Host 'R75_STRICT_OBSERVER_PROFILE_PREFLIGHT_PASS' -ForegroundColor Green
     }
 
     if ($PreflightOnly) {

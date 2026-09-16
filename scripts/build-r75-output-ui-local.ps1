@@ -15,6 +15,10 @@ if (-not (Test-Path $R74Builder)) {
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $Original = [System.IO.File]::ReadAllText($R74Builder)
 
+function Normalize-Eol([string]$Text) {
+    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
 function Replace-BlockRequired(
     [string]$Text,
     [string]$StartMarker,
@@ -22,16 +26,21 @@ function Replace-BlockRequired(
     [string]$Replacement,
     [string]$Label
 ) {
-    $Start = $Text.IndexOf($StartMarker)
+    $NormalizedText = Normalize-Eol $Text
+    $NormalizedReplacement = Normalize-Eol $Replacement
+    $Start = $NormalizedText.IndexOf($StartMarker)
     if ($Start -lt 0) { throw "r75 patch start marker missing: $Label" }
-    $End = $Text.IndexOf($EndMarker, $Start + $StartMarker.Length)
+    $End = $NormalizedText.IndexOf($EndMarker, $Start + $StartMarker.Length)
     if ($End -le $Start) { throw "r75 patch end marker missing: $Label" }
-    return $Text.Substring(0, $Start) + $Replacement + "`r`n`r`n" + $Text.Substring($End)
+    return $NormalizedText.Substring(0, $Start) + $NormalizedReplacement + "`n`n" + $NormalizedText.Substring($End)
 }
 
 function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$Label) {
-    if (-not $Text.Contains($Old)) { throw "r75 expected text missing: $Label" }
-    return $Text.Replace($Old, $New)
+    $NormalizedText = Normalize-Eol $Text
+    $NormalizedOld = Normalize-Eol $Old
+    $NormalizedNew = Normalize-Eol $New
+    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r75 expected text missing: $Label" }
+    return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
 }
 
 # r75 is deliberately a tiny local finalizer layered on r74. It keeps the

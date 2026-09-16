@@ -50,6 +50,16 @@ function Assert-NotContains([string]$Text,[string]$Needle,[string]$Label) {
     if ($Text.Contains($Needle)) { throw "r83 preflight forbidden text present: $Label" }
 }
 
+function Assert-PowerShellParses([string]$Text,[string]$Label) {
+    $Tokens = $null
+    $Errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput($Text,[ref]$Tokens,[ref]$Errors)
+    if ($Errors -and $Errors.Count -gt 0) {
+        $Summary = @($Errors | Select-Object -First 8 | ForEach-Object { $_.Message }) -join ' | '
+        throw "r83 preflight PowerShell parse failed: $Label :: $Summary"
+    }
+}
+
 # ---------------------------------------------------------------------------
 # PRE-BUILD STATIC PIPELINE PREFLIGHT
 # ---------------------------------------------------------------------------
@@ -107,8 +117,7 @@ $R83BuilderText = Replace-BlockRequired `
     'replace r78 selective r77 retarget block'
 $R83BuilderText = $R83BuilderText.Replace('r78','r83').Replace('R78','R83').Replace('+78','+83')
 
-# Simulate the inner r77 retarget independently during preflight. This catches
-# path/version mismatches before any source materialization happens.
+# Simulate the entire r77 source retarget, including generated path literals.
 $SimulatedR83Core = $OriginalR77.Replace('r77','r83').Replace('R77','R83').Replace('+77','+83')
 foreach ($Check in @(
     @("`$R83OutputText = `$OriginalR76Output.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",'r83 output identity source'),
@@ -122,6 +131,13 @@ foreach ($Check in @(
 )) {
     Assert-Contains $SimulatedR83Core $Check[0] $Check[1]
 }
+
+# Simulate the generated r83 entrypoint's collision-avoidance path rewrite too.
+$SimulatedR83Entry = $OriginalR76Local.Replace('r76','r83').Replace('R76','R83').Replace('+76','+83')
+$SimulatedR83Entry = Replace-Required $SimulatedR83Entry `
+    "`$Source = Join-Path `$PSScriptRoot 'build-r83-output-ui-local.ps1'" `
+    "`$Source = Join-Path `$PSScriptRoot '.build-r83-output.generated.ps1'" `
+    'r83 generated entry output source path'
 
 # Validate every exact r76/r75 needle consumed by the retargeted core.
 foreach ($Check in @(
@@ -153,6 +169,14 @@ foreach ($Check in @(
     Assert-Contains $R83BuilderText $Check[0] $Check[1]
 }
 
+# Parse every generated PowerShell layer with the real PowerShell parser before
+# materialization. This catches quoting/here-string/version-retarget syntax bugs
+# on the user's actual pwsh runtime without touching tracked source.
+Assert-PowerShellParses $PatchedR76Output 'patched r76 collector builder'
+Assert-PowerShellParses $SimulatedR83Core 'retargeted r83 core builder'
+Assert-PowerShellParses $SimulatedR83Entry 'generated r83 entry builder'
+Assert-PowerShellParses $R83BuilderText 'generated r83 timestamp wrapper'
+
 # Guard against the two already-observed nested-wrapper failure modes.
 Assert-NotContains $R83BuilderText 'do not reject valid Codex renderers solely because URL is not app://' 'old r80 source-layer label'
 Assert-NotContains $R83BuilderText 'r82 generated output and entry identity' 'old r82 nested identity label'
@@ -166,7 +190,7 @@ Write-Host 'R83_STATIC_PIPELINE_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - exact telemetry patch is applied at the real r76 collector source layer'
 Write-Host '  - r78 timestamp-v4 is retained without the incomplete historical r77->r78 path retarget'
 Write-Host '  - the complete nested r77 builder was simulated as r83, including generated file paths'
-Write-Host '  - every known exact-string dependency exists before carry-forward starts'
+Write-Host '  - generated r76/r83 PowerShell layers parse successfully before carry-forward starts'
 Write-Host '  - historical recursive r24-r41 unified drivers remain excluded'
 
 if ($PreflightOnly) {

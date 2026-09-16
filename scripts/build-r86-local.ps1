@@ -9,19 +9,21 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R83Builder = Join-Path $PSScriptRoot 'build-r83-local.ps1'
 $R85Builder = Join-Path $PSScriptRoot 'build-r85-local.ps1'
+$R77Builder = Join-Path $PSScriptRoot 'build-r77-local.ps1'
 $R75Builder = Join-Path $PSScriptRoot 'build-r75-output-ui-local.ps1'
 $StampSource = Join-Path $PSScriptRoot 'r86-timestamp-stamp.js'
 $ObserverSource = Join-Path $PSScriptRoot 'r86-timestamp-observer.js'
 $ObserverPatchInclude = Join-Path $PSScriptRoot 'r86-r78-observer-patch.inc.ps1'
 $TempR86Builder = Join-Path $PSScriptRoot '.build-r86-from-r83.generated.ps1'
 
-foreach ($Path in @($R83Builder,$R85Builder,$R75Builder,$StampSource,$ObserverSource,$ObserverPatchInclude)) {
+foreach ($Path in @($R83Builder,$R85Builder,$R77Builder,$R75Builder,$StampSource,$ObserverSource,$ObserverPatchInclude)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r86 required file missing: $Path" }
 }
 
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $OriginalR83 = [System.IO.File]::ReadAllText($R83Builder)
 $OriginalR85 = [System.IO.File]::ReadAllText($R85Builder)
+$OriginalR77 = [System.IO.File]::ReadAllText($R77Builder)
 $OriginalR75 = [System.IO.File]::ReadAllText($R75Builder)
 $StampBody = [System.IO.File]::ReadAllText($StampSource)
 $ObserverBody = [System.IO.File]::ReadAllText($ObserverSource)
@@ -60,6 +62,35 @@ function Assert-PowerShellParses([string]$Text,[string]$Label) {
         throw "r86 PowerShell parse failed: $Label :: $Summary"
     }
 }
+
+# ---------------------------------------------------------------------------
+# 0) Harden r77's multiline source replacement against Windows/Git EOL drift.
+# The r86 build installs a temporary LF-normalizing r77 builder only after the
+# clean-worktree gate. This prevents the observed false-negative where the
+# assistantRootsNow body was present but Replace-Required could not match it.
+# ---------------------------------------------------------------------------
+$OldR77ReplaceRequired = @'
+function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$Label) {
+    if (-not $Text.Contains($Old)) { throw "r77 expected text missing: $Label" }
+    return $Text.Replace($Old, $New)
+}
+'@
+$NewR77ReplaceRequired = @'
+function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$Label) {
+    # r86 compatibility: generated builders can be written with LF even when
+    # PowerShell here-strings use CRLF. Normalize all operands before matching.
+    $NormalizedText = $Text.Replace("`r`n", "`n")
+    $NormalizedOld = $Old.Replace("`r`n", "`n")
+    $NormalizedNew = $New.Replace("`r`n", "`n")
+    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r77 expected text missing: $Label" }
+    return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
+}
+'@
+$PatchedR77 = Replace-Required $OriginalR77 $OldR77ReplaceRequired $NewR77ReplaceRequired 'make r77 multiline replacements EOL-safe'
+
+$R77OldRootsMatch = [regex]::Match($PatchedR77, '(?s)\$OldAssistantRoots\s*=\s*@''\r?\n(?<body>.*?)\r?\n''@')
+if (-not $R77OldRootsMatch.Success) { throw 'r86 preflight could not extract r77 old assistant roots' }
+$R77OldRoots = $R77OldRootsMatch.Groups['body'].Value.Replace("`r`n","`n")
 
 # ---------------------------------------------------------------------------
 # 1) Reuse r85's reviewed prose grouping, then tighten ownership so user/native
@@ -135,6 +166,13 @@ $PatchedR75 = Replace-BlockRequired `
     $NewSegmentation `
     'install r86 segmentation into r75 source'
 
+# Reproduce the exact r77 assistant-root precondition against the exact r86
+# temporary r75 source before any carry-forward/build work begins.
+$NormalizedPatchedR75ForR77 = $PatchedR75.Replace("`r`n","`n")
+if (-not $NormalizedPatchedR75ForR77.Contains($R77OldRoots)) {
+    throw 'r86 r77 compatibility preflight failed: timestamp fallback assistant roots are absent from patched r75 source'
+}
+
 # ---------------------------------------------------------------------------
 # 2) Start from r83's already-preflighted package/carry-forward chain. The r78
 # generation layer owns the action-row stamp rewrite, so patch that generated
@@ -178,12 +216,16 @@ foreach ($Marker in @(
 $R78RetargetNeedle = '$R86BuilderText = $R86BuilderText.Replace(''r78'',''r86'').Replace(''R78'',''R86'').Replace(''+78'',''+86'')'
 $R86Core = Insert-AfterRequired $R86Core $R78RetargetNeedle $GeneratedR78Patch 'patch generated r78 timestamp layer'
 
-# Install the r86 segmentation source only after r83/r86's clean-worktree gate.
+# Install the r86 segmentation source and the EOL-safe r77 compatibility source
+# only after r83/r86's clean-worktree gate.
 $PatchedR75Bytes = $Utf8NoBom.GetBytes($PatchedR75)
 $PatchedR75B64 = [Convert]::ToBase64String($PatchedR75Bytes)
+$PatchedR77Bytes = $Utf8NoBom.GetBytes($PatchedR77)
+$PatchedR77B64 = [Convert]::ToBase64String($PatchedR77Bytes)
 $Sha = [System.Security.Cryptography.SHA256]::Create()
 try {
     $PatchedR75Sha256 = ([BitConverter]::ToString($Sha.ComputeHash($PatchedR75Bytes))).Replace('-','').ToLowerInvariant()
+    $PatchedR77Sha256 = ([BitConverter]::ToString($Sha.ComputeHash($PatchedR77Bytes))).Replace('-','').ToLowerInvariant()
 } finally {
     $Sha.Dispose()
 }
@@ -201,15 +243,27 @@ try {
     if ($R86TimestampSourceHash -ne '__R86_TIMESTAMP_SHA256__') {
         throw "r86 temporary timestamp source hash mismatch: $R86TimestampSourceHash"
     }
+
+    $R86R77BuilderPath = Join-Path $PSScriptRoot 'build-r77-local.ps1'
+    $R86R77SourceBase64 = '__R86_R77_BASE64__'
+    $R86R77SourceText = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($R86R77SourceBase64))
+    [System.IO.File]::WriteAllText($R86R77BuilderPath,$R86R77SourceText,[System.Text.UTF8Encoding]::new($false))
+    $R86R77SourceHash = (Get-FileHash -LiteralPath $R86R77BuilderPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($R86R77SourceHash -ne '__R86_R77_SHA256__') {
+        throw "r86 temporary r77 compatibility source hash mismatch: $R86R77SourceHash"
+    }
+
     Write-Host 'R86_TEMP_TIMESTAMP_SOURCE_INSTALLED' -ForegroundColor Green
+    Write-Host 'R86_TEMP_R77_COMPAT_SOURCE_INSTALLED' -ForegroundColor Green
     Write-Host '[r86 1/4] Selectively materializing r43-r65 onto the current r70+ tree...' -ForegroundColor Cyan
 '@
-$InstallBlock = $InstallBlock.Replace('__R86_TIMESTAMP_BASE64__',$PatchedR75B64).Replace('__R86_TIMESTAMP_SHA256__',$PatchedR75Sha256)
-$R86Core = Replace-Required $R86Core $InstallNeedle $InstallBlock 'install r86 segmentation after clean-worktree gate'
+$InstallBlock = $InstallBlock.Replace('__R86_TIMESTAMP_BASE64__',$PatchedR75B64).Replace('__R86_TIMESTAMP_SHA256__',$PatchedR75Sha256).Replace('__R86_R77_BASE64__',$PatchedR77B64).Replace('__R86_R77_SHA256__',$PatchedR77Sha256)
+$R86Core = Replace-Required $R86Core $InstallNeedle $InstallBlock 'install r86 segmentation/r77 compatibility after clean-worktree gate'
 
 foreach ($Marker in @(
     'R86_TIMESTAMP_R78_GENERATION_PATCH',
     'R86_TEMP_TIMESTAMP_SOURCE_INSTALLED',
+    'R86_TEMP_R77_COMPAT_SOURCE_INSTALLED',
     'R86_STATIC_PIPELINE_PREFLIGHT_PASS',
     'R86_EXACT_TOKEN_TELEMETRY_PASS',
     'R86_R43_R65_CARRY_FORWARD_PACKAGE_PASS',
@@ -235,8 +289,12 @@ foreach ($Marker in @(
 if (-not $ObserverPatchText.Contains('r86 live-only timestamp observer')) {
     throw 'r86 observer patch include verification failed'
 }
+if (-not $PatchedR77.Contains('Normalize all operands before matching')) {
+    throw 'r86 r77 compatibility source verification failed'
+}
 
 Assert-PowerShellParses $PatchedR75 'r86 patched r75 timestamp source'
+Assert-PowerShellParses $PatchedR77 'r86 EOL-safe r77 builder'
 Assert-PowerShellParses $R86Core 'r86 generated r83 package wrapper'
 
 Write-Host 'R86_TIMESTAMP_CORRECTNESS_PREFLIGHT_PASS' -ForegroundColor Green
@@ -247,7 +305,9 @@ Write-Host '  - generic assistant wrappers are identity only, not automatically 
 Write-Host '  - historical baseline/remount DOM never receives Date.now()'
 Write-Host '  - periodic/scheduled sweeps are exact-only'
 Write-Host '  - stale r74-r85 structural timestamp cache is cleared at runtime'
+Write-Host '  - r77 multiline source matching is EOL-normalized and preflighted against the exact temporary r75 source'
 Write-Host '  - telemetry/provider/r43-r65 carry-forward remain inherited from r83'
+Write-Host 'R86_R77_COMPAT_PREFLIGHT_PASS' -ForegroundColor Green
 
 try {
     Write-Utf8NoBom $TempR86Builder $R86Core

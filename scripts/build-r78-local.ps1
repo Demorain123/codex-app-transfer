@@ -43,19 +43,10 @@ function Replace-BlockRequired(
 # ---------------------------------------------------------------------------
 # r78 timestamp v4
 # ---------------------------------------------------------------------------
-# The previous renderer could discover many current Codex output surfaces, but
-# it still placed every badge as a child of the guessed segment and let a
-# turn-level native sent-time leak into unrelated progress/tool segments.
-#
-# r78 follows the proven Codex-Monitor strategy for final assistant replies:
-# use the native [data-assistant-message-sent-time] row as the stable reply
-# action-row anchor and place our timestamp immediately after it. Progress,
-# tool, command and agent surfaces keep their own first-observed timestamps and
-# never inherit the final reply's native sent time. This produces one visible
-# timestamp per output surface without disturbing Codex's fixed-height action
-# row.
-$NewStamp = @'
-$NewStamp = @'
+# Final replies use Codex's native sent-time/action row as a stable anchor.
+# Progress/tool/agent surfaces keep independent first-observed timestamps and
+# never inherit a final reply's native sent-time.
+$NewStampBody = @'
   function nativeTimeForSegment(segment, root) {
     if (!(segment instanceof Element)) return null;
     const direct = nativeTime(segment);
@@ -112,9 +103,7 @@ $NewStamp = @'
     const actionRow = actionRowForSegment(segment, root);
     const host = actionRow && actionRow.parentElement;
     let existing = timestampBadgeForKey(key);
-    if (!existing) {
-      existing = segment.querySelector(':scope > [' + BADGE_ATTR + ']');
-    }
+    if (!existing) existing = segment.querySelector(':scope > [' + BADGE_ATTR + ']');
     if (existing) return;
 
     const cache = readSeenCache();
@@ -136,13 +125,12 @@ $NewStamp = @'
     badge.style.cssText = 'position:relative;z-index:2;display:flex;width:100%;box-sizing:border-box;align-items:center;justify-content:flex-end;min-height:11px;margin:2px 0 1px 0;padding:0 3px;border:0;background:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;color:color-mix(in srgb,CanvasText 58%,transparent);font:9px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.01em;white-space:nowrap;pointer-events:auto;user-select:text;opacity:.82;';
 
     if (actionRow && host) {
-      // Keep Codex's native fixed-height reply action row untouched. This is
-      // the same safe layout strategy used by Codex-Monitor for reply chips.
+      // Keep Codex's fixed-height action row untouched. Codex-Monitor uses the
+      // same sibling-after-action-row strategy for stable per-reply chips.
       actionRow.insertAdjacentElement('afterend', badge);
     } else {
-      // Progress/tool/agent surfaces own their timestamp. Appending rather than
-      // prepending keeps the marker close to the end of the output that caused
-      // the observation and survives clipped/virtualized top edges.
+      // Progress/tool/agent surfaces own their timestamp. Append the marker so
+      // it remains visible even when the top edge is clipped/virtualized.
       segment.appendChild(badge);
     }
 
@@ -151,7 +139,7 @@ $NewStamp = @'
     rememberSegmentTime(key, when);
   }
 '@
-'@
+$NewStamp = '$NewStamp = @''' + "`r`n" + $NewStampBody + "`r`n'@"
 
 $PatchedR75 = Replace-BlockRequired `
     $OriginalR75 `
@@ -169,10 +157,10 @@ $PatchedR75 = Replace-Required `
 foreach ($Marker in @(
     'function nativeTimeForSegment(segment, root) {',
     'function actionRowForSegment(segment, root) {',
-    "data-cas-timestamp-confidence",
+    'data-cas-timestamp-confidence',
     "actionRow.insertAdjacentElement('afterend', badge);",
-    "segment.appendChild(badge);",
-    "const native = nativeTimeForSegment(segment, root);"
+    'segment.appendChild(badge);',
+    'const native = nativeTimeForSegment(segment, root);'
 )) {
     if (-not $PatchedR75.Contains($Marker)) { throw "r78 timestamp source verification failed: $Marker" }
 }

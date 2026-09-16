@@ -85,27 +85,23 @@ if not MASKED_HISTORY_FILE.is_file():
 masked_history_before = sha256(MASKED_HISTORY_FILE)
 print(f"r82 preserve=r70_masked_history sha256_before={masked_history_before}")
 
-# IMPORTANT: do not call any apply_rXX_unified.py here. Those historical
-# composition drivers intentionally recurse into r24-r42 and contain anchors
-# from old UI/source trees. r82 carries forward only the reviewed r43-r65 leaf
-# transforms that are still required by the current r70+ baseline.
+# IMPORTANT: do not call historical recursive apply_rXX_unified.py drivers.
+# They recurse into r24-r42 and contain stale source/UI anchors. r82 applies only
+# the reviewed leaf transforms required for the r43-r65 carry-forward.
 
-# r42 is a prerequisite invariant used by r43/r45. Apply only its narrow leaf
-# if the modern tree does not already contain it.
 if not has("crates/adapters/src/mapper/grok_build.rs", "CAS-R42-GROK-EFFECTIVE-TOOL-COLLISION-GUARD"):
     run_leaf("r42-prereq", "scripts/apply_r42_grok_tool_collision_guard.py")
 else:
     print("r82 stage=r42-prereq status=already_materialized")
 
-# r43: health/MCP rewrite hardening. This is the post-r42 leaf only.
 if not has("src-tauri/src/admin/handlers/chain_health.rs", "CAS-R43-REWRITE-HEALTH-MCP"):
     run_leaf("r43", "scripts/apply_r43_rewrite_health.py")
 else:
     print("r82 stage=r43 status=already_materialized")
 
-# r44's Responses terminal-semantics work was subsequently represented by the
-# r45 semantic-terminal invariant. There is no historical r44 leaf replay here.
-# r45 is the reviewed modern carry-forward boundary for that behavior.
+# r44 had no durable standalone materializer on this branch. Its terminal-SSE
+# behavior is carried by the r45 model-switch leaf and is verified below via
+# CAS-R45-RESPONSES-SEMANTIC-TERMINAL.
 for rel in (
     "scripts/apply_r45_model_switch_continuity.py",
     "scripts/apply_r45_compaction_detector_safety.py",
@@ -139,11 +135,7 @@ for rel in (
 ):
     run_leaf("r47", rel)
 
-for rel in (
-    "scripts/apply_r48_provider_temp_control.py",
-    "scripts/apply_r48_provider_temp_control_hardening.py",
-):
-    run_leaf("r48", rel)
+run_leaf("r48", "scripts/apply_r48_provider_temp_control.py")
 
 for rel in (
     "scripts/apply_r49_unified_codex_temp_launch.py",
@@ -154,9 +146,8 @@ for rel in (
 run_leaf("r50", "scripts/apply_r50_same_session_cross_model_replay.py")
 
 for rel in (
-    "scripts/apply_r51_cross_model_compact_handoff.py",
-    "scripts/apply_r51_compact_handoff_quality_hotfix.py",
     "scripts/apply_r51_compaction_role_truth_hotfix.py",
+    "scripts/apply_r51_compact_handoff_quality_hotfix.py",
 ):
     run_leaf("r51", rel)
 
@@ -166,12 +157,7 @@ for rel in (
 ):
     run_leaf("r52", rel)
 
-for rel in (
-    "scripts/apply_r53_sub2api_oauth_compact_proxy.py",
-    "scripts/apply_r53_sub2api_compact_max_output_hotfix.py",
-):
-    run_leaf("r53", rel)
-
+run_leaf("r53", "scripts/apply_r53_sub2api_compact_max_output_hotfix.py")
 run_leaf("r54", "scripts/apply_r54_compact_responses_sse_reassembly.py")
 run_leaf("r55", "scripts/apply_r55_detached_mcp_helper.py")
 run_leaf("r56", "scripts/apply_r56_compact_sse_summary_fallback.py")
@@ -197,8 +183,6 @@ for rel in (
 run_leaf("r64", "scripts/apply_r64_post_compact_continuation_guard.py")
 run_leaf("r65", "scripts/apply_r65_startup_generation_gate.py")
 
-# Evidence matrix: a version is not counted merely because an old script or Git
-# ancestor exists. The current build tree must contain the runtime/UI markers.
 require("crates/adapters/src/mapper/grok_build.rs", "CAS-R42-GROK-EFFECTIVE-TOOL-COLLISION-GUARD")
 require(
     "src-tauri/src/admin/handlers/chain_health.rs",
@@ -226,10 +210,7 @@ require(
     "/api/thread-recovery/preview",
     "/api/thread-recovery/action",
 )
-require(
-    "frontend/src/pages/ProxyPage.vue",
-    "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI",
-)
+require("frontend/src/pages/ProxyPage.vue", "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI")
 require(
     "frontend/src/api/threadRecovery.ts",
     "/api/thread-recovery/preview",
@@ -254,14 +235,8 @@ require(
     "CAS-R56-COMPACT-SSE-SUMMARY-FALLBACK",
     "CAS-R62-COMPACT-SUMMARY-SELF-REPAIR",
 )
-require(
-    "crates/adapters/src/mapper/sub2api_grok_compat.rs",
-    "CAS-R60-SUB2API-POST-COMPACTION-REPLAY",
-)
-require(
-    "crates/adapters/src/mapper/responses.rs",
-    "CAS-R60-SUB2API-POST-COMPACTION-REPLAY-HOOK",
-)
+require("crates/adapters/src/mapper/sub2api_grok_compat.rs", "CAS-R60-SUB2API-POST-COMPACTION-REPLAY")
+require("crates/adapters/src/mapper/responses.rs", "CAS-R60-SUB2API-POST-COMPACTION-REPLAY-HOOK")
 
 scan_forbidden()
 print("R82_R66_R69_EXPERIMENTS_ABSENT_PASS")
@@ -274,7 +249,7 @@ if masked_history_after != masked_history_before:
 print(f"r82 preserve=r70_masked_history sha256_after={masked_history_after}")
 print("R82_R70_MASKED_HISTORY_PRESERVED_PASS")
 print("R82_R43_R65_SELECTIVE_MATERIALIZATION_PASS")
-print("- no apply_rXX_unified.py driver was executed")
+print("- no historical recursive apply_rXX_unified.py driver was executed")
 print("- r24-r41 were not replayed; r42 leaf was used only as a required prerequisite when absent")
 print("- r44 terminal semantics is represented by the verified r45 semantic-terminal invariant")
 print("- r66-r69 Hook A/B experiment markers are absent from runtime sources")

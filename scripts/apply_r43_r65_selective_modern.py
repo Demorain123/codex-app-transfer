@@ -20,7 +20,10 @@ FORBIDDEN_EXPERIMENT_MARKERS = (
     "CAS-R69-SESSIONSTART-POSTCOMPACT-HOOKS-AB",
 )
 
-MASKED_HISTORY_FILE = ROOT / "crates" / "proxy" / "src" / "tool_call_repair.rs"
+# r70 masked-history repair lives in the adapters Responses module, not proxy/src.
+# Hash this exact modern runtime file before/after carry-forward so an old leaf
+# cannot silently regress the r70 one-shot portable-history repair.
+MASKED_HISTORY_FILE = ROOT / "crates" / "adapters" / "src" / "responses" / "tool_call_repair.rs"
 
 
 def sha256(path: Path) -> str:
@@ -83,7 +86,7 @@ def scan_forbidden() -> None:
 if not MASKED_HISTORY_FILE.is_file():
     raise SystemExit(f"r82 r70 preservation file missing: {MASKED_HISTORY_FILE.relative_to(ROOT).as_posix()}")
 masked_history_before = sha256(MASKED_HISTORY_FILE)
-print(f"r82 preserve=r70_masked_history sha256_before={masked_history_before}")
+print(f"r82 preserve=r70_masked_history file={MASKED_HISTORY_FILE.relative_to(ROOT).as_posix()} sha256_before={masked_history_before}")
 
 # IMPORTANT: do not call historical recursive apply_rXX_unified.py drivers.
 # They recurse into r24-r42 and contain stale source/UI anchors. r82 applies only
@@ -244,9 +247,9 @@ print("R82_R66_R69_EXPERIMENTS_ABSENT_PASS")
 masked_history_after = sha256(MASKED_HISTORY_FILE)
 if masked_history_after != masked_history_before:
     raise SystemExit(
-        "r82 r70 masked-history regression: crates/proxy/src/tool_call_repair.rs changed during r43-r65 carry-forward"
+        "r82 r70 masked-history regression: crates/adapters/src/responses/tool_call_repair.rs changed during r43-r65 carry-forward"
     )
-print(f"r82 preserve=r70_masked_history sha256_after={masked_history_after}")
+print(f"r82 preserve=r70_masked_history file={MASKED_HISTORY_FILE.relative_to(ROOT).as_posix()} sha256_after={masked_history_after}")
 print("R82_R70_MASKED_HISTORY_PRESERVED_PASS")
 print("R82_R43_R65_SELECTIVE_MATERIALIZATION_PASS")
 print("- no historical recursive apply_rXX_unified.py driver was executed")

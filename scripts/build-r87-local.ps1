@@ -9,6 +9,7 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R86Builder = Join-Path $PSScriptRoot 'build-r86-local.ps1'
 $R77Builder = Join-Path $PSScriptRoot 'build-r77-local.ps1'
+$R76EntryBuilder = Join-Path $PSScriptRoot 'build-r76-local.ps1'
 $GuardSource = Join-Path $RepoRoot 'frontend/src/components/provider/Sub2ApiGrokCompatControls.vue'
 $R86Stamp = Join-Path $PSScriptRoot 'r86-timestamp-stamp.js'
 $R86Observer = Join-Path $PSScriptRoot 'r86-timestamp-observer.js'
@@ -19,7 +20,7 @@ $TempStamp = Join-Path $PSScriptRoot 'r87-timestamp-stamp.js'
 $TempObserver = Join-Path $PSScriptRoot 'r87-timestamp-observer.js'
 $TempObserverPatch = Join-Path $PSScriptRoot 'r87-r78-observer-patch.inc.ps1'
 
-foreach ($Path in @($R86Builder,$R77Builder,$GuardSource,$R86Stamp,$R86Observer,$R86ObserverPatch)) {
+foreach ($Path in @($R86Builder,$R77Builder,$R76EntryBuilder,$GuardSource,$R86Stamp,$R86Observer,$R86ObserverPatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r87 required file missing: $Path" }
 }
 
@@ -61,6 +62,13 @@ foreach ($Marker in @(
 foreach ($Forbidden in @('fetch(', 'providersApi.', 'invoke(', 'axios.', '$http.', 'retryRequest(')) {
     if ($GuardText.Contains($Forbidden)) { throw "r87 guard contains forbidden active-call shape: $Forbidden" }
 }
+
+# Gate the expensive nested carry-forward/package build on the r76 entrypoint's
+# own no-write preflight. This explicitly exercises the migration against native,
+# LF and CRLF source variants and proves a second pass is idempotent.
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $R76EntryBuilder -PreflightOnly
+if ($LASTEXITCODE -ne 0) { throw "r87 r76 entrypoint preflight failed with exit code $LASTEXITCODE" }
+Write-Host 'R87_R76_ENTRY_EOL_PREFLIGHT_PASS' -ForegroundColor Green
 
 $OriginalR86 = [System.IO.File]::ReadAllText($R86Builder)
 $OriginalR77 = [System.IO.File]::ReadAllText($R77Builder)
@@ -167,6 +175,7 @@ Write-Host '  - generic 502/503/timeout turn replay is not added'
 Write-Host '  - transport fallback remains explicitly Sub2API-owned / not probed'
 Write-Host '  - r86 timestamp correctness pipeline is inherited and retargeted, not rewritten'
 Write-Host '  - r77 legacy timestamp-root recovery safely yields to the r86+ strict observer during full builds'
+Write-Host '  - r76 entrypoint UI migration is preflighted across native/LF/CRLF before carry-forward starts'
 Write-Host '  - r43-r65 selective carry-forward and r66-r69 negative guards remain inherited'
 
 try {

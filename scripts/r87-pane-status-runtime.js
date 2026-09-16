@@ -58,6 +58,13 @@
     return roots;
   }
 
+  // Keep the historical single-composer helper as a compatibility facade for
+  // timestamp/live-generation code while multi-pane callers use the full list.
+  function findComposerRoot() {
+    const roots = findComposerRoots();
+    return roots.length ? roots[0] : null;
+  }
+
   function threadIdFromElement(node) {
     if (!(node instanceof Element)) return '';
     for (const attr of ['data-above-composer-conversation-id','data-conversation-id','data-thread-id']) {

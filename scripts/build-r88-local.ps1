@@ -69,9 +69,12 @@ foreach ($Marker in @(
     'R88_REFRESH_BLOCK_END',
     'function findComposerRoots() {',
     'function paneForNode(node) {',
+    'function normalizePaneThreadId(value) {',
+    'function paneSessionId(pane, composer) {',
     'function paneThreadId(pane, composer) {',
+    'function paneAgentId(pane) {',
     'function ensureStatusBars() {',
-    'function statusHtmlForPane(threadId, agentId) {',
+    'function statusHtmlForPane(sessionId, threadId, agentId) {',
     'margin:0 0 22px 0'
 )) {
     if (-not $PaneJsText.Contains($Marker)) { throw "r88 pane JS invariant missing: $Marker" }
@@ -79,6 +82,7 @@ foreach ($Marker in @(
 foreach ($Marker in @(
     'R88_PANE_RUNTIME_GENERATION_PATCH_V4',
     'R88_PANE_RUNTIME_PATCH',
+    "const PANE_SESSION_ATTR = 'data-cas-pane-session-id';",
     'r88-pane-runtime.js',
     'Get-R88PaneJsBlock',
     'r88 pane-scoped composer/status mounting',
@@ -183,7 +187,7 @@ $R87BuilderText = $R87BuilderText.Replace(
     if ($PreflightOnly) {
         Write-Host 'R88_PANE_RUNTIME_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - main and split/agent composer panes are enumerated independently'
-        Write-Host '  - pane-local session/thread id is shown; agent id is separately labeled when only the short agent handle is visible'
+        Write-Host '  - session id, child thread id and UI agent id are kept as distinct identities'
         Write-Host '  - mismatched telemetry fails closed to -- instead of borrowing another pane''s metrics'
         Write-Host '  - status bars reserve 22px below-bar space so native Step pills do not overlap'
         Write-Host '  - live timestamp fallback is pane-scoped and still blocks baseline/remounted history'
@@ -192,7 +196,7 @@ $R87BuilderText = $R87BuilderText.Replace(
         Write-Host 'R88_PANE_RUNTIME_UI_FIX_PASS' -ForegroundColor Green
         Write-Host '  - pane-aware live timestamps restored without weakening historical-baseline protection'
         Write-Host '  - one status bar per visible conversation/agent pane'
-        Write-Host '  - pane-local sid visible; agent handle is not misreported as a session id'
+        Write-Host '  - pane-local sid/tid visible; agent handle is not misreported as session/thread id'
         Write-Host '  - non-owned telemetry is never borrowed from another pane'
         Write-Host '  - visible/package identity is r88 / 2.4.5+88'
     }

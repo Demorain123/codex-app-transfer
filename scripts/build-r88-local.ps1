@@ -158,6 +158,26 @@ if (-not (Test-Path -LiteralPath $R88PanePatchInclude)) { throw "r88 pane runtim
     $BuilderNeedle = '$R87BuilderText = Retarget-R86Text $OriginalR86'
     $BuilderInsertion = @'
 $R87BuilderText = Retarget-R86Text $OriginalR86
+foreach ($Pair in @(
+    @('r88-timestamp-stamp.js', '.r88-timestamp-stamp.generated.js'),
+    @('r88-timestamp-observer.js', '.r88-timestamp-observer.generated.js'),
+    @('r88-r78-observer-patch.inc.ps1', '.r88-r78-observer-patch.generated.inc.ps1')
+)) {
+    if (-not $R87BuilderText.Contains($Pair[0])) {
+        throw "r88 inner generated-helper source path missing: $($Pair[0])"
+    }
+    $R87BuilderText = $R87BuilderText.Replace($Pair[0],$Pair[1])
+}
+foreach ($ExpectedInner in @(
+    ".r88-timestamp-stamp.generated.js",
+    ".r88-timestamp-observer.generated.js",
+    ".r88-r78-observer-patch.generated.inc.ps1"
+)) {
+    if (-not $R87BuilderText.Contains($ExpectedInner)) {
+        throw "r88 inner generated-helper binding missing: $ExpectedInner"
+    }
+}
+Write-Host 'R88_INNER_HELPER_BINDING_PASS' -ForegroundColor Green
 $R88PanePatchText = [System.IO.File]::ReadAllText($R88PanePatchInclude)
 $R88PaneInsertNeedle = '$NormalizedPatchedR75ForR77 ='
 if (-not $R87BuilderText.Contains($R88PaneInsertNeedle)) {
@@ -212,6 +232,7 @@ $R87BuilderText = $R87BuilderText.Replace(
         Write-Host '  - main and split/agent composer panes are enumerated independently'
         Write-Host '  - session id, child thread id and UI agent id are kept as distinct identities'
         Write-Host '  - generated helper cleanup paths are isolated from tracked r88 sources'
+        Write-Host '  - inner r86 source paths are bound to the same generated helper filenames'
         Write-Host '  - mismatched telemetry fails closed to -- instead of borrowing another pane''s metrics'
         Write-Host '  - status bars reserve 22px below-bar space so native Step pills do not overlap'
         Write-Host '  - live timestamp fallback is pane-scoped and still blocks baseline/remounted history'

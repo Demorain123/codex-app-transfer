@@ -112,8 +112,7 @@ if (-not (Test-Path -LiteralPath $R88PanePatchInclude)) { throw "r88 pane runtim
     $BuilderInsertion = @'
 $R87BuilderText = Retarget-R86Text $OriginalR86
 $R88PanePatchText = [System.IO.File]::ReadAllText($R88PanePatchInclude)
-$R88PaneInsertNeedle = '$NormalizedPatchedR75ForR77 = $PatchedR75.Replace("`r`n","`n")'
-$R88PaneInsertNeedle = $R88PaneInsertNeedle.Replace('\"','"')
+$R88PaneInsertNeedle = '$NormalizedPatchedR75ForR77 ='
 if (-not $R87BuilderText.Contains($R88PaneInsertNeedle)) {
     throw 'r88 could not locate nested r86/r75 pane-runtime insertion point'
 }

@@ -5,16 +5,16 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$R77Builder = Join-Path $PSScriptRoot 'build-r77-local.ps1'
+$R76OutputBuilder = Join-Path $PSScriptRoot 'build-r76-output-ui-local.ps1'
 $R78Builder = Join-Path $PSScriptRoot 'build-r78-local.ps1'
 $TempR80Builder = Join-Path $PSScriptRoot '.build-r80-from-r78.generated.ps1'
 
-foreach ($Path in @($R77Builder, $R78Builder)) {
+foreach ($Path in @($R76OutputBuilder, $R78Builder)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r80 required file missing: $Path" }
 }
 
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-$OriginalR77 = [System.IO.File]::ReadAllText($R77Builder)
+$OriginalR76Output = [System.IO.File]::ReadAllText($R76OutputBuilder)
 $OriginalR78 = [System.IO.File]::ReadAllText($R78Builder)
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
@@ -26,19 +26,18 @@ function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$La
     return $Text.Replace($Old, $New)
 }
 
-# r76/r77 limited the collector to app:// renderers. Current Codex Desktop can
-# host the same thread DOM under other renderer URLs, and the active-thread DOM
-# probe is already a stronger eligibility test. Keep only explicit non-app
-# tooling exclusions and let the stable thread-id probe decide eligibility.
-$PatchedR77 = Replace-Required `
-    $OriginalR77 `
-    "        if (url && !url.startsWith('app://')) continue;" `
-    "        if (url && /^(devtools:|chrome-extension:|chrome:)/i.test(url)) continue;" `
-    'do not reject valid Codex renderers solely because URL is not app://'
+# IMPORTANT: the renderer URL guard and safeEnvelope live in the r76 collector
+# source, not in build-r77-local.ps1. r77 only reads/generates from that source.
+# Patch the actual source layer that r77 consumes so r78/r80 inherit the fix.
+$PatchedR76Output = $OriginalR76Output
+$OldUrlGuard = "        if (url && !url.startsWith('app://')) continue;"
+$NewUrlGuard = "        if (url && /^(devtools:|chrome-extension:|chrome:)/i.test(url)) continue;"
+if ($PatchedR76Output.Contains($OldUrlGuard)) {
+    $PatchedR76Output = $PatchedR76Output.Replace($OldUrlGuard, $NewUrlGuard)
+} elseif (-not $PatchedR76Output.Contains($NewUrlGuard)) {
+    throw 'r80 exact telemetry collector URL guard anchor missing'
+}
 
-# r77 began discovering the latest turn_context model, but r76's safe envelope
-# dropped it before executeJavaScript(). Preserve the model while still sending
-# no prompt/response text or provider credentials to the renderer.
 $OldSafeEnvelope = @'
     const safeEnvelope = {
       threadId: normalizeUsageThreadId(threadId),
@@ -54,15 +53,19 @@ $NewSafeEnvelope = @'
       info: envelope.info,
     };
 '@
-$PatchedR77 = Replace-Required $PatchedR77 $OldSafeEnvelope $NewSafeEnvelope 'forward bounded turn_context model'
+if ($PatchedR76Output.Contains($OldSafeEnvelope)) {
+    $PatchedR76Output = $PatchedR76Output.Replace($OldSafeEnvelope, $NewSafeEnvelope)
+} elseif (-not $PatchedR76Output.Contains("model: typeof envelope.model === 'string' ? envelope.model : null,")) {
+    throw 'r80 exact telemetry safeEnvelope anchor missing'
+}
 
 foreach ($Marker in @(
     "/^(devtools:|chrome-extension:|chrome:)/i.test(url)",
     "model: typeof envelope.model === 'string' ? envelope.model : null,",
-    'state.ingestExternalUsage = ingestExternalUsage;',
-    'data-above-composer-conversation-id'
+    'CAS-R76-EXACT-TOKEN-TELEMETRY',
+    'activeThreadExpression'
 )) {
-    if (-not $PatchedR77.Contains($Marker)) { throw "r80 telemetry source verification failed: $Marker" }
+    if (-not $PatchedR76Output.Contains($Marker)) { throw "r80 telemetry source verification failed: $Marker" }
 }
 
 # Make the r78 timestamp/action-row builder generate r80 identity while keeping
@@ -88,7 +91,7 @@ foreach ($Marker in @(
 }
 
 try {
-    Write-Utf8NoBom $R77Builder $PatchedR77
+    Write-Utf8NoBom $R76OutputBuilder $PatchedR76Output
     Write-Utf8NoBom $TempR80Builder $PatchedR78
 
     $Args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $TempR80Builder)
@@ -104,7 +107,7 @@ try {
     Write-Host '  - r78 per-output timestamp action-row strategy is retained'
 }
 finally {
-    Write-Utf8NoBom $R77Builder $OriginalR77
+    Write-Utf8NoBom $R76OutputBuilder $OriginalR76Output
     Remove-Item -LiteralPath $TempR80Builder -Force -ErrorAction SilentlyContinue
     Write-Host '[r80] restored temporary source patches; worktree remains pull-friendly'
 }

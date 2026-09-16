@@ -15,6 +15,7 @@
     document.querySelectorAll('[data-codex-composer-root],[data-thread-find-composer="true"],[data-codex-composer="true"]').forEach(add);
     document.querySelectorAll('.ProseMirror[contenteditable="true"],[role="textbox"][contenteditable="true"],textarea').forEach(function(editable) {
       if (!(editable instanceof Element) || !isVisible(editable)) return;
+      if (roots.some(function(root) { return root.contains(editable); })) return;
       add(editable.closest('[data-testid*="composer"],.composer-surface-chrome,form') || editable.parentElement);
     });
     return roots;
@@ -78,7 +79,7 @@
   function threadIdFromNode(node) {
     if (!(node instanceof Element)) return '';
     const attrs = [
-      'data-conversation-id', 'data-above-composer-conversation-id', 'data-thread-id',
+      'data-above-composer-conversation-id', 'data-conversation-id', 'data-thread-id',
       'data-session-id', 'data-app-action-sidebar-thread-id', 'data-turn-thread-id',
     ];
     for (const attr of attrs) {
@@ -99,13 +100,15 @@
     const scope = pane instanceof Element ? pane : (composer instanceof Element ? composer.parentElement : null);
     if (scope instanceof Element) {
       const selectors = [
-        '[data-conversation-id]', '[data-above-composer-conversation-id]', '[data-thread-id]',
+        '[data-above-composer-conversation-id]', '[data-conversation-id]', '[data-thread-id]',
         '[data-session-id]', '[data-app-action-sidebar-thread-id]', '[data-turn-thread-id]',
-      ].join(',');
-      const nodes = scope.querySelectorAll(selectors);
-      for (const node of nodes) {
-        const value = threadIdFromNode(node);
-        if (value) return value;
+      ];
+      for (const selector of selectors) {
+        const nodes = scope.querySelectorAll(selector);
+        for (const node of nodes) {
+          const value = threadIdFromNode(node);
+          if (value) return value;
+        }
       }
       const links = scope.querySelectorAll('a[href]');
       for (const link of links) {
@@ -113,10 +116,6 @@
         const match = href.match(/([0-9a-f]{8}-[0-9a-f-]{20,})/i);
         if (match) return normalizePaneThreadId(match[1]);
       }
-    }
-    const composers = findComposerRoots();
-    if (composer instanceof Element && composers.length === 1) {
-      return normalizePaneThreadId(state.metrics && state.metrics.externalThreadId);
     }
     return '';
   }
@@ -146,7 +145,8 @@
       const parent = composer.parentElement;
       if (!(parent instanceof Element)) return;
       const pane = paneForComposer(composer);
-      const threadId = paneThreadId(pane, composer);
+      let threadId = paneThreadId(pane, composer);
+      if (!threadId && index === 0) threadId = normalizePaneThreadId(state.metrics && state.metrics.externalThreadId);
       const agentId = paneAgentId(pane);
       let bar = null;
       for (const child of Array.from(parent.children || [])) {
@@ -161,6 +161,9 @@
         bar.title = 'Click for live telemetry charts';
         bar.addEventListener('click', function(event) {
           event.stopPropagation();
+          const paneId = normalizePaneThreadId(bar.getAttribute(PANE_THREAD_ATTR));
+          const externalId = normalizePaneThreadId(state.metrics && state.metrics.externalThreadId);
+          if (paneId && externalId && paneId !== externalId) return;
           toggleAnalytics(bar);
         });
       }
@@ -225,6 +228,9 @@
       bar.innerHTML = statusHtmlForPane(threadId, agentId);
       let width = 9999;
       try { width = bar.getBoundingClientRect().width; } catch {}
+      bar.querySelectorAll('.cas-status-item').forEach(function(node) { node.style.whiteSpace = 'nowrap'; });
+      bar.querySelectorAll('.cas-status-muted').forEach(function(node) { node.style.color = 'color-mix(in srgb,CanvasText 44%,transparent)'; });
+      bar.querySelectorAll('.cas-status-spacer').forEach(function(node) { node.style.flex = '1 1 auto'; node.style.minWidth = '2px'; });
       bar.querySelectorAll('.cas-status-secondary').forEach(function(node) { node.style.display = width <= 720 ? 'none' : ''; });
       bar.querySelectorAll('.cas-status-tertiary').forEach(function(node) { node.style.display = width <= 560 ? 'none' : ''; });
     }

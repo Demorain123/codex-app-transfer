@@ -24,8 +24,13 @@ function Write-Utf8NoBom([string]$Path, [string]$Text) {
 }
 
 function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$Label) {
-    if (-not $Text.Contains($Old)) { throw "r76 expected text missing: $Label" }
-    return $Text.Replace($Old, $New)
+    # Generated Windows builders may alternate between CRLF and LF. Make EOL
+    # style irrelevant while keeping the actual source text contract strict.
+    $NormalizedText = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $NormalizedOld = $Old.Replace("`r`n", "`n").Replace("`r", "`n")
+    $NormalizedNew = $New.Replace("`r`n", "`n").Replace("`r", "`n")
+    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r76 expected text missing: $Label" }
+    return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
 }
 
 # r74/r75 could populate Context, cache, native tok/s and cumulative session

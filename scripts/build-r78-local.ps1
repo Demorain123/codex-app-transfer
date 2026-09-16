@@ -31,13 +31,6 @@ function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$La
 # ---------------------------------------------------------------------------
 # r78 timestamp hardening
 # ---------------------------------------------------------------------------
-# r77 recovered current renderer roots, but older/already-visible assistant
-# outputs can still lack a native sent-time node, and a turn-level sent-time must
-# not be copied onto every progress segment. Reuse the same local session JSONL
-# that supplies exact token telemetry: collect a bounded list of assistant
-# response_item timestamps + short text prefixes and match them to visible output
-# segments. This mirrors the proven local-read-only approach used by Codex-Monitor
-# without copying full transcripts or changing Codex session files.
 $TimestampMatchHelpers = @'
   function normalizedOutputMatchText(value) {
     return String(value || '')
@@ -86,8 +79,6 @@ $TimestampMatchHelpers = @'
         }
       }
 
-      // Newer records win equal-score ties. This matters when a short status
-      // phrase such as "Continuing" legitimately appears more than once.
       if (score > bestScore) {
         bestScore = score;
         best = { epoch: epoch, source: 'Codex session response_item' };
@@ -101,8 +92,6 @@ $TimestampMatchHelpers = @'
     if (ownNative) return ownNative;
     const session = sessionTimeForSegment(segment);
     if (session) return session;
-    // A root-level native sent-time describes the final assistant boundary. Do
-    // not smear that one timestamp across every progress/tool segment in a turn.
     if (finalOutputSegment(segment, root)) return nativeTime(root);
     return null;
   }
@@ -119,12 +108,33 @@ $PatchedR75 = Replace-Required $PatchedR75 `
     '    const native = exactTimeForSegment(segment, root);' `
     'per-segment exact timestamp selection'
 
+$OldWhenChoice = @'
+    const remembered = rememberedTime(key);
+    const attrTime = timeAttr(badge);
+    const when = (Number.isFinite(attrTime) && attrTime > 0)
+      ? attrTime
+      : ((Number.isFinite(remembered) && remembered > 0) ? remembered : epoch);
+'@
+$NewWhenChoice = @'
+    const remembered = rememberedTime(key);
+    const attrTime = timeAttr(badge);
+    const exactSource = /Codex session response_item|Codex message time/i.test(String(source || ''));
+    const when = exactSource
+      ? epoch
+      : ((Number.isFinite(attrTime) && attrTime > 0)
+        ? attrTime
+        : ((Number.isFinite(remembered) && remembered > 0) ? remembered : epoch));
+'@
+$PatchedR75 = Replace-Required $PatchedR75 $OldWhenChoice $NewWhenChoice 'exact timestamp promotes over remembered estimate'
+
 $OldBadgeText = @'
     badge.textContent = clock(when);
     badge.title = fullTime(when) + ' · ' + ((Number.isFinite(remembered) && remembered > 0) ? 'remembered local output time' : source);
 '@
 $NewBadgeText = @'
-    const displaySource = (Number.isFinite(remembered) && remembered > 0) ? 'remembered local output time' : source;
+    const displaySource = exactSource
+      ? source
+      : ((Number.isFinite(remembered) && remembered > 0) ? 'remembered local output time' : source);
     const estimated = /first observed|remembered local output time/i.test(String(displaySource || ''));
     badge.textContent = (estimated ? '~' : '') + clock(when);
     badge.setAttribute('data-cas-output-time-quality', estimated ? 'estimated' : 'exact');
@@ -133,7 +143,6 @@ $NewBadgeText = @'
 '@
 $PatchedR75 = Replace-Required $PatchedR75 $OldBadgeText $NewBadgeText 'timestamp exact-vs-estimated badge provenance'
 
-# Make the timestamp rail easier to see without turning it into another card.
 $PatchedR75 = Replace-Required $PatchedR75 `
     'font:9px/1.15 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;pointer-events:auto;user-select:text;opacity:.72;' `
     'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;pointer-events:auto;user-select:text;opacity:.84;' `
@@ -173,9 +182,6 @@ $AssistantCollector = @'
       if (previous && previous.size === stat.size) return previous.items;
       if (!stat.size) return previous?.items || [];
 
-      // A bounded tail is enough for the currently visible/recent replies while
-      // keeping long Windows sessions inexpensive. The cache avoids rereading it
-      // when the append-only JSONL size has not changed.
       const length = Math.min(stat.size, 8 * 1024 * 1024);
       const buffer = Buffer.allocUnsafe(length);
       await handle.read(buffer, 0, length, stat.size - length);
@@ -257,9 +263,6 @@ $NewRunCollector = @'
 '@
 $PatchedR76Output = Replace-Required $PatchedR76Output $OldRunCollector $NewRunCollector 'attach recent assistant timestamp items'
 
-# Windows accepts one CODEX_HOME in normal use, but when a compatibility setup
-# provides several roots use the platform delimiter as well as the old comma
-# form instead of silently treating the whole string as one path.
 $PatchedR76Output = Replace-Required $PatchedR76Output `
     "    const homes = raw ? raw.split(',').map((value) => value.trim()).filter(Boolean) : [];" `
     "    const homes = raw ? raw.split(new RegExp('[,;' + (process.platform === 'win32' ? ';' : ':') + ']')).map((value) => value.trim()).filter(Boolean) : [];" `
@@ -267,8 +270,7 @@ $PatchedR76Output = Replace-Required $PatchedR76Output `
 
 # ---------------------------------------------------------------------------
 # Generate an r78 identity from the reviewed r77 entry while preserving r77's
-# bridge fixes and root recovery. Keep temp filenames private to this wrapper;
-# package/app identity becomes +78.
+# bridge fixes and root recovery.
 # ---------------------------------------------------------------------------
 $PatchedR77Entry = $OriginalR77Entry
 $PatchedR77Entry = Replace-Required $PatchedR77Entry `
@@ -292,6 +294,7 @@ $PatchedR77Entry = $PatchedR77Entry.Replace('r77 local build failed', 'r78 local
 foreach ($Marker in @(
     'function sessionTimeForSegment(segment)',
     'function exactTimeForSegment(segment, root)',
+    'const exactSource = /Codex session response_item|Codex message time/',
     'data-cas-output-time-quality',
     'state.externalAssistantItems',
     'const recentAssistantItems = async (filePath)',
@@ -304,8 +307,6 @@ foreach ($Marker in @(
     if (-not $Combined.Contains($Marker)) { throw "r78 source verification failed: $Marker" }
 }
 
-# Negative safety check: this timestamp/telemetry release must not pull any of
-# the r66-r69 Hook A/B experiments back into the daily build path.
 foreach ($Forbidden in @(
     'CAS-R66-POST-COMPACT-HOOKS-AB',
     'CAS-R67-HOOKS-RESTORED-SELECTIVE-STATE',
@@ -330,6 +331,7 @@ try {
     Write-Host ''
     Write-Host 'R78_TIMESTAMP_PASS' -ForegroundColor Green
     Write-Host '  - exact response_item timestamps are matched to visible assistant outputs when available'
+    Write-Host '  - exact native/session time repairs an earlier ~estimated first-observed timestamp'
     Write-Host '  - native final sent-time is no longer copied onto unrelated progress/tool segments'
     Write-Host '  - fallback first-observed/remembered times are visibly marked with ~ as estimated'
     Write-Host 'R78_EXACT_USAGE_PASS' -ForegroundColor Green

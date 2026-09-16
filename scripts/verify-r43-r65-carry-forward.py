@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fail-closed verifier for the r43-r65 formal carry-forward ledger.
 
-This verifier intentionally does not infer completion from branch names.  A
-revision only passes after the manifest records a final acceptance state and
-concrete evidence.  During the audit, --allow-pending can be used to validate
-only the ledger shape without emitting the final carry-forward PASS marker.
+Branch names are discovery inputs, never completion evidence. A revision only
+passes after the manifest records a final acceptance state and concrete source,
+test, comparison, commit, or runtime evidence. During the audit,
+--allow-pending validates structure without emitting the final PASS marker.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ FINAL_STATES = {
 }
 NON_FINAL_STATES = {"pending-audit"}
 FORBIDDEN_EXPERIMENTAL_REVISIONS = {66, 67, 68, 69}
+EVIDENCE_KINDS = {"source", "test", "commit", "comparison", "runtime"}
 
 
 def fail(message: str) -> None:
@@ -52,9 +53,16 @@ def main() -> int:
     except Exception as exc:
         fail(f"cannot read manifest: {exc}")
 
+    if data.get("schema_version") != 2:
+        fail("manifest schema_version must be 2")
+
     declared_range = data.get("range") or {}
     if declared_range.get("start") != EXPECTED_START or declared_range.get("end") != EXPECTED_END:
         fail(f"range must be exactly r{EXPECTED_START}-r{EXPECTED_END}")
+
+    declared_forbidden = set(data.get("forbidden_experimental_revisions") or [])
+    if declared_forbidden != FORBIDDEN_EXPERIMENTAL_REVISIONS:
+        fail("forbidden experimental revisions must be exactly r66-r69")
 
     rows = data.get("revisions")
     if not isinstance(rows, list):
@@ -73,13 +81,18 @@ def main() -> int:
     pending: list[int] = []
     for row in rows:
         revision = row["revision"]
-        branch = row.get("source_branch")
+        branches = row.get("source_branches")
         status = row.get("status")
         evidence = row.get("evidence")
 
+        if not isinstance(branches, list) or not branches:
+            fail(f"r{revision} requires at least one historical source branch")
         expected_prefix = f"dev-r{revision}-"
-        if not isinstance(branch, str) or not branch.startswith(expected_prefix):
-            fail(f"r{revision} source_branch must start with {expected_prefix!r}")
+        if len(set(branches)) != len(branches):
+            fail(f"r{revision} source_branches contains duplicates")
+        for branch in branches:
+            if not isinstance(branch, str) or not branch.startswith(expected_prefix):
+                fail(f"r{revision} source branch must start with {expected_prefix!r}")
 
         if status in NON_FINAL_STATES:
             pending.append(revision)
@@ -89,7 +102,6 @@ def main() -> int:
 
         if status not in FINAL_STATES:
             fail(f"r{revision} has unsupported status {status!r}")
-
         if not isinstance(evidence, list) or not evidence:
             fail(f"r{revision} final state requires at least one concrete evidence entry")
 
@@ -99,7 +111,7 @@ def main() -> int:
             kind = item.get("kind")
             ref = item.get("ref")
             note = item.get("note")
-            if kind not in {"source", "test", "commit", "comparison", "runtime"}:
+            if kind not in EVIDENCE_KINDS:
                 fail(f"r{revision} evidence[{index}] has unsupported kind {kind!r}")
             if not isinstance(ref, str) or not ref.strip():
                 fail(f"r{revision} evidence[{index}] requires a non-empty ref")

@@ -23,7 +23,7 @@ if ($TrackedBefore.Count -gt 0) {
 }
 
 $SelectiveText = [System.IO.File]::ReadAllText($Selective)
-if ([regex]::IsMatch($SelectiveText, 'scripts/apply_r\d+_unified\.py')) {
+if ([regex]::IsMatch($SelectiveText, 'scripts/apply_r\d+_unified\.py'.Replace('\\','\'))) {
     throw 'r82 selective materializer must never invoke historical recursive apply_rXX_unified.py drivers'
 }
 

@@ -28,7 +28,7 @@ $R88ComposerBlock = Get-R88PaneJsBlock $R88PaneJs '// R88_COMPOSER_BLOCK_START' 
 $R88RefreshBlock = Get-R88PaneJsBlock $R88PaneJs '// R88_REFRESH_BLOCK_START' '// R88_REFRESH_BLOCK_END' 'refresh block'
 
 $R88StatusConstantOld = "  const STATUS_ID = 'cas-live-statusbar';"
-$R88StatusConstantNew = $R88StatusConstantOld + "`n  const PANE_STATUS_ATTR = 'data-cas-pane-statusbar';`n  const PANE_THREAD_ATTR = 'data-cas-pane-thread-id';`n  const PANE_AGENT_ATTR = 'data-cas-pane-agent-id';"
+$R88StatusConstantNew = $R88StatusConstantOld + "`n  const PANE_STATUS_ATTR = 'data-cas-pane-statusbar';`n  const PANE_SESSION_ATTR = 'data-cas-pane-session-id';`n  const PANE_THREAD_ATTR = 'data-cas-pane-thread-id';`n  const PANE_AGENT_ATTR = 'data-cas-pane-agent-id';"
 $Original = Replace-Required $Original $R88StatusConstantOld $R88StatusConstantNew 'r88 pane status constants'
 
 $R88InsideOwnOld = "    return !!node.closest('#' + STATUS_ID + ',#' + MIRROR_ID + ',#' + ANALYTICS_ID);"
@@ -51,6 +51,7 @@ $PatchedR75 = $PatchedR75.Replace(
 foreach ($Marker in @(
     'R88_PANE_RUNTIME_PATCH',
     "const PANE_STATUS_ATTR = 'data-cas-pane-statusbar';",
+    "const PANE_SESSION_ATTR = 'data-cas-pane-session-id';",
     'r88-pane-runtime.js',
     'Get-R88PaneJsBlock',
     'r88 pane-scoped composer/status mounting',

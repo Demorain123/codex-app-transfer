@@ -132,9 +132,9 @@ $MainProcessCollector = @'
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const hit = await walk(path.join(dir, entry.name));
-        if ($null -ne $hit) { return $hit }
+        if (hit) return hit;
       }
-      return $null
+      return null;
     };
 
     for (const home of codexUsageRoots()) {

@@ -1,5 +1,6 @@
 param(
-    [switch]$RunFocusedTests
+    [switch]$RunFocusedTests,
+    [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,7 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $OriginalR74 = [System.IO.File]::ReadAllText($R74Builder)
 $OriginalR75 = [System.IO.File]::ReadAllText($R75Builder)
 $OriginalLauncher = [System.IO.File]::ReadAllText($LauncherPath)
+$TouchedSources = $false
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
     [System.IO.File]::WriteAllText($Path, $Text, $Utf8NoBom)
@@ -130,9 +132,9 @@ $MainProcessCollector = @'
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const hit = await walk(path.join(dir, entry.name));
-        if (hit) return hit;
+        if ($null -ne $hit) { return $hit }
       }
-      return null;
+      return $null
     };
 
     for (const home of codexUsageRoots()) {
@@ -247,18 +249,13 @@ $MainProcessCollector = @'
 '@
 
 try {
-    # 1) Temporarily teach the r74 telemetry template how to accept the exact,
-    # read-only local token_count payload. r75/r76's timestamp finalizer then
-    # layers on top of this same runtime instead of forking another renderer.
+    # 1) Build the exact read-only telemetry patches entirely in memory first.
+    # Preflight mode exits before touching r74/launcher/temp files.
     $PatchedR74 = Replace-Required $OriginalR74 `
         '  state.refresh = refreshUi;' `
         ($ExternalUsageIngest + '  state.refresh = refreshUi;') `
         'external local token_count ingestion hook'
-    Write-Utf8NoBom $R74Builder $PatchedR74
 
-    # 2) Temporarily extend the proven Electron main-process startup hook. The
-    # code lives inside Codex itself after injection, so the small launcher may
-    # exit exactly as before; no background PowerShell/Python process is needed.
     $PatchedLauncher = Replace-Required $OriginalLauncher `
         '  const armOutputTelemetry = (electron) => {' `
         ($MainProcessCollector + '  const armOutputTelemetry = (electron) => {') `
@@ -280,9 +277,8 @@ try {
   };
 '@
     $PatchedLauncher = Replace-Required $PatchedLauncher $OldAttach $NewAttach 'arm local usage collector with telemetry'
-    Write-Utf8NoBom $LauncherPath $PatchedLauncher
 
-    # 3) Reuse the reviewed r75 finalizer, but generate r76 identity directly
+    # 2) Reuse the reviewed r75 finalizer, but generate r76 identity directly
     # from r74 so the visible package/version and builder PASS markers stay in
     # one chain. No r75 install is required on the user's machine.
     $R76BuilderText = $OriginalR75.Replace('r75', 'r76').Replace('R75', 'R76').Replace('+75', '+76')
@@ -292,9 +288,8 @@ try {
     )) {
         if (-not $R76BuilderText.Contains($Marker)) { throw "r76 generated builder verification failed: $Marker" }
     }
-    Write-Utf8NoBom $TempBuilder $R76BuilderText
 
-    # Source-level guards before invoking the expensive package build.
+    $Combined = $PatchedLauncher + $PatchedR74
     foreach ($Marker in @(
         'CAS-R76-EXACT-TOKEN-TELEMETRY',
         'activeThreadExpression',
@@ -303,9 +298,18 @@ try {
         'armLocalUsageCollector(electron)',
         'ingestExternalUsage'
     )) {
-        $Combined = [System.IO.File]::ReadAllText($LauncherPath) + [System.IO.File]::ReadAllText($R74Builder)
         if (-not $Combined.Contains($Marker)) { throw "r76 telemetry source verification failed: $Marker" }
     }
+
+    if ($PreflightOnly) {
+        Write-Host 'R76_OUTPUT_TEXT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
+        return
+    }
+
+    Write-Utf8NoBom $R74Builder $PatchedR74
+    Write-Utf8NoBom $LauncherPath $PatchedLauncher
+    Write-Utf8NoBom $TempBuilder $R76BuilderText
+    $TouchedSources = $true
 
     node --check $LauncherPath
     if ($LASTEXITCODE -ne 0) { throw 'r76 temporary launcher JavaScript syntax check failed' }
@@ -322,8 +326,10 @@ try {
     Write-Host '  - collector: local read-only; no app.asar/session/auth/provider writes'
 }
 finally {
-    Write-Utf8NoBom $R74Builder $OriginalR74
-    Write-Utf8NoBom $LauncherPath $OriginalLauncher
+    if ($TouchedSources) {
+        Write-Utf8NoBom $R74Builder $OriginalR74
+        Write-Utf8NoBom $LauncherPath $OriginalLauncher
+    }
     Remove-Item -LiteralPath $TempBuilder -Force -ErrorAction SilentlyContinue
     Write-Host '[r76] restored temporary source patches; worktree remains pull-friendly'
 }

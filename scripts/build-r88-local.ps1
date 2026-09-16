@@ -1,0 +1,186 @@
+param(
+    [switch]$RunFocusedTests,
+    [switch]$PreflightOnly
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+$R87Builder = Join-Path $PSScriptRoot 'build-r87-local.ps1'
+$R88Observer = Join-Path $PSScriptRoot 'r88-timestamp-observer.js'
+$R88PanePatch = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch.inc.ps1'
+$TempBuilder = Join-Path $PSScriptRoot '.build-r88-from-r87.generated.ps1'
+$TempObserverCheck = Join-Path $PSScriptRoot '.r88-observer-syntax.generated.mjs'
+
+foreach ($Path in @($R87Builder,$R88Observer,$R88PanePatch)) {
+    if (-not (Test-Path -LiteralPath $Path)) { throw "r88 required file missing: $Path" }
+}
+
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$OriginalR87 = [System.IO.File]::ReadAllText($R87Builder)
+$ObserverText = [System.IO.File]::ReadAllText($R88Observer)
+$PanePatchText = [System.IO.File]::ReadAllText($R88PanePatch)
+
+function Write-Utf8NoBom([string]$Path,[string]$Text) {
+    [System.IO.File]::WriteAllText($Path,$Text,$Utf8NoBom)
+}
+
+function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label) {
+    if (-not $Text.Contains($Old)) { throw "r88 expected text missing: $Label" }
+    return $Text.Replace($Old,$New)
+}
+
+function Assert-PowerShellParses([string]$Text,[string]$Label) {
+    $Tokens = $null
+    $Errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput($Text,[ref]$Tokens,[ref]$Errors)
+    if ($Errors -and $Errors.Count -gt 0) {
+        $Summary = @($Errors | Select-Object -First 8 | ForEach-Object { $_.Message }) -join ' | '
+        throw "r88 PowerShell parse failed: $Label :: $Summary"
+    }
+}
+
+# Guard the already-validated r87 baseline before generating anything.
+$Head = (git -C $RepoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'r88 git rev-parse failed' }
+$Dirty = @(git -C $RepoRoot status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0) { throw 'r88 git status failed' }
+if ($Dirty.Count -gt 0) { throw "r88 requires a clean tracked worktree:`n$($Dirty -join "`n")" }
+
+foreach ($Marker in @(
+    'function activeGenerationUiPresentFor(node) {',
+    'function latestConversationTurnFor(node) {',
+    'function hasRecentLiveUsageFor(node) {',
+    'function liveSemanticRootFor(node) {',
+    'state.timestampBaselineElements = new WeakSet();',
+    'first observed live output mutation locally',
+    'if (!hasRecentLiveUsage()) return;',
+    'sweepOutputSegments(false)'
+)) {
+    if (-not $ObserverText.Contains($Marker)) { throw "r88 observer invariant missing: $Marker" }
+}
+foreach ($Marker in @(
+    'R88_PANE_RUNTIME_GENERATION_PATCH',
+    'R88_PANE_RUNTIME_PATCH',
+    'function findComposerRoots() {',
+    'function paneForNode(node) {',
+    'function paneThreadId(pane, composer) {',
+    'function ensureStatusBars() {',
+    'function statusHtmlForPane(threadId) {',
+    'data-cas-pane-statusbar',
+    'margin:0 0 22px 0'
+)) {
+    if (-not $PanePatchText.Contains($Marker)) { throw "r88 pane patch invariant missing: $Marker" }
+}
+
+try {
+    # Syntax-check the observer fragment as real JavaScript before any expensive
+    # nested PowerShell generation. The fragment is wrapped only to provide a
+    # legal function scope; referenced runtime helpers intentionally stay unresolved.
+    Write-Utf8NoBom $TempObserverCheck ("function __r88ObserverSyntaxOnly(){`n" + $ObserverText + "`n}`n")
+    node --check $TempObserverCheck
+    if ($LASTEXITCODE -ne 0) { throw 'r88 timestamp observer JavaScript syntax check failed' }
+    Write-Host 'R88_TIMESTAMP_OBSERVER_JS_PREFLIGHT_PASS' -ForegroundColor Green
+
+    # Generate an r88 wrapper from the already-proven r87 build system. Only
+    # targeted replacements are allowed: package retarget, observer source,
+    # generated helper filenames, and one nested r75 pane-runtime insertion.
+    $R88 = $OriginalR87
+
+    $R88 = Replace-Required $R88 `
+        "`$R86Observer = Join-Path `$PSScriptRoot 'r86-timestamp-observer.js'" `
+        "`$R86Observer = Join-Path `$PSScriptRoot 'r88-timestamp-observer.js'" `
+        'use r88 timestamp observer'
+
+    $R88 = Replace-Required $R88 `
+        "    return `$Text.Replace('r86','r87').Replace('R86','R87').Replace('+86','+87')" `
+        "    return `$Text.Replace('r86','r88').Replace('R86','R88').Replace('+86','+88')" `
+        'retarget inherited r86 package to r88'
+
+    foreach ($Pair in @(
+        @(".build-r87-from-r86.generated.ps1", ".build-r88-from-r86.generated.ps1"),
+        @("r87-timestamp-stamp.js", "r88-timestamp-stamp.js"),
+        @("r87-timestamp-observer.js", "r88-timestamp-observer.js"),
+        @("r87-r78-observer-patch.inc.ps1", "r88-r78-observer-patch.inc.ps1")
+    )) {
+        $R88 = Replace-Required $R88 $Pair[0] $Pair[1] "retarget generated helper $($Pair[0])"
+    }
+
+    $PaneDeclNeedle = "`$R86ObserverPatch = Join-Path `$PSScriptRoot 'r86-r78-observer-patch.inc.ps1'"
+    $PaneDeclReplacement = @'
+$R86ObserverPatch = Join-Path $PSScriptRoot 'r86-r78-observer-patch.inc.ps1'
+$R88PanePatchInclude = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch.inc.ps1'
+if (-not (Test-Path -LiteralPath $R88PanePatchInclude)) { throw "r88 pane runtime patch missing: $R88PanePatchInclude" }
+'@
+    $R88 = Replace-Required $R88 $PaneDeclNeedle $PaneDeclReplacement 'declare r88 pane patch include'
+
+    $BuilderNeedle = '$R87BuilderText = Retarget-R86Text $OriginalR86'
+    $BuilderInsertion = @'
+$R87BuilderText = Retarget-R86Text $OriginalR86
+$R88PanePatchText = [System.IO.File]::ReadAllText($R88PanePatchInclude)
+$R88PaneInsertNeedle = '$NormalizedPatchedR75ForR77 = $PatchedR75.Replace("`r`n","`n")'
+if (-not $R87BuilderText.Contains($R88PaneInsertNeedle)) {
+    throw 'r88 could not locate nested r86/r75 pane-runtime insertion point'
+}
+$R87BuilderText = $R87BuilderText.Replace(
+    $R88PaneInsertNeedle,
+    $R88PanePatchText + "`r`n`r`n" + $R88PaneInsertNeedle
+)
+'@
+    $R88 = Replace-Required $R88 $BuilderNeedle $BuilderInsertion 'inject pane runtime into nested r75 source'
+
+    # r87's wrapper verifies the expected contents of the retargeted inner r86
+    # builder. Update only those expectations; guard component markers remain r87
+    # because the readonly guard is inherited unchanged from the proven baseline.
+    $R88 = Replace-Required $R88 `
+        '"`$R87Core = `$OriginalR83.Replace(''r83'',''r87'').Replace(''R83'',''R87'').Replace(''+83'',''+87'')"' `
+        '"`$R88Core = `$OriginalR83.Replace(''r83'',''r88'').Replace(''R83'',''R88'').Replace(''+83'',''+88'')"' `
+        'retarget inner core verification marker'
+
+    foreach ($Pair in @(
+        @("'R87_TIMESTAMP_CORRECTNESS_PREFLIGHT_PASS'", "'R88_TIMESTAMP_CORRECTNESS_PREFLIGHT_PASS'"),
+        @("'R87_R77_COMPAT_PREFLIGHT_PASS'", "'R88_R77_COMPAT_PREFLIGHT_PASS'"),
+        @("'R87_TIMESTAMP_CORRECTNESS_PASS'", "'R88_TIMESTAMP_CORRECTNESS_PASS'")
+    )) {
+        $R88 = Replace-Required $R88 $Pair[0] $Pair[1] "retarget inner verification $($Pair[0])"
+    }
+
+    $R88 = $R88.Replace('visible/package identity is r87 / 2.4.5+87','visible/package identity is r88 / 2.4.5+88')
+    $R88 = $R88.Replace('R87_SUB2API_COMPAT_GUARD_READONLY_PASS','R88_SUB2API_COMPAT_GUARD_READONLY_PASS')
+    $R88 = $R88.Replace('R87_COMPAT_GUARD_PREFLIGHT_ONLY_PASS','R88_COMPAT_GUARD_PREFLIGHT_ONLY_PASS')
+
+    Assert-PowerShellParses $R88 'generated r88 wrapper'
+    Write-Host 'R88_GENERATED_WRAPPER_PARSE_PASS' -ForegroundColor Green
+
+    Write-Utf8NoBom $TempBuilder $R88
+    $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$TempBuilder)
+    if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
+    if ($PreflightOnly) { $Args += '-PreflightOnly' }
+    & pwsh @Args
+    if ($LASTEXITCODE -ne 0) { throw "r88 nested build failed with exit code $LASTEXITCODE" }
+
+    $DirtyAfter = @(git -C $RepoRoot status --porcelain --untracked-files=no)
+    if ($LASTEXITCODE -ne 0) { throw 'r88 post-build git status failed' }
+    if ($DirtyAfter.Count -gt 0) { throw "r88 nested build left tracked changes:`n$($DirtyAfter -join "`n")" }
+
+    if ($PreflightOnly) {
+        Write-Host 'R88_PANE_RUNTIME_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
+        Write-Host '  - main and split/agent composer panes are enumerated independently'
+        Write-Host '  - pane-local session/thread id is shown; mismatched telemetry fails closed to --'
+        Write-Host '  - status bars reserve 22px below-bar space so native Step pills do not overlap'
+        Write-Host '  - live timestamp fallback is pane-scoped and still blocks baseline/remounted history'
+    } else {
+        Write-Host ''
+        Write-Host 'R88_PANE_RUNTIME_UI_FIX_PASS' -ForegroundColor Green
+        Write-Host '  - pane-aware live timestamps restored without weakening historical-baseline protection'
+        Write-Host '  - one status bar per visible conversation/agent pane'
+        Write-Host '  - pane-local sid visible; non-owned telemetry is never borrowed from another pane'
+        Write-Host '  - visible/package identity is r88 / 2.4.5+88'
+    }
+}
+finally {
+    Remove-Item -LiteralPath $TempBuilder -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $TempObserverCheck -Force -ErrorAction SilentlyContinue
+    Write-Host '[r88] removed temporary generated wrappers; tracked worktree stays pull-friendly'
+}

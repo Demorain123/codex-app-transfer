@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R87Builder = Join-Path $PSScriptRoot 'build-r87-local.ps1'
 $R88Observer = Join-Path $PSScriptRoot 'r88-timestamp-observer.js'
-$R88PanePatch = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v2.inc.ps1'
+$R88PanePatch = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v3.inc.ps1'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r88-from-r87.generated.ps1'
 $TempObserverCheck = Join-Path $PSScriptRoot '.r88-observer-syntax.generated.mjs'
 
@@ -60,7 +60,7 @@ foreach ($Marker in @(
     if (-not $ObserverText.Contains($Marker)) { throw "r88 observer invariant missing: $Marker" }
 }
 foreach ($Marker in @(
-    'R88_PANE_RUNTIME_GENERATION_PATCH_V2',
+    'R88_PANE_RUNTIME_GENERATION_PATCH_V3',
     'R88_PANE_RUNTIME_PATCH',
     'function findComposerRoots() {',
     'function paneForNode(node) {',
@@ -103,7 +103,7 @@ try {
     $PaneDeclNeedle = "`$R86ObserverPatch = Join-Path `$PSScriptRoot 'r86-r78-observer-patch.inc.ps1'"
     $PaneDeclReplacement = @'
 $R86ObserverPatch = Join-Path $PSScriptRoot 'r86-r78-observer-patch.inc.ps1'
-$R88PanePatchInclude = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v2.inc.ps1'
+$R88PanePatchInclude = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v3.inc.ps1'
 if (-not (Test-Path -LiteralPath $R88PanePatchInclude)) { throw "r88 pane runtime patch missing: $R88PanePatchInclude" }
 '@
     $R88 = Replace-Required $R88 $PaneDeclNeedle $PaneDeclReplacement 'declare r88 pane patch include'

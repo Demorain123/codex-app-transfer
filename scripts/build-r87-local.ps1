@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R86Builder = Join-Path $PSScriptRoot 'build-r86-local.ps1'
+$R77Builder = Join-Path $PSScriptRoot 'build-r77-local.ps1'
 $GuardSource = Join-Path $RepoRoot 'frontend/src/components/provider/Sub2ApiGrokCompatControls.vue'
 $R86Stamp = Join-Path $PSScriptRoot 'r86-timestamp-stamp.js'
 $R86Observer = Join-Path $PSScriptRoot 'r86-timestamp-observer.js'
@@ -18,7 +19,7 @@ $TempStamp = Join-Path $PSScriptRoot 'r87-timestamp-stamp.js'
 $TempObserver = Join-Path $PSScriptRoot 'r87-timestamp-observer.js'
 $TempObserverPatch = Join-Path $PSScriptRoot 'r87-r78-observer-patch.inc.ps1'
 
-foreach ($Path in @($R86Builder,$GuardSource,$R86Stamp,$R86Observer,$R86ObserverPatch)) {
+foreach ($Path in @($R86Builder,$R77Builder,$GuardSource,$R86Stamp,$R86Observer,$R86ObserverPatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r87 required file missing: $Path" }
 }
 
@@ -62,6 +63,7 @@ foreach ($Forbidden in @('fetch(', 'providersApi.', 'invoke(', 'axios.', '$http.
 }
 
 $OriginalR86 = [System.IO.File]::ReadAllText($R86Builder)
+$OriginalR77 = [System.IO.File]::ReadAllText($R77Builder)
 $R87BuilderText = Retarget-R86Text $OriginalR86
 $R87StampText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Stamp))
 $R87ObserverText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Observer))
@@ -112,6 +114,32 @@ if (-not $R87BuilderText.Contains($R77CreateNeedle)) {
     throw 'r87 could not locate r77 compatibility materialization point'
 }
 $R87BuilderText = $R87BuilderText.Replace($R77CreateNeedle,$R77CreateReplacement)
+
+# PRE-MATERIALIZATION SIMULATION: exercise the exact condition that failed in
+# the first r87 full build. The strict observer must intentionally no longer
+# contain r77's legacy assistantRootsNow body, while still exposing the strict
+# ownership/baseline markers that authorize the two timestamp-only no-ops.
+$R77OldRootsMatch = [regex]::Match($OriginalR77, '(?s)\$OldAssistantRoots\s*=\s*@''\r?\n(?<body>.*?)\r?\n''@')
+if (-not $R77OldRootsMatch.Success) { throw 'r87 preflight could not extract r77 legacy assistant roots' }
+$R77OldRoots = $R77OldRootsMatch.Groups['body'].Value.Replace("`r`n","`n")
+$NormalizedObserver = $R87ObserverText.Replace("`r`n","`n")
+if ($NormalizedObserver.Contains($R77OldRoots)) {
+    throw 'r87 strict-observer simulation did not exercise the superseded legacy root path'
+}
+foreach ($Marker in @(
+    'function strictAssistantRootFor(node) {',
+    'function assistantRootsNow() {',
+    'state.timestampBaselineElements = new WeakSet();',
+    'if (!hasRecentLiveUsage()) return;'
+)) {
+    if (-not $NormalizedObserver.Contains($Marker)) {
+        throw "r87 strict-observer simulation missing marker: $Marker"
+    }
+}
+if (-not $R87BuilderText.Contains("'timestamp fallback assistant roots' -or `$Label -eq 'timestamp mutation fallback root'")) {
+    throw 'r87 strict-observer simulation missing timestamp-only supersession guard'
+}
+Write-Host 'R87_R77_STRICT_OBSERVER_SIMULATION_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     "`$R87Core = `$OriginalR83.Replace('r83','r87').Replace('R83','R87').Replace('+83','+87')",

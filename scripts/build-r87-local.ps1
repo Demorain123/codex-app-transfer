@@ -9,6 +9,8 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R86Builder = Join-Path $PSScriptRoot 'build-r86-local.ps1'
 $R77Builder = Join-Path $PSScriptRoot 'build-r77-local.ps1'
+$R75Builder = Join-Path $PSScriptRoot 'build-r75-output-ui-local.ps1'
+$R76OutputBuilder = Join-Path $PSScriptRoot 'build-r76-output-ui-local.ps1'
 $R76EntryBuilder = Join-Path $PSScriptRoot 'build-r76-local.ps1'
 $GuardSource = Join-Path $RepoRoot 'frontend/src/components/provider/Sub2ApiGrokCompatControls.vue'
 $R86Stamp = Join-Path $PSScriptRoot 'r86-timestamp-stamp.js'
@@ -20,7 +22,7 @@ $TempStamp = Join-Path $PSScriptRoot 'r87-timestamp-stamp.js'
 $TempObserver = Join-Path $PSScriptRoot 'r87-timestamp-observer.js'
 $TempObserverPatch = Join-Path $PSScriptRoot 'r87-r78-observer-patch.inc.ps1'
 
-foreach ($Path in @($R86Builder,$R77Builder,$R76EntryBuilder,$GuardSource,$R86Stamp,$R86Observer,$R86ObserverPatch)) {
+foreach ($Path in @($R86Builder,$R77Builder,$R75Builder,$R76OutputBuilder,$R76EntryBuilder,$GuardSource,$R86Stamp,$R86Observer,$R86ObserverPatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r87 required file missing: $Path" }
 }
 
@@ -63,9 +65,19 @@ foreach ($Forbidden in @('fetch(', 'providersApi.', 'invoke(', 'axios.', '$http.
     if ($GuardText.Contains($Forbidden)) { throw "r87 guard contains forbidden active-call shape: $Forbidden" }
 }
 
-# Gate the expensive nested carry-forward/package build on the r76 entrypoint's
-# own no-write preflight. This explicitly exercises the migration against native,
-# LF and CRLF source variants and proves a second pass is idempotent.
+# Gate the expensive carry-forward/package build on the actual historical text
+# transforms that feed the nested r77/r78/r83 chain. All three preflights are
+# no-write: r75 validates timestamp block/poll transforms, r76-output validates
+# telemetry/launcher transforms, and r76-entry validates native/LF/CRLF plus a
+# second idempotent pass.
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $R75Builder -PreflightOnly
+if ($LASTEXITCODE -ne 0) { throw "r87 r75 transform preflight failed with exit code $LASTEXITCODE" }
+Write-Host 'R87_R75_TEXT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
+
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $R76OutputBuilder -PreflightOnly
+if ($LASTEXITCODE -ne 0) { throw "r87 r76 output preflight failed with exit code $LASTEXITCODE" }
+Write-Host 'R87_R76_OUTPUT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
+
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $R76EntryBuilder -PreflightOnly
 if ($LASTEXITCODE -ne 0) { throw "r87 r76 entrypoint preflight failed with exit code $LASTEXITCODE" }
 Write-Host 'R87_R76_ENTRY_EOL_PREFLIGHT_PASS' -ForegroundColor Green
@@ -174,6 +186,7 @@ Write-Host '  - no /health, /models, /responses probe is issued by the guard'
 Write-Host '  - generic 502/503/timeout turn replay is not added'
 Write-Host '  - transport fallback remains explicitly Sub2API-owned / not probed'
 Write-Host '  - r86 timestamp correctness pipeline is inherited and retargeted, not rewritten'
+Write-Host '  - r75/r76 generated text transforms are exercised in no-write preflight before carry-forward'
 Write-Host '  - r77 legacy timestamp-root recovery safely yields to the r86+ strict observer during full builds'
 Write-Host '  - r76 entrypoint UI migration is preflighted across native/LF/CRLF before carry-forward starts'
 Write-Host '  - r43-r65 selective carry-forward and r66-r69 negative guards remain inherited'

@@ -21,7 +21,7 @@ function Get-R88PaneJsBlock([string]$Text,[string]$StartMarker,[string]$EndMarke
     $Start += $StartMarker.Length
     $End = $Text.IndexOf($EndMarker,$Start)
     if ($End -le $Start) { throw "r88 pane JS end marker missing: $Label" }
-    return $Text.Substring($Start,$End-$Start).Trim("`r","`n")
+    return $Text.Substring($Start,$End-$Start).Trim([char[]]"`r`n")
 }
 
 $R88ComposerBlock = Get-R88PaneJsBlock $R88PaneJs '// R88_COMPOSER_BLOCK_START' '// R88_COMPOSER_BLOCK_END' 'composer block'

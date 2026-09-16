@@ -10,6 +10,7 @@ $R74Builder = Join-Path $PSScriptRoot 'build-r74-output-ui-local.ps1'
 $R75Builder = Join-Path $PSScriptRoot 'build-r75-output-ui-local.ps1'
 $LauncherPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'src-tauri\resources\codex_no_micro_launcher.mjs'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r76-output-ui-local.generated.ps1'
+$PreflightLauncher = Join-Path $PSScriptRoot '.r76-launcher-preflight.generated.mjs'
 
 foreach ($Path in @($R74Builder, $R75Builder, $LauncherPath)) {
     if (-not (Test-Path $Path)) { throw "r76 required file missing: $Path" }
@@ -250,7 +251,7 @@ $MainProcessCollector = @'
 
 try {
     # 1) Build the exact read-only telemetry patches entirely in memory first.
-    # Preflight mode exits before touching r74/launcher/temp files.
+    # Preflight mode exits before touching tracked r74/launcher sources.
     $PatchedR74 = Replace-Required $OriginalR74 `
         '  state.refresh = refreshUi;' `
         ($ExternalUsageIngest + '  state.refresh = refreshUi;') `
@@ -302,6 +303,10 @@ try {
     }
 
     if ($PreflightOnly) {
+        Write-Utf8NoBom $PreflightLauncher $PatchedLauncher
+        node --check $PreflightLauncher
+        if ($LASTEXITCODE -ne 0) { throw 'r76 patched launcher preflight JavaScript syntax check failed' }
+        Write-Host 'R76_OUTPUT_JS_PREFLIGHT_PASS' -ForegroundColor Green
         Write-Host 'R76_OUTPUT_TEXT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
         return
     }
@@ -331,5 +336,6 @@ finally {
         Write-Utf8NoBom $LauncherPath $OriginalLauncher
     }
     Remove-Item -LiteralPath $TempBuilder -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $PreflightLauncher -Force -ErrorAction SilentlyContinue
     Write-Host '[r76] restored temporary source patches; worktree remains pull-friendly'
 }

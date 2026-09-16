@@ -33,6 +33,10 @@ function Assert-PowerShellParses([string]$Text,[string]$Label) {
     }
 }
 
+function Assert-TextContains([string]$Text,[string]$Needle,[string]$Label) {
+    if (-not $Text.Contains($Needle)) { throw "r87 runtime hotfix invariant missing ($Label): $Needle" }
+}
+
 $TrackedBefore = @(git -C $RepoRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0) { throw 'r87 runtime hotfix git status preflight failed' }
 if ($TrackedBefore.Count -gt 0) {
@@ -44,6 +48,46 @@ foreach ($Js in @($TimestampObserver,$PaneRuntime,$ExternalIngest,$MainCollector
     if ($LASTEXITCODE -ne 0) { throw "r87 runtime hotfix JavaScript syntax failed: $Js" }
 }
 Write-Host 'R87_RUNTIME_HOTFIX_JS_PREFLIGHT_PASS' -ForegroundColor Green
+
+$TimestampText = [System.IO.File]::ReadAllText($TimestampObserver)
+$PaneRuntimeText = [System.IO.File]::ReadAllText($PaneRuntime)
+$ExternalIngestText = [System.IO.File]::ReadAllText($ExternalIngest)
+$MainCollectorText = [System.IO.File]::ReadAllText($MainCollector)
+
+foreach ($Check in @(
+    @('function timestampPaneScopeFor(node) {','pane-local timestamp scope'),
+    @('function latestConversationTurnFor(node) {','pane-local latest turn'),
+    @('const composers = timestampComposerRoots();','multi-composer live signal'),
+    @('state.timestampBaselineElements.has(segment) || state.timestampBaselineKeys.has(key)','historical baseline guard'),
+    @('if (!isLatestTurnSurface(segment)) return;','latest-turn estimated timestamp guard')
+)) { Assert-TextContains $TimestampText $Check[0] $Check[1] }
+
+foreach ($Check in @(
+    @('function findComposerRoots() {','multi-pane composer resolver'),
+    @('function findComposerRoot() {','legacy composer compatibility facade'),
+    @('function ensureStatusBars() {','per-pane statusbar renderer'),
+    @('function placeStatusHost(host, composer) {','statusbar collision relocation'),
+    @('data-cas-status-placement-depth','statusbar placement evidence'),
+    @('data-cas-session-id','exact session identity attribute'),
+    @('sid ','session id surface'),
+    @('tid ','subagent thread id surface')
+)) { Assert-TextContains $PaneRuntimeText $Check[0] $Check[1] }
+
+foreach ($Check in @(
+    @('state.externalUsageByThread = new Map()','per-thread renderer usage map'),
+    @('sessionId: typeof envelope.sessionId ===','session id ingestion'),
+    @('parentThreadId: typeof envelope.parentThreadId ===','parent thread ingestion')
+)) { Assert-TextContains $ExternalIngestText $Check[0] $Check[1] }
+
+foreach ($Check in @(
+    @('CAS-R87-MULTI-PANE-EXACT-TOKEN-TELEMETRY','multi-pane collector marker'),
+    @('const visibleThreadExpression = "(() => {" +','visible pane thread resolver'),
+    @('const readUsageIdentity = async (filePath, fallbackThreadId) => {','session_meta identity reader'),
+    @("line.includes('session_meta')",'session_meta bounded scan'),
+    @('sessionId: identity && typeof identity.sessionId ===','session id forwarding'),
+    @('parentThreadId: identity && typeof identity.parentThreadId ===','parent id forwarding')
+)) { Assert-TextContains $MainCollectorText $Check[0] $Check[1] }
+Write-Host 'R87_RUNTIME_HOTFIX_UI_INVARIANTS_PASS' -ForegroundColor Green
 
 $BaseText = [System.IO.File]::ReadAllText($BaseBuilder)
 $PanePatchText = [System.IO.File]::ReadAllText($PanePatch)
@@ -95,7 +139,7 @@ foreach ($Marker in @(
 }
 Write-Host 'R87_RUNTIME_HOTFIX_STATIC_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - r87 successful package chain remains the unchanged base builder'
-Write-Host '  - timestamp live signal stays bounded by newest-turn/baseline protections'
+Write-Host '  - timestamp live signal stays bounded by pane-local latest-turn/baseline protections'
 Write-Host '  - each visible composer can receive an independent status bar'
 Write-Host '  - status hosts relocate outward when native composer layout would overlap them'
 Write-Host '  - local JSONL session_meta supplies session/thread/parent identity read-only'

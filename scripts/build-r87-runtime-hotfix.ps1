@@ -60,7 +60,7 @@ $R87ObserverPatchText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Obse
 $R87PanePatchPath = Join-Path $PSScriptRoot 'r87-pane-status-patch.inc.ps1'
 if (-not (Test-Path -LiteralPath $R87PanePatchPath)) { throw "r87 pane overlay include missing: $R87PanePatchPath" }
 $R87PanePatchText = [System.IO.File]::ReadAllText($R87PanePatchPath)
-$R87CoreNeedle = "$R87Core = $OriginalR83.Replace('r83','r87').Replace('R83','R87').Replace('+83','+87')"
+$R87CoreNeedle = '$R87Core = $OriginalR83.Replace(''r83'',''r87'').Replace(''R83'',''R87'').Replace(''+83'',''+87'')'
 if (-not $R87BuilderText.Contains($R87CoreNeedle)) {
     throw 'r87 runtime hotfix could not locate generated r87 core materialization point'
 }

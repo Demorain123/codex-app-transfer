@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "purpose": "Evidence-driven carry-forward audit. Historical ancestry or an old bootstrap script alone does not count as runtime materialization.",
+  "prerequisites": [
+    {
+      "version": "r42",
+      "capability": "Grok tool-collision guard retained as a required r43 regression invariant",
+      "reference_branches": ["dev-r42-grok-tool-collision-guard-local"]
+    }
+  ],
+  "requirements": [
+    {
+      "version": "r43",
+      "capability": "health/MCP hardening: attribution isolation, stale-fault clearing, transient-vs-persistent failure handling, MCP generation/Exit Guard hardening while preserving r42 collision guard",
+      "reference_branches": ["dev-r43-health-mcp-hardening-local"],
+      "evidence_scripts": ["scripts/apply_r43_unified.py", "scripts/apply_r43_rewrite_health_replay_preflight.py"]
+    },
+    {
+      "version": "r44",
+      "capability": "Responses terminal semantics",
+      "reference_branches": ["dev-r44-responses-terminal-semantics"],
+      "evidence_scripts": []
+    },
+    {
+      "version": "r45",
+      "capability": "model-switch continuity and compaction metadata/detector safety",
+      "reference_branches": ["dev-r45-model-switch-continuity-local"],
+      "evidence_scripts": ["scripts/apply_r45_unified.py", "scripts/apply_r45_model_switch_continuity.py", "scripts/apply_r45_compaction_metadata_truth.py", "scripts/apply_r45_compaction_detector_safety.py"]
+    },
+    {
+      "version": "r46",
+      "capability": "model-switch old-thread recovery plus recovery explainability/forensics hardening",
+      "reference_branches": ["dev-r46-model-switch-old-thread-recovery-local"],
+      "evidence_scripts": ["scripts/apply_r46_unified.py", "scripts/apply_r46_thread_recovery_backend_fixes.py", "scripts/apply_r46_thread_recovery_backup_hardening.py", "scripts/apply_r46_thread_recovery_ui.py", "scripts/apply_r46_chain_health_recovery_hint.py"]
+    },
+    {
+      "version": "r47",
+      "capability": "Codex temp-dir control and agent-loop recovery",
+      "reference_branches": ["dev-r47-codex-temp-dir-local"],
+      "evidence_scripts": ["scripts/apply_r47_unified.py", "scripts/apply_r47_codex_temp_dir.py", "scripts/apply_r47_agent_loop_recovery.py"]
+    },
+    {
+      "version": "r48",
+      "capability": "provider-scoped temp control",
+      "reference_branches": ["dev-r48-provider-temp-control-local"],
+      "evidence_scripts": ["scripts/apply_r48_unified.py", "scripts/apply_r48_provider_temp_control.py"]
+    },
+    {
+      "version": "r49",
+      "capability": "unified Codex temp launch with no micro temp-scope regression",
+      "reference_branches": ["dev-r49-unified-codex-temp-launch-local"],
+      "evidence_scripts": ["scripts/apply_r49_unified.py", "scripts/apply_r49_unified_codex_temp_launch.py", "scripts/apply_r49_no_micro_temp_scope_fix.py"]
+    },
+    {
+      "version": "r50",
+      "capability": "same-session cross-model replay",
+      "reference_branches": ["dev-r50-same-session-cross-model-replay-local"],
+      "evidence_scripts": ["scripts/apply_r50_unified.py", "scripts/apply_r50_same_session_cross_model_replay.py"]
+    },
+    {
+      "version": "r51",
+      "capability": "model-switch classifier compact handoff, role truth and compact-handoff quality",
+      "reference_branches": ["dev-r51-model-switch-classifier-compact-handoff-local"],
+      "evidence_scripts": ["scripts/apply_r51_unified.py", "scripts/apply_r51_compaction_role_truth_hotfix.py", "scripts/apply_r51_compact_handoff_quality_hotfix.py"]
+    },
+    {
+      "version": "r52",
+      "capability": "portable cross-model compaction history with guarded non-Grok compact adapter",
+      "reference_branches": ["dev-r52-cross-model-compaction-history-portable-local"],
+      "evidence_scripts": ["scripts/apply_r52_unified.py", "scripts/apply_r52_sub2api_cross_model_compaction.py", "scripts/apply_r52_non_grok_compact_adapter_guard.py"]
+    },
+    {
+      "version": "r53",
+      "capability": "Sub2API OAuth compact max-output compatibility",
+      "reference_branches": ["dev-r53-sub2api-oauth-compact-max-output-local"],
+      "evidence_scripts": ["scripts/apply_r53_unified.py", "scripts/apply_r53_sub2api_compact_max_output_hotfix.py"]
+    },
+    {
+      "version": "r54",
+      "capability": "Sub2API compact Responses SSE reassembly",
+      "reference_branches": ["dev-r54-sub2api-compact-responses-sse-local"],
+      "evidence_scripts": ["scripts/apply_r54_unified.py", "scripts/apply_r54_compact_responses_sse_reassembly.py"]
+    },
+    {
+      "version": "r55",
+      "capability": "safe detached MCP helper install",
+      "reference_branches": ["dev-r55-detached-mcp-helper-install-safe-local"],
+      "evidence_scripts": ["scripts/apply_r55_unified.py", "scripts/apply_r55_detached_mcp_helper.py", "scripts/Verify-r55-MCP-Detach.ps1"]
+    },
+    {
+      "version": "r56",
+      "capability": "compact SSE summary fallback",
+      "reference_branches": ["dev-r56-compact-sse-summary-fallback-local"],
+      "evidence_scripts": ["scripts/apply_r56_unified.py", "scripts/apply_r56_compact_sse_summary_fallback.py"]
+    },
+    {
+      "version": "r57",
+      "capability": "external MCP source migration and dependency repair",
+      "reference_branches": ["dev-r57-external-mcp-source-migration-local"],
+      "evidence_scripts": ["scripts/apply_r57_unified.py", "scripts/apply_r57_external_mcp_source_migration.py", "scripts/apply_r57_sqlite_dependency_repair.py", "scripts/Verify-r57-External-MCP-Migration.ps1"]
+    },
+    {
+      "version": "r58",
+      "capability": "Windows ChatGPT lifecycle guard",
+      "reference_branches": ["dev-r58-windows-chatgpt-lifecycle-guard-local"],
+      "evidence_scripts": ["scripts/apply_r58_unified.py", "scripts/apply_r58_windows_chatgpt_lifecycle_guard.py", "scripts/Verify-r58-Windows-Lifecycle.ps1"]
+    },
+    {
+      "version": "r59",
+      "capability": "interrupted-tail same-session/same-id recovery",
+      "reference_branches": ["dev-r59-interrupted-tail-same-id-recovery-local"],
+      "evidence_scripts": ["scripts/apply_r59_unified.py", "scripts/apply_r59_interrupted_tail_same_id_recovery.py", "scripts/Verify-r59-Interrupted-Tail-Recovery.ps1"]
+    },
+    {
+      "version": "r60",
+      "capability": "recovery session catalog plus Sub2API post-compaction replay compatibility",
+      "reference_branches": ["dev-r60-recovery-session-catalog-local", "dev-r60-sub2api-post-compact-replay-local", "dev-r60-sub2api-post-compaction-replay-local"],
+      "evidence_scripts": ["scripts/apply_r60_unified.py", "scripts/apply_r60_sub2api_post_compaction_replay.py"]
+    },
+    {
+      "version": "r61",
+      "capability": "model-switch compact resume-once / Sub2API compaction-loop guard and legacy remote-compaction compatibility",
+      "reference_branches": ["dev-r61-model-switch-compact-resume-once", "dev-r61-sub2api-compaction-loop-guard-local"],
+      "evidence_scripts": ["scripts/apply_r61_unified.py", "scripts/apply_r61_disable_remote_compaction_v2.py"]
+    },
+    {
+      "version": "r62",
+      "capability": "compact summary repair/retry",
+      "reference_branches": ["dev-r62-compact-summary-repair-retry-local"],
+      "evidence_scripts": ["scripts/apply_r62_unified.py", "scripts/apply_r62_compact_summary_repair.py"]
+    },
+    {
+      "version": "r63",
+      "capability": "auth-epoch encrypted-history fence and compile hardening",
+      "reference_branches": ["dev-r63-auth-epoch-encrypted-history-fence-local"],
+      "evidence_scripts": ["scripts/apply_r63_unified.py", "scripts/apply_r63_auth_epoch_encrypted_history_fence.py", "scripts/apply_r63_compile_hardening.py"]
+    },
+    {
+      "version": "r64",
+      "capability": "post-compact continuation guard",
+      "reference_branches": ["dev-r64-post-compact-continuation-guard-local"],
+      "evidence_scripts": ["scripts/apply_r64_unified.py", "scripts/apply_r64_post_compact_continuation_guard.py", "scripts/README-R64.md"]
+    },
+    {
+      "version": "r65",
+      "capability": "Windows first-turn startup generation gate",
+      "reference_branches": ["dev-r65-first-turn-startup-generation-gate-local"],
+      "evidence_scripts": ["scripts/Bootstrap-r65-Local.ps1"]
+    }
+  ],
+  "excluded_experiments": [
+    {"version":"r66","reference_branch":"dev-r66-post-compact-hooks-ab-local","marker":"CAS-R66-POST-COMPACT-HOOKS-AB"},
+    {"version":"r67","reference_branch":"dev-r67-hooks-restored-selective-state-local","marker":"CAS-R67-HOOKS-RESTORED-SELECTIVE-STATE"},
+    {"version":"r68","reference_branch":"dev-r68-sessionstart-only-ab-local","marker":"CAS-R68-SESSIONSTART-ONLY-HOOKS-AB"},
+    {"version":"r69","reference_branch":"dev-r69-sessionstart-postcompact-ab-local","marker":"CAS-R69-SESSIONSTART-POSTCOMPACT-HOOKS-AB"}
+  ],
+  "future_required_after_carry_forward": {
+    "hook_health": "read-only only: counts/categories/correlation; no paths, commands, hook IDs, automatic disable/delete/edit, or recovery mutation",
+    "observability": "retain exact-vs-estimated timestamp confidence and exact token telemetry recovery from r77/r78",
+    "provider_compatibility": "retain Sub2API/local-model catalog, aliases, unknown-price handling and r70 masked historical-turn compatibility"
+  }
+}

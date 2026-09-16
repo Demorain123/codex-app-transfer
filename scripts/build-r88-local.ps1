@@ -9,17 +9,19 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R87Builder = Join-Path $PSScriptRoot 'build-r87-local.ps1'
 $R88Observer = Join-Path $PSScriptRoot 'r88-timestamp-observer.js'
-$R88PanePatch = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v3.inc.ps1'
+$R88PaneJs = Join-Path $PSScriptRoot 'r88-pane-runtime.js'
+$R88PanePatch = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v4.inc.ps1'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r88-from-r87.generated.ps1'
 $TempObserverCheck = Join-Path $PSScriptRoot '.r88-observer-syntax.generated.mjs'
 
-foreach ($Path in @($R87Builder,$R88Observer,$R88PanePatch)) {
+foreach ($Path in @($R87Builder,$R88Observer,$R88PaneJs,$R88PanePatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r88 required file missing: $Path" }
 }
 
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $OriginalR87 = [System.IO.File]::ReadAllText($R87Builder)
 $ObserverText = [System.IO.File]::ReadAllText($R88Observer)
+$PaneJsText = [System.IO.File]::ReadAllText($R88PaneJs)
 $PanePatchText = [System.IO.File]::ReadAllText($R88PanePatch)
 
 function Write-Utf8NoBom([string]$Path,[string]$Text) {
@@ -60,24 +62,42 @@ foreach ($Marker in @(
     if (-not $ObserverText.Contains($Marker)) { throw "r88 observer invariant missing: $Marker" }
 }
 foreach ($Marker in @(
-    'R88_PANE_RUNTIME_GENERATION_PATCH_V3',
-    'R88_PANE_RUNTIME_PATCH',
+    'R88_PANE_RUNTIME_JS',
+    'R88_COMPOSER_BLOCK_START',
+    'R88_COMPOSER_BLOCK_END',
+    'R88_REFRESH_BLOCK_START',
+    'R88_REFRESH_BLOCK_END',
     'function findComposerRoots() {',
     'function paneForNode(node) {',
     'function paneThreadId(pane, composer) {',
     'function ensureStatusBars() {',
-    'function statusHtmlForPane(threadId) {',
-    'data-cas-pane-statusbar',
+    'function statusHtmlForPane(threadId, agentId) {',
     'margin:0 0 22px 0'
+)) {
+    if (-not $PaneJsText.Contains($Marker)) { throw "r88 pane JS invariant missing: $Marker" }
+}
+foreach ($Marker in @(
+    'R88_PANE_RUNTIME_GENERATION_PATCH_V4',
+    'R88_PANE_RUNTIME_PATCH',
+    'r88-pane-runtime.js',
+    'Get-R88PaneJsBlock',
+    'r88 pane-scoped composer/status mounting',
+    'r88 pane status refresh'
 )) {
     if (-not $PanePatchText.Contains($Marker)) { throw "r88 pane patch invariant missing: $Marker" }
 }
+Assert-PowerShellParses $PanePatchText 'r88 pane generation include'
+Write-Host 'R88_PANE_PATCH_PS_PARSE_PASS' -ForegroundColor Green
 
 try {
     Write-Utf8NoBom $TempObserverCheck ("function __r88ObserverSyntaxOnly(){`n" + $ObserverText + "`n}`n")
     node --check $TempObserverCheck
     if ($LASTEXITCODE -ne 0) { throw 'r88 timestamp observer JavaScript syntax check failed' }
     Write-Host 'R88_TIMESTAMP_OBSERVER_JS_PREFLIGHT_PASS' -ForegroundColor Green
+
+    node --check $R88PaneJs
+    if ($LASTEXITCODE -ne 0) { throw 'r88 pane runtime JavaScript syntax check failed' }
+    Write-Host 'R88_PANE_RUNTIME_JS_PREFLIGHT_PASS' -ForegroundColor Green
 
     $R88 = $OriginalR87
 
@@ -103,7 +123,7 @@ try {
     $PaneDeclNeedle = "`$R86ObserverPatch = Join-Path `$PSScriptRoot 'r86-r78-observer-patch.inc.ps1'"
     $PaneDeclReplacement = @'
 $R86ObserverPatch = Join-Path $PSScriptRoot 'r86-r78-observer-patch.inc.ps1'
-$R88PanePatchInclude = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v3.inc.ps1'
+$R88PanePatchInclude = Join-Path $PSScriptRoot 'r88-r75-pane-runtime-patch-v4.inc.ps1'
 if (-not (Test-Path -LiteralPath $R88PanePatchInclude)) { throw "r88 pane runtime patch missing: $R88PanePatchInclude" }
 '@
     $R88 = Replace-Required $R88 $PaneDeclNeedle $PaneDeclReplacement 'declare r88 pane patch include'
@@ -126,9 +146,11 @@ $R87BuilderText = $R87BuilderText.Replace(
     $OldCoreVerify = @'
     "`$R87Core = `$OriginalR83.Replace('r83','r87').Replace('R83','R87').Replace('+83','+87')",
 '@
+    $OldCoreVerify = $OldCoreVerify.Replace('\"','"')
     $NewCoreVerify = @'
     "`$R88Core = `$OriginalR83.Replace('r83','r88').Replace('R83','R88').Replace('+83','+88')",
 '@
+    $NewCoreVerify = $NewCoreVerify.Replace('\"','"')
     $R88 = Replace-Required $R88 $OldCoreVerify $NewCoreVerify 'retarget inner core verification marker'
 
     foreach ($Pair in @(
@@ -161,7 +183,8 @@ $R87BuilderText = $R87BuilderText.Replace(
     if ($PreflightOnly) {
         Write-Host 'R88_PANE_RUNTIME_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - main and split/agent composer panes are enumerated independently'
-        Write-Host '  - pane-local session/thread id is shown; mismatched telemetry fails closed to --'
+        Write-Host '  - pane-local session/thread id is shown; agent id is separately labeled when only the short agent handle is visible'
+        Write-Host '  - mismatched telemetry fails closed to -- instead of borrowing another pane''s metrics'
         Write-Host '  - status bars reserve 22px below-bar space so native Step pills do not overlap'
         Write-Host '  - live timestamp fallback is pane-scoped and still blocks baseline/remounted history'
     } else {
@@ -169,7 +192,8 @@ $R87BuilderText = $R87BuilderText.Replace(
         Write-Host 'R88_PANE_RUNTIME_UI_FIX_PASS' -ForegroundColor Green
         Write-Host '  - pane-aware live timestamps restored without weakening historical-baseline protection'
         Write-Host '  - one status bar per visible conversation/agent pane'
-        Write-Host '  - pane-local sid visible; non-owned telemetry is never borrowed from another pane'
+        Write-Host '  - pane-local sid visible; agent handle is not misreported as a session id'
+        Write-Host '  - non-owned telemetry is never borrowed from another pane'
         Write-Host '  - visible/package identity is r88 / 2.4.5+88'
     }
 }

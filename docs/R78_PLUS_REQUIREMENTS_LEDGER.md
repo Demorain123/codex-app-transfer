@@ -1,6 +1,6 @@
 # R78+ requirements ledger
 
-This ledger is the acceptance contract for the post-r76/r77 work. A requirement is not complete merely because an older branch, experiment, or build script once contained related code. It must be **materialized**, **already-equivalent with evidence**, or **not-applicable with evidence** in the current daily-build chain.
+This ledger is the acceptance contract for the post-r76/r77 work. A requirement is not complete merely because an older branch, experiment, or build script once contained related code. It must be **materialized**, **already-equivalent with evidence**, or **not-applicable-with-evidence** in the current daily-build chain.
 
 ## Immediate correctness blockers
 
@@ -16,18 +16,35 @@ This ledger is the acceptance contract for the post-r76/r77 work. A requirement 
 
 For every formal release capability from r43 through r65, record one of `materialized`, `already-equivalent`, or `not-applicable-with-evidence`, with source paths/tests. Do not mark the range complete from branch names or historical commits alone.
 
-Known later-range capabilities that must be explicitly verified include:
+The authoritative historical source branches currently present in this repository are:
 
-- r58 Windows ChatGPT.exe lifecycle adaptation
-- r59 interrupted-tail same agent/session recovery
-- r60 Sub2API terminated-SSE compatibility
-- r61 compact/encrypted_content preservation
-- r62 Grok item_reference compatibility
-- r63 masked historical item_reference snapshot/restore
-- r64 conditional placeholder stripping
-- r65 Windows first-turn startup generation gate
+| Rev | Historical source branch |
+| --- | --- |
+| r43 | `dev-r43-rewrite-health-mcp-overlay-local` |
+| r44 | `dev-r44-orchestrate-anything-trellis-local` |
+| r45 | `dev-r45-rewrite-hook-skill-rebuild-local` |
+| r46 | `dev-r46-r45-official-guardrails-local` |
+| r47 | `dev-r47-r42-43-44-rebase-local` |
+| r48 | `dev-r48-session-hooks-local` |
+| r49 | `dev-r49-scripts-hooks-local` |
+| r50 | `dev-r50-trellis-addon-local` |
+| r51 | `dev-r51-skill-lineage-hook-local` |
+| r52 | `dev-r52-global-sessionstart-local` |
+| r53 | `dev-r53-r51-r41-regression-local` |
+| r54 | `dev-r54-no-hook-duplicate-rebuild-local` |
+| r55 | `dev-r55-hook-triage-local` |
+| r56 | `dev-r56-post-compact-continuity-local` |
+| r57 | `dev-r57-windows-process-health-local` |
+| r58 | `dev-r58-chatgpt-lifecycle-local` |
+| r59 | `dev-r59-gpt56-luna-max-local` |
+| r60 | `dev-r60-consent-transcript-structure-local` |
+| r61 | `dev-r61-transition-diagnostics-local` |
+| r62 | `dev-r62-canonical-local-rebase` |
+| r63 | `dev-r63-scope-separation-local` |
+| r64 | `dev-r64-auq-local-only-owned-primitive` |
+| r65 | `dev-r65-first-turn-startup-generation-gate-local` |
 
-r43-r57 must be recovered from repository history and audited individually rather than guessed.
+These branch names are discovery inputs, not proof that their behavior is present in the current build. Each revision still requires source/test evidence. In particular, older summaries that mapped r59-r64 to unrelated later compatibility features are not authoritative and must not be used for carry-forward acceptance.
 
 ## r66-r69 negative invariant
 

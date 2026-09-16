@@ -1,5 +1,6 @@
 param(
-    [switch]$RunFocusedTests
+    [switch]$RunFocusedTests,
+    [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -347,6 +348,11 @@ try {
         'R75_OUTPUT_UI_LOCAL_PASS'
     )) {
         if (-not $Patched.Contains($Marker)) { throw "r75 generated builder verification failed: $Marker" }
+    }
+
+    if ($PreflightOnly) {
+        Write-Host 'R75_TEXT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
+        return
     }
 
     [System.IO.File]::WriteAllText($TempBuilder, $Patched, $Utf8NoBom)

@@ -81,6 +81,10 @@ Write-Host 'R87_R76_OUTPUT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
 if ($LASTEXITCODE -ne 0) { throw "r87 r76 entrypoint preflight failed with exit code $LASTEXITCODE" }
 Write-Host 'R87_R76_ENTRY_EOL_PREFLIGHT_PASS' -ForegroundColor Green
 
+& node --check $R86Observer
+if ($LASTEXITCODE -ne 0) { throw "r87 timestamp observer JavaScript syntax preflight failed with exit code $LASTEXITCODE" }
+Write-Host 'R87_TIMESTAMP_OBSERVER_JS_PREFLIGHT_PASS' -ForegroundColor Green
+
 $GeneratorDirty = @(git -C $RepoRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0) { throw 'r87 generator preflight worktree check failed' }
 if ($GeneratorDirty.Count -gt 0) {
@@ -150,6 +154,28 @@ foreach ($Marker in @(
         throw "r87 strict-observer simulation missing marker: $Marker"
     }
 }
+
+# Runtime regression guard discovered during the first successful r87 package
+# smoke test: exact token_count can lag a long-running turn, so strict timestamp
+# ownership must have a bounded UI-live signal without reopening historical
+# Date.now() stamping. Estimated stamps stay limited to the newest turn.
+foreach ($Marker in @(
+    'function activeGenerationUiPresent() {',
+    'function latestConversationTurn() {',
+    'function isLatestTurnSurface(node) {',
+    'function liveSemanticRootFor(node) {',
+    'if (activeGenerationUiPresent()) return true;',
+    'return liveSemanticRootFor(element);',
+    'if (!isLatestTurnSurface(segment)) return;',
+    'state.timestampBaselineElements.has(segment) || state.timestampBaselineKeys.has(key)',
+    'sweepOutputSegments(false)'
+)) {
+    if (-not $NormalizedObserver.Contains($Marker)) {
+        throw "r87 timestamp live-signal invariant missing: $Marker"
+    }
+}
+Write-Host 'R87_TIMESTAMP_LIVE_SIGNAL_PREFLIGHT_PASS' -ForegroundColor Green
+
 if (-not $R87BuilderText.Contains("'timestamp fallback assistant roots' -or `$Label -eq 'timestamp mutation fallback root'")) {
     throw 'r87 strict-observer simulation missing timestamp-only supersession guard'
 }
@@ -177,6 +203,9 @@ Write-Host '  - no /health, /models, /responses probe is issued by the guard'
 Write-Host '  - generic 502/503/timeout turn replay is not added'
 Write-Host '  - transport fallback remains explicitly Sub2API-owned / not probed'
 Write-Host '  - r86 timestamp correctness pipeline is inherited and retargeted, not rewritten'
+Write-Host '  - long-running turns can use the visible stop/cancel control as bounded live evidence when token_count lags'
+Write-Host '  - estimated timestamps remain restricted to the newest turn; baseline/remount and user-message guards stay intact'
+Write-Host '  - progress/tool/agent semantic surfaces can recover a live root without reopening broad historical roots'
 Write-Host '  - r75 verification accepts only a complete legacy observer or complete r86+ strict/live-only observer'
 Write-Host '  - r75 deep preflight now simulates the exact strict observer source used by the real nested build'
 Write-Host '  - r77 legacy timestamp-root recovery safely yields to the r86+ strict observer during full builds'

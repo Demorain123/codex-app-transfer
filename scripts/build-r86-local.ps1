@@ -12,9 +12,10 @@ $R85Builder = Join-Path $PSScriptRoot 'build-r85-local.ps1'
 $R75Builder = Join-Path $PSScriptRoot 'build-r75-output-ui-local.ps1'
 $StampSource = Join-Path $PSScriptRoot 'r86-timestamp-stamp.js'
 $ObserverSource = Join-Path $PSScriptRoot 'r86-timestamp-observer.js'
+$ObserverPatchInclude = Join-Path $PSScriptRoot 'r86-r78-observer-patch.inc.ps1'
 $TempR86Builder = Join-Path $PSScriptRoot '.build-r86-from-r83.generated.ps1'
 
-foreach ($Path in @($R83Builder,$R85Builder,$R75Builder,$StampSource,$ObserverSource)) {
+foreach ($Path in @($R83Builder,$R85Builder,$R75Builder,$StampSource,$ObserverSource,$ObserverPatchInclude)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r86 required file missing: $Path" }
 }
 
@@ -24,6 +25,7 @@ $OriginalR85 = [System.IO.File]::ReadAllText($R85Builder)
 $OriginalR75 = [System.IO.File]::ReadAllText($R75Builder)
 $StampBody = [System.IO.File]::ReadAllText($StampSource)
 $ObserverBody = [System.IO.File]::ReadAllText($ObserverSource)
+$ObserverPatchText = [System.IO.File]::ReadAllText($ObserverPatchInclude)
 
 function Write-Utf8NoBom([string]$Path,[string]$Text) {
     [System.IO.File]::WriteAllText($Path,$Text,$Utf8NoBom)
@@ -134,19 +136,23 @@ $PatchedR75 = Replace-BlockRequired `
     'install r86 segmentation into r75 source'
 
 # ---------------------------------------------------------------------------
-# 2) Start from the already preflighted r83 package/carry-forward chain. Patch
-# the generated r78 timestamp layer itself, because r78 owns/overwrites stamp
-# logic after r75 is loaded. This avoids the broken r85->r84 insertion point and
-# ensures the strict stamp/observer actually survives to the packaged runtime.
+# 2) Start from r83's already-preflighted package/carry-forward chain. The r78
+# generation layer owns the action-row stamp rewrite, so patch that generated
+# script directly instead of trying to inject into r85/r84 after the fact.
 # ---------------------------------------------------------------------------
 $R86Core = $OriginalR83.Replace('r83','r86').Replace('R83','R86').Replace('+83','+86')
-$StampB64 = [Convert]::ToBase64String($Utf8NoBom.GetBytes($StampBody))
-$ObserverB64 = [Convert]::ToBase64String($Utf8NoBom.GetBytes($ObserverBody))
 
-$GeneratedR78PatchTemplate = @'
+$GeneratedR78Patch = @'
 
 # R86_TIMESTAMP_R78_GENERATION_PATCH
-$R86StampBody = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__STAMP_B64__'))
+$R86StampBodyPath = Join-Path $PSScriptRoot 'r86-timestamp-stamp.js'
+$R86ObserverPatchPath = Join-Path $PSScriptRoot 'r86-r78-observer-patch.inc.ps1'
+foreach ($R86Path in @($R86StampBodyPath,$R86ObserverPatchPath)) {
+    if (-not (Test-Path -LiteralPath $R86Path)) { throw "r86 generated timestamp helper missing: $R86Path" }
+}
+$R86StampBody = [System.IO.File]::ReadAllText($R86StampBodyPath)
+$R86ObserverPatchCode = [System.IO.File]::ReadAllText($R86ObserverPatchPath)
+
 $StampStart = $R86BuilderText.IndexOf('$NewStampBody = @''')
 $StampEnd = if ($StampStart -ge 0) { $R86BuilderText.IndexOf('$NewStamp = ', $StampStart) } else { -1 }
 if ($StampStart -lt 0 -or $StampEnd -le $StampStart) { throw 'r86 could not locate generated r78 stamp body' }
@@ -157,14 +163,7 @@ $LeakLabelIndex = $R86BuilderText.IndexOf('do not leak final reply native time i
 $ObserverPatchStart = if ($LeakLabelIndex -ge 0) { $R86BuilderText.LastIndexOf('$PatchedR75 = Replace-Required',$LeakLabelIndex) } else { -1 }
 $ObserverPatchEnd = if ($LeakLabelIndex -ge 0) { $R86BuilderText.IndexOf('foreach ($Marker in @(',$LeakLabelIndex) } else { -1 }
 if ($ObserverPatchStart -lt 0 -or $ObserverPatchEnd -le $ObserverPatchStart) { throw 'r86 could not locate generated r78 observer patch block' }
-$ObserverPatchCode = @'
-$R86ObserverBody = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__OBSERVER_B64__'))
-$R86ObserverWrapped = '$NewObserver = @''' + "`r`n" + $R86ObserverBody + "`r`n'@"
-$R86ObserverReplacement = $R86ObserverWrapped + "`r`n`r`ntry {`r`n"
-$PatchedR75 = Replace-BlockRequired $PatchedR75 '$NewObserver = @''' '    # Build r75 from the already-reviewed r74 local builder without copying its' $R86ObserverReplacement 'r86 live-only timestamp observer'
-$PatchedR75 = $PatchedR75.Replace('try { sweepOutputSegments(true); } catch {}','try { sweepOutputSegments(false); } catch {}')
-'@
-$R86BuilderText = $R86BuilderText.Substring(0,$ObserverPatchStart) + $ObserverPatchCode + "`r`n`r`n" + $R86BuilderText.Substring($ObserverPatchEnd)
+$R86BuilderText = $R86BuilderText.Substring(0,$ObserverPatchStart) + $R86ObserverPatchCode + "`r`n`r`n" + $R86BuilderText.Substring($ObserverPatchEnd)
 
 foreach ($Marker in @(
     'function isFinalAssistantSurface(segment) {',
@@ -175,7 +174,6 @@ foreach ($Marker in @(
     if (-not $R86BuilderText.Contains($Marker)) { throw "r86 generated r78 timestamp patch verification failed: $Marker" }
 }
 '@
-$GeneratedR78Patch = $GeneratedR78PatchTemplate.Replace('__STAMP_B64__',$StampB64).Replace('__OBSERVER_B64__',$ObserverB64)
 
 $R78RetargetNeedle = '$R86BuilderText = $R86BuilderText.Replace(''r78'',''r86'').Replace(''R78'',''R86'').Replace(''+78'',''+86'')'
 $R86Core = Insert-AfterRequired $R86Core $R78RetargetNeedle $GeneratedR78Patch 'patch generated r78 timestamp layer'
@@ -233,6 +231,9 @@ foreach ($Marker in @(
     'sweepOutputSegments(false)'
 )) {
     if (-not (($StampBody + "`n" + $ObserverBody).Contains($Marker))) { throw "r86 strict timestamp source verification failed: $Marker" }
+}
+if (-not $ObserverPatchText.Contains('r86 live-only timestamp observer')) {
+    throw 'r86 observer patch include verification failed'
 }
 
 Assert-PowerShellParses $PatchedR75 'r86 patched r75 timestamp source'

@@ -34,6 +34,14 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     return $Text.Replace($Old,$New)
 }
 
+function Replace-BlockRequired([string]$Text,[string]$StartMarker,[string]$EndMarker,[string]$Replacement,[string]$Label) {
+    $Start = $Text.IndexOf($StartMarker)
+    if ($Start -lt 0) { throw "r83 preflight block start missing: $Label" }
+    $End = $Text.IndexOf($EndMarker,$Start + $StartMarker.Length)
+    if ($End -le $Start) { throw "r83 preflight block end missing: $Label" }
+    return $Text.Substring(0,$Start) + $Replacement + "`r`n`r`n" + $Text.Substring($End)
+}
+
 function Assert-Contains([string]$Text,[string]$Needle,[string]$Label) {
     if (-not $Text.Contains($Needle)) { throw "r83 preflight invariant missing: $Label" }
 }
@@ -45,11 +53,11 @@ function Assert-NotContains([string]$Text,[string]$Needle,[string]$Label) {
 # ---------------------------------------------------------------------------
 # PRE-BUILD STATIC PIPELINE PREFLIGHT
 # ---------------------------------------------------------------------------
-# Do this BEFORE replaying r43-r65 so exact-string drift in the observability
-# builder chain fails immediately, rather than after several minutes of work.
+# This phase runs before r43-r65 materialization. Exact-string drift therefore
+# fails in seconds, instead of after the expensive carry-forward chain.
 
-# Patch the actual r76 collector source layer. r77/r78 generate from this file;
-# patching build-r77 itself was the source-layer mistake that broke r82.
+# Patch the real collector source layer. r77 reads this r76 file and generates
+# the target-version output builder from it.
 $PatchedR76Output = Replace-Required $OriginalR76Output `
     "        if (url && !url.startsWith('app://')) continue;" `
     "        if (url && /^(devtools:|chrome-extension:|chrome:)/i.test(url)) continue;" `
@@ -72,24 +80,52 @@ $NewSafeEnvelope = @'
 '@
 $PatchedR76Output = Replace-Required $PatchedR76Output $OldSafeEnvelope $NewSafeEnvelope 'r76 collector safe model envelope'
 
-# r78 is the last known-good composition layer for timestamp/action-row logic.
-# Generate r83 directly from r78; do not wrap r80/r82 and do not rewrite an
-# already-generated builder. This keeps source/target roles unambiguous.
-$R83BuilderText = $OriginalR78.Replace('r78','r83').Replace('R78','R83').Replace('+78','+83')
-
-# Validate the exact inner needles that the generated r83 script will consume.
-foreach ($Check in @(
-    @("`$R77OutputText = `$OriginalR76Output.Replace('r76', 'r77').Replace('R76', 'R77').Replace('+76', '+77')",'r77 output identity source'),
-    @("`$R77EntryText = `$OriginalR76Local.Replace('r76', 'r77').Replace('R76', 'R77').Replace('+76', '+77')",'r77 entry identity source'),
-    @("Replace('r75', 'r77')",'r77 timestamp identity source'),
-    @('R77_EXACT_TOKEN_TELEMETRY_PASS','r77 exact telemetry marker'),
-    @('R77_LOCAL_ENTRYPOINT_PASS','r77 entry marker'),
-    @('state.ingestExternalUsage = ingestExternalUsage;','r77 external usage bridge'),
-    @('data-above-composer-conversation-id','r77 active-thread resolver')
+# r78 contains the reviewed timestamp-v4/action-row layer. Its historical
+# r77->r78 conversion changed only selected version strings, which leaves inner
+# generated path literals at r77. For r83, replace that conversion block with a
+# complete r77->r83 retarget so variables, generated filenames, expected paths,
+# PASS markers and diagnostics all agree on one target version.
+$R83CoreBlock = @'
+$PatchedR77 = $OriginalR77.Replace('r77', 'r83').Replace('R77', 'R83').Replace('+77', '+83')
+foreach ($Marker in @(
+    "$R83OutputText = $OriginalR76Output.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",
+    "$R83EntryText = $OriginalR76Local.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",
+    "build-r83-output-ui-local.ps1",
+    ".build-r83-output.generated.ps1",
+    "R83_EXACT_TOKEN_TELEMETRY_PASS",
+    "R83_LOCAL_ENTRYPOINT_PASS",
+    "state.ingestExternalUsage = ingestExternalUsage;",
+    "data-above-composer-conversation-id"
 )) {
-    Assert-Contains $OriginalR77 $Check[0] $Check[1]
+    if (-not $PatchedR77.Contains($Marker)) { throw "r83 retargeted r77 source verification failed: $Marker" }
+}
+'@
+
+$R83BuilderText = Replace-BlockRequired `
+    $OriginalR78 `
+    '$PatchedR77 = $OriginalR77' `
+    'try {' `
+    $R83CoreBlock `
+    'replace r78 selective r77 retarget block'
+$R83BuilderText = $R83BuilderText.Replace('r78','r83').Replace('R78','R83').Replace('+78','+83')
+
+# Simulate the inner r77 retarget independently during preflight. This catches
+# path/version mismatches before any source materialization happens.
+$SimulatedR83Core = $OriginalR77.Replace('r77','r83').Replace('R77','R83').Replace('+77','+83')
+foreach ($Check in @(
+    @("`$R83OutputText = `$OriginalR76Output.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",'r83 output identity source'),
+    @("`$R83EntryText = `$OriginalR76Local.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",'r83 entry identity source'),
+    @("build-r83-output-ui-local.ps1",'r83 generated output source path'),
+    @(".build-r83-output.generated.ps1",'r83 generated output temp path'),
+    @('R83_EXACT_TOKEN_TELEMETRY_PASS','r83 exact telemetry marker'),
+    @('R83_LOCAL_ENTRYPOINT_PASS','r83 entry marker'),
+    @('state.ingestExternalUsage = ingestExternalUsage;','r83 external usage bridge'),
+    @('data-above-composer-conversation-id','r83 active-thread resolver')
+)) {
+    Assert-Contains $SimulatedR83Core $Check[0] $Check[1]
 }
 
+# Validate every exact r76/r75 needle consumed by the retargeted core.
 foreach ($Check in @(
     @('state.metrics.externalUpdatedAt = Number(envelope.updatedAt) || Date.now();','r76 ingest tail'),
     @('const activeThreadExpression = "(() => {" +','r76 active-thread expression'),
@@ -111,32 +147,29 @@ foreach ($Check in @(
 }
 
 foreach ($Check in @(
-    @("Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",'r83 output/entry identity'),
-    @("Replace('r75', 'r83')",'r83 timestamp identity'),
-    @('R83_EXACT_TOKEN_TELEMETRY_PASS','r83 exact telemetry marker'),
-    @('R83_LOCAL_ENTRYPOINT_PASS','r83 entrypoint marker'),
-    @('R83_TIMESTAMP_ACTIONROW_V4_PASS','r83 timestamp action-row marker')
+    @('R83_TIMESTAMP_ACTIONROW_V4_PASS','r83 timestamp action-row marker'),
+    @('data-cas-timestamp-confidence','r83 timestamp confidence metadata'),
+    @("actionRow.insertAdjacentElement('afterend', badge);",'r83 action-row timestamp placement'),
+    @('const native = nativeTimeForSegment(segment, root);','r83 segment-native-time isolation')
 )) {
     Assert-Contains $R83BuilderText $Check[0] $Check[1]
 }
 
-# Guard against repeating the r82 design bug: r83 must not depend on build-r80
-# nor contain the failed nested label from that wrapper.
-Assert-NotContains $R83BuilderText 'do not reject valid Codex renderers solely because URL is not app://' 'r80 nested source-layer label'
-Assert-NotContains $R83BuilderText 'r82 generated output and entry identity' 'r82 nested identity label'
+# Guard against the two already-observed nested-wrapper failure modes.
+Assert-NotContains $R83BuilderText 'do not reject valid Codex renderers solely because URL is not app://' 'old r80 source-layer label'
+Assert-NotContains $R83BuilderText 'r82 generated output and entry identity' 'old r82 nested identity label'
 
-# The selective carry-forward driver must remain non-recursive.
 $SelectiveText = [System.IO.File]::ReadAllText($Selective)
 if ([regex]::IsMatch($SelectiveText, 'run\(\s*["'']scripts/apply_r\d+_unified\.py')) {
     throw 'r83 selective materializer must not execute historical recursive apply_rXX_unified.py drivers'
 }
 
 Write-Host 'R83_STATIC_PIPELINE_PREFLIGHT_PASS' -ForegroundColor Green
-Write-Host '  - package chain resolved directly as r78 -> r83'
-Write-Host '  - exact telemetry patch targets the real r76 collector source layer'
-Write-Host '  - every known r77/r76/r75 exact-string dependency is present before materialization'
-Write-Host '  - failed r80/r82 nested-builder labels are absent'
-Write-Host '  - r43-r65 selective driver contains no recursive unified-driver execution'
+Write-Host '  - exact telemetry patch is applied at the real r76 collector source layer'
+Write-Host '  - r78 timestamp-v4 is retained without the incomplete historical r77->r78 path retarget'
+Write-Host '  - the complete nested r77 builder was simulated as r83, including generated file paths'
+Write-Host '  - every known exact-string dependency exists before carry-forward starts'
+Write-Host '  - historical recursive r24-r41 unified drivers remain excluded'
 
 if ($PreflightOnly) {
     Write-Host 'R83_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
@@ -160,8 +193,6 @@ try {
     if ($ChangedAfterCarry.Count -eq 0) { throw 'r83 carry-forward produced no tracked runtime changes' }
     Write-Host ("  carry-forward tracked paths: {0}" -f $ChangedAfterCarry.Count)
 
-    # Only after the materialization gate succeeds, place the preflighted
-    # observability sources into the working tree for the package build.
     [System.IO.File]::WriteAllText($R76Output,$PatchedR76Output,$Utf8NoBom)
     [System.IO.File]::WriteAllText($TempR83Builder,$R83BuilderText,$Utf8NoBom)
 
@@ -172,8 +203,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "r83 package build failed with exit code $LASTEXITCODE" }
 
     Write-Host 'R83_EXACT_TELEMETRY_TARGETING_PASS' -ForegroundColor Green
-    Write-Host '  - renderer eligibility is thread-DOM gated, not app:// gated'
-    Write-Host '  - bounded turn_context model survives the safe envelope'
+    Write-Host '  - renderer eligibility is active-thread-DOM gated, not app:// gated'
+    Write-Host '  - bounded turn_context model survives the renderer-safe envelope'
 
     Write-Host '[r83 4/4] Package completed; tracked source restoration will run in finally.' -ForegroundColor Cyan
     Write-Host ''
@@ -181,7 +212,7 @@ try {
     Write-Host 'R83_R43_R65_CARRY_FORWARD_PACKAGE_PASS' -ForegroundColor Green
     Write-Host '  - r43-r65 selective carry-forward retained'
     Write-Host '  - r66-r69 Hook A/B experiments remain excluded'
-    Write-Host '  - r70 masked-history repair remains protected by the selective materializer'
+    Write-Host '  - r70 masked-history repair remains hash-protected by the selective materializer'
     Write-Host '  - r78 action-row timestamps and exact local JSONL usage telemetry are included'
     Write-Host '  - visible/package identity is r83 / 2.4.5+83'
 }

@@ -32,7 +32,8 @@ function Replace-BlockRequired([string]$Text,[string]$StartMarker,[string]$EndMa
 # paragraphs/list items. A single streamed assistant output therefore became
 # several timestamp surfaces discovered in the same sweep, producing repeated
 # times and visual noise. r85 keeps semantic tool/agent/status rows independent
-# while treating a contiguous prose subtree as one visible output block.
+# while treating a real Markdown/prose renderer subtree as one visible output
+# block. Adjacent generic output wrappers are deliberately NOT merged.
 $SegmentationBody = @'
   function isStrongSemanticOutputSurface(node) {
     if (!(node instanceof Element)) return false;
@@ -97,9 +98,17 @@ $SegmentationBody = @'
   function shouldKeepAsProseGroup(node, children) {
     if (!(node instanceof Element) || children.length < 2) return false;
     if (!children.every(function(child) { return isPureProseSubtree(child, 0); })) return false;
-    // Markdown paragraphs, lists and code blocks belonging to one streamed
-    // assistant output normally remain close together. Keep those as one
-    // timestamp surface instead of stamping every paragraph/list item.
+
+    // Do not merge multiple sibling output wrappers just because they all
+    // contain text. A real Markdown/prose renderer normally exposes its text
+    // flow nodes (p/ul/pre/etc.) directly. Requiring direct text-flow children
+    // keeps separate streamed output wrappers independent.
+    const directTextFlowCount = children.filter(function(child) { return isTextFlowTag(child); }).length;
+    const minimumDirectTextFlow = Math.max(2, Math.ceil(children.length * 0.6));
+    if (!isTextFlowTag(node) && directTextFlowCount < minimumDirectTextFlow) return false;
+
+    // Paragraphs/list/code within one renderer are normally close together;
+    // a large vertical gap is treated as a real output boundary.
     return maxVerticalGap(children) <= 40;
   }
 
@@ -143,7 +152,7 @@ $SegmentationBody = @'
 
     // Critical r85 correction: one Markdown/prose output is one timestamp
     // surface even when it contains multiple paragraphs, list items or code
-    // blocks. This prevents the repeated identical times seen in r84.
+    // blocks. Separate sibling output wrappers are not merged.
     if (shouldKeepAsProseGroup(node, children)) return [node];
 
     // Horizontal icon/label/action rows stay atomic.
@@ -261,6 +270,7 @@ $R85BuilderText = Replace-BlockRequired `
 foreach ($Marker in @(
     'function isPureProseSubtree(node, depth) {',
     'function shouldKeepAsProseGroup(node, children) {',
+    'const minimumDirectTextFlow = Math.max(2, Math.ceil(children.length * 0.6));',
     'if (shouldKeepAsProseGroup(node, children)) return [node];',
     'R85_TIMESTAMP_SEGMENTATION_PREFLIGHT_PASS',
     'R85_TIMESTAMP_ACTIONROW_V4_PASS',
@@ -283,7 +293,8 @@ if ($ParseErrors.Count -gt 0) {
 }
 
 Write-Host 'R85_TIMESTAMP_GROUPING_PREFLIGHT_PASS' -ForegroundColor Green
-Write-Host '  - one contiguous Markdown/prose output maps to one timestamp surface'
+Write-Host '  - one Markdown/prose renderer maps to one timestamp surface'
+Write-Host '  - adjacent generic output wrappers are not merged'
 Write-Host '  - tool/agent/status/error rows remain independent timestamp surfaces'
 Write-Host '  - r78 exact-vs-estimated timestamp confidence and action-row anchoring are preserved'
 Write-Host '  - r83 exact telemetry and r43-r65 carry-forward package are unchanged'
@@ -304,7 +315,7 @@ try {
         Write-Host ''
         Write-Host 'R85_OUTPUT_TIMESTAMP_GROUPING_PASS' -ForegroundColor Green
         Write-Host '  - paragraphs/lists/code within one assistant output no longer receive duplicate sibling timestamps'
-        Write-Host '  - semantic progress/tool/agent/error outputs keep their own time'
+        Write-Host '  - separate output wrappers and semantic progress/tool/agent/error outputs keep independent times'
         Write-Host '  - final assistant timestamp still anchors after the native Codex action row when available'
     }
 }

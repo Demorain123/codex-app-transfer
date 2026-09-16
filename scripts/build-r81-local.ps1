@@ -9,12 +9,21 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R64Unified = Join-Path $PSScriptRoot 'apply_r64_unified.py'
 $R65Apply = Join-Path $PSScriptRoot 'apply_r65_startup_generation_gate.py'
 $R80Builder = Join-Path $PSScriptRoot 'build-r80-local.ps1'
+$TempR81Builder = Join-Path $PSScriptRoot '.build-r81-from-r80.generated.ps1'
 
 foreach ($Path in @($R64Unified, $R65Apply, $R80Builder)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r81 required file missing: $Path" }
 }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw 'r81 requires python on PATH' }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'r81 requires git on PATH' }
+
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$OriginalR80 = [System.IO.File]::ReadAllText($R80Builder)
+
+function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$Label) {
+    if (-not $Text.Contains($Old)) { throw "r81 expected text missing: $Label" }
+    return $Text.Replace($Old, $New)
+}
 
 $TrackedBefore = @(& git -C $RepoRoot status --porcelain --untracked-files=no)
 if ($LASTEXITCODE -ne 0) { throw 'r81 git status preflight failed' }
@@ -50,6 +59,30 @@ function Assert-ForbiddenRuntimeMarkersAbsent {
         }
     }
 }
+
+# Generate an r81-visible package from the complete r80 observability builder.
+$R81BuilderText = $OriginalR80
+$R81BuilderText = Replace-Required $R81BuilderText `
+    "Replace('r76', 'r80').Replace('R76', 'R80').Replace('+76', '+80')" `
+    "Replace('r76', 'r81').Replace('R76', 'R81').Replace('+76', '+81')" `
+    'r81 package identity'
+$R81BuilderText = Replace-Required $R81BuilderText "Replace('r75', 'r80')" "Replace('r75', 'r81')" 'r81 timestamp identity'
+$R81BuilderText = $R81BuilderText.Replace('R80_EXACT_TOKEN_TELEMETRY_PASS', 'R81_EXACT_TOKEN_TELEMETRY_PASS')
+$R81BuilderText = $R81BuilderText.Replace('R80_LOCAL_ENTRYPOINT_PASS', 'R81_LOCAL_ENTRYPOINT_PASS')
+$R81BuilderText = $R81BuilderText.Replace('R80_TIMESTAMP_TELEMETRY_BASE_PASS', 'R81_TIMESTAMP_TELEMETRY_BASE_PASS')
+$R81BuilderText = $R81BuilderText.Replace('R80_TIMESTAMP_ACTIONROW_V4_PASS', 'R81_TIMESTAMP_ACTIONROW_V4_PASS')
+$R81BuilderText = $R81BuilderText.Replace('R80_EXACT_TELEMETRY_TARGETING_PASS', 'R81_EXACT_TELEMETRY_TARGETING_PASS')
+
+foreach ($Marker in @(
+    "Replace('r76', 'r81').Replace('R76', 'R81').Replace('+76', '+81')",
+    "Replace('r75', 'r81')",
+    'R81_EXACT_TOKEN_TELEMETRY_PASS',
+    'R81_TIMESTAMP_ACTIONROW_V4_PASS',
+    'R81_EXACT_TELEMETRY_TARGETING_PASS'
+)) {
+    if (-not $R81BuilderText.Contains($Marker)) { throw "r81 generated builder verification failed: $Marker" }
+}
+[System.IO.File]::WriteAllText($TempR81Builder, $R81BuilderText, $Utf8NoBom)
 
 $RestorePaths = @()
 try {
@@ -115,8 +148,8 @@ try {
     Write-Host '  - r44 terminal-semantics requirement is represented by the r45 semantic-terminal invariant'
     Write-Host '  - r66-r69 Hook A/B experimental runtime markers are absent'
 
-    Write-Host '[r81 4/5] Building the current r80 observability/telemetry package on top of the materialized stack...' -ForegroundColor Cyan
-    $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$R80Builder)
+    Write-Host '[r81 4/5] Building r81 observability/telemetry on top of the materialized stack...' -ForegroundColor Cyan
+    $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$TempR81Builder)
     if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
     & pwsh @Args
     if ($LASTEXITCODE -ne 0) { throw "r81 package build failed with exit code $LASTEXITCODE" }
@@ -127,9 +160,11 @@ try {
     Write-Host '  - cumulative r43-r64 materializer completed before packaging'
     Write-Host '  - r65 startup-generation gate was composed on top'
     Write-Host '  - r80 exact telemetry targeting and r78 timestamp action-row behavior were retained'
+    Write-Host '  - visible/package identity is r81 / 2.4.5+81'
     Write-Host '  - no r66-r69 Hook A/B experiment was materialized'
 }
 finally {
+    Remove-Item -LiteralPath $TempR81Builder -Force -ErrorAction SilentlyContinue
     $Changed = @(& git -C $RepoRoot diff --name-only --diff-filter=ACMRTUXB 2>$null)
     if ($Changed.Count -gt 0) {
         & git -C $RepoRoot restore --worktree -- $Changed

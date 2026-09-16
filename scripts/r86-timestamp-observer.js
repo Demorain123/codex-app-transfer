@@ -1,12 +1,65 @@
+  function activeGenerationUiPresent() {
+    const composer = findComposerRoot();
+    if (!(composer instanceof Element)) return false;
+    const scope = composer.parentElement instanceof Element ? composer.parentElement : composer;
+    const controls = scope.querySelectorAll('button,[role="button"]');
+    for (const control of controls) {
+      if (!(control instanceof Element) || !isVisible(control) || insideOwnUi(control)) continue;
+      const hint = [
+        control.getAttribute('aria-label'),
+        control.getAttribute('title'),
+        control.getAttribute('data-testid'),
+        control.getAttribute('data-state'),
+        control.textContent,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (/(^|[\s:_-])(stop|cancel|interrupt|abort)([\s:_-]|$)|停止|取消|中止|终止/i.test(hint)) return true;
+    }
+    return false;
+  }
+
+  function latestConversationTurn() {
+    const preferred = Array.from(document.querySelectorAll('[data-chatgpt-conversation-turn="true"]'))
+      .filter(function(node) { return node instanceof Element && !insideComposer(node) && !insideOwnUi(node); });
+    if (preferred.length) return preferred[preferred.length - 1];
+    const keyed = Array.from(document.querySelectorAll('[data-turn-key]'))
+      .filter(function(node) { return node instanceof Element && !insideComposer(node) && !insideOwnUi(node); });
+    return keyed.length ? keyed[keyed.length - 1] : null;
+  }
+
+  function isLatestTurnSurface(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    if (!(element instanceof Element)) return false;
+    const latest = latestConversationTurn();
+    if (!(latest instanceof Element)) return true;
+    return element === latest || latest.contains(element) || element.contains(latest);
+  }
+
+  function liveSemanticRootFor(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    if (!(element instanceof Element) || insideComposer(element) || insideOwnUi(element) || isUserAuthoredSurface(element)) return null;
+    if (!hasRecentLiveUsage()) return null;
+
+    const latest = latestConversationTurn();
+    const semantic = element.closest('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
+    if (semantic instanceof Element && !isUserAuthoredSurface(semantic)) {
+      if (!(latest instanceof Element) || semantic === latest || latest.contains(semantic) || semantic.contains(latest)) return semantic;
+    }
+
+    if (latest instanceof Element && (element === latest || latest.contains(element))) return latest;
+    return null;
+  }
+
   function strictAssistantRootFor(node) {
     const element = node instanceof Element ? node : node && node.parentElement;
     if (!element || insideComposer(element) || insideOwnUi(element) || isUserAuthoredSurface(element)) return null;
     const direct = element.closest('[data-content-search-assistant-turn-key],[data-local-conversation-final-assistant],[data-message-author-role="assistant"]');
     if (direct) return direct;
     const broad = assistantRootFor(element);
-    if (!(broad instanceof Element)) return null;
-    const nested = broad.querySelector('[data-content-search-assistant-turn-key],[data-local-conversation-final-assistant],[data-message-author-role="assistant"]');
-    return nested || broad;
+    if (broad instanceof Element) {
+      const nested = broad.querySelector('[data-content-search-assistant-turn-key],[data-local-conversation-final-assistant],[data-message-author-role="assistant"]');
+      return nested || broad;
+    }
+    return liveSemanticRootFor(element);
   }
 
   function assistantRootsNow() {
@@ -64,6 +117,10 @@
   }
 
   function hasRecentLiveUsage() {
+    // Exact token_count telemetry can legitimately arrive only after a long
+    // model/tool turn completes. While Codex exposes a visible stop/cancel
+    // control, the current UI itself is stronger evidence that a turn is live.
+    if (activeGenerationUiPresent()) return true;
     const updated = Number(state.metrics && state.metrics.externalUpdatedAt);
     if (!Number.isFinite(updated) || updated <= 0) return false;
     const age = Date.now() - updated;
@@ -87,6 +144,9 @@
     // Historical DOM that was present at runtime install never receives "now".
     // React remounts/text churn are not trustworthy generation-time evidence.
     if (state.timestampBaselineElements.has(segment) || state.timestampBaselineKeys.has(key)) return;
+    // Estimated timestamps are restricted to the newest turn. This keeps the
+    // live-stop fallback from stamping virtualized/remounted historical turns.
+    if (!isLatestTurnSurface(segment)) return;
     if (!hasRecentLiveUsage()) return;
     stampSegment(segment, root, Date.now(), 'first observed live output mutation locally');
   }
@@ -105,6 +165,7 @@
         }
         if (!allowFresh) return;
         if (state.timestampBaselineElements.has(segment) || state.timestampBaselineKeys.has(key)) return;
+        if (!isLatestTurnSurface(segment)) return;
         if (!hasRecentLiveUsage()) return;
         stampSegment(segment, root, Date.now(), 'first observed live output segment locally');
       });

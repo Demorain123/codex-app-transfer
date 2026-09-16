@@ -1,5 +1,6 @@
 param(
-    [switch]$RunFocusedTests
+    [switch]$RunFocusedTests,
+    [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,36 +65,58 @@ $Container720 = "      '@container (max-width:720px){#' + STATUS_ID + ' .cas-sta
 $Container560 = "      '@container (max-width:560px){#' + STATUS_ID + ' .cas-status-tertiary{display:none;}}',"
 $BarAnchor = '      bar.id = STATUS_ID;'
 $ContainerTypeLine = "      bar.style.containerType = 'inline-size';"
+$TotalLine = "    const session = 'total ' + shortNumber(effectiveSessionTotal());"
+$MirrorTotalLine = '<span>Session total</span><span>'
 
-$AdaptiveR74 = Ensure-LineAfter $OriginalR74 $SpacerAnchor $Container720 'status container-query <=720 rule'
-$AdaptiveR74 = Ensure-LineAfter $AdaptiveR74 $Container720 $Container560 'status container-query <=560 rule'
-$AdaptiveR74 = Ensure-LineAfter $AdaptiveR74 $BarAnchor $ContainerTypeLine 'status container type'
+function Apply-R76UiMigration([string]$Value) {
+    $Result = Ensure-LineAfter $Value $SpacerAnchor $Container720 'status container-query <=720 rule'
+    $Result = Ensure-LineAfter $Result $Container720 $Container560 'status container-query <=560 rule'
+    $Result = Ensure-LineAfter $Result $BarAnchor $ContainerTypeLine 'status container type'
+    $Result = Replace-Required-OrAlready $Result `
+        "    const session = 'session ' + shortNumber(effectiveSessionTotal());" `
+        $TotalLine `
+        'status cumulative total label'
+    $Result = Replace-Required-OrAlready $Result `
+        '<span>Session</span><span>' `
+        $MirrorTotalLine `
+        'mirror cumulative total label'
+    return $Result
+}
 
-# OpenAI's current token accounting distinguishes active request/context usage
-# (last_token_usage) from lifetime cumulative thread usage (total_token_usage).
-# Calling the latter merely "session" is easy to misread when it reaches tens or
-# hundreds of millions, so r76 labels it explicitly as cumulative total.
-$AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 `
-    "    const session = 'session ' + shortNumber(effectiveSessionTotal());" `
-    "    const session = 'total ' + shortNumber(effectiveSessionTotal());" `
-    'status cumulative total label'
-$AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 `
-    '<span>Session</span><span>' `
-    '<span>Session total</span><span>' `
-    'mirror cumulative total label'
-
-foreach ($Marker in @(
-    $Container720,
-    $Container560,
-    $ContainerTypeLine,
-    "    const session = 'total ' + shortNumber(effectiveSessionTotal());",
-    '<span>Session total</span><span>'
-)) {
-    if (-not $AdaptiveR74.Contains($Marker)) {
-        throw "r76 entrypoint post-migration invariant missing: $Marker"
+function Assert-R76UiMigration([string]$Value,[string]$Label) {
+    foreach ($Marker in @($Container720,$Container560,$ContainerTypeLine,$TotalLine,$MirrorTotalLine)) {
+        if (-not $Value.Contains($Marker)) {
+            throw "r76 entrypoint post-migration invariant missing ($Label): $Marker"
+        }
     }
 }
+
+$AdaptiveR74 = Apply-R76UiMigration $OriginalR74
+Assert-R76UiMigration $AdaptiveR74 'native-eol'
+
+# Prove idempotency on the actual source plus explicit LF and CRLF variants.
+# This catches the exact class of Windows nested-builder failures that used to
+# pass wrapper preflight but fail deep in the package build.
+$SecondPass = Apply-R76UiMigration $AdaptiveR74
+if ($SecondPass -ne $AdaptiveR74) { throw 'r76 entrypoint migration is not idempotent on actual source' }
+
+$LfSource = $OriginalR74.Replace("`r`n","`n").Replace("`r","`n")
+$LfMigrated = Apply-R76UiMigration $LfSource
+Assert-R76UiMigration $LfMigrated 'lf'
+if ((Apply-R76UiMigration $LfMigrated) -ne $LfMigrated) { throw 'r76 LF migration is not idempotent' }
+
+$CrLfSource = $LfSource.Replace("`n","`r`n")
+$CrLfMigrated = Apply-R76UiMigration $CrLfSource
+Assert-R76UiMigration $CrLfMigrated 'crlf'
+if ((Apply-R76UiMigration $CrLfMigrated) -ne $CrLfMigrated) { throw 'r76 CRLF migration is not idempotent' }
+
 Write-Host 'R76_ENTRY_UI_MIGRATION_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R76_ENTRY_UI_EOL_MATRIX_PASS' -ForegroundColor Green
+
+if ($PreflightOnly) {
+    Write-Host 'R76_ENTRY_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
+    return
+}
 
 try {
     [System.IO.File]::WriteAllText($R74Builder, $AdaptiveR74, $Utf8NoBom)

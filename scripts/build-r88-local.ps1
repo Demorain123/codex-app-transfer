@@ -115,14 +115,37 @@ try {
         "    return `$Text.Replace('r86','r88').Replace('R86','R88').Replace('+86','+88')" `
         'retarget inherited r86 package to r88'
 
+    # All helper files written and removed by the inherited r87 wrapper must use
+    # dedicated generated names. Never let a cleanup path alias a tracked r88
+    # source file: the first r88 preflight exposed exactly that collision.
     foreach ($Pair in @(
         @('.build-r87-from-r86.generated.ps1', '.build-r88-from-r86.generated.ps1'),
-        @('r87-timestamp-stamp.js', 'r88-timestamp-stamp.js'),
-        @('r87-timestamp-observer.js', 'r88-timestamp-observer.js'),
-        @('r87-r78-observer-patch.inc.ps1', 'r88-r78-observer-patch.inc.ps1')
+        @('r87-timestamp-stamp.js', '.r88-timestamp-stamp.generated.js'),
+        @('r87-timestamp-observer.js', '.r88-timestamp-observer.generated.js'),
+        @('r87-r78-observer-patch.inc.ps1', '.r88-r78-observer-patch.generated.inc.ps1')
     )) {
         $R88 = Replace-Required $R88 $Pair[0] $Pair[1] "retarget generated helper $($Pair[0])"
     }
+
+    foreach ($ForbiddenCollision in @(
+        "`$TempStamp = Join-Path `$PSScriptRoot 'r88-timestamp-stamp.js'",
+        "`$TempObserver = Join-Path `$PSScriptRoot 'r88-timestamp-observer.js'",
+        "`$TempObserverPatch = Join-Path `$PSScriptRoot 'r88-r78-observer-patch.inc.ps1'"
+    )) {
+        if ($R88.Contains($ForbiddenCollision)) {
+            throw "r88 tracked-source/temp-helper collision detected: $ForbiddenCollision"
+        }
+    }
+    foreach ($ExpectedTemp in @(
+        "`$TempStamp = Join-Path `$PSScriptRoot '.r88-timestamp-stamp.generated.js'",
+        "`$TempObserver = Join-Path `$PSScriptRoot '.r88-timestamp-observer.generated.js'",
+        "`$TempObserverPatch = Join-Path `$PSScriptRoot '.r88-r78-observer-patch.generated.inc.ps1'"
+    )) {
+        if (-not $R88.Contains($ExpectedTemp)) {
+            throw "r88 generated-helper isolation invariant missing: $ExpectedTemp"
+        }
+    }
+    Write-Host 'R88_GENERATED_HELPER_ISOLATION_PASS' -ForegroundColor Green
 
     $PaneDeclNeedle = "`$R86ObserverPatch = Join-Path `$PSScriptRoot 'r86-r78-observer-patch.inc.ps1'"
     $PaneDeclReplacement = @'
@@ -188,6 +211,7 @@ $R87BuilderText = $R87BuilderText.Replace(
         Write-Host 'R88_PANE_RUNTIME_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - main and split/agent composer panes are enumerated independently'
         Write-Host '  - session id, child thread id and UI agent id are kept as distinct identities'
+        Write-Host '  - generated helper cleanup paths are isolated from tracked r88 sources'
         Write-Host '  - mismatched telemetry fails closed to -- instead of borrowing another pane''s metrics'
         Write-Host '  - status bars reserve 22px below-bar space so native Step pills do not overlap'
         Write-Host '  - live timestamp fallback is pane-scoped and still blocks baseline/remounted history'

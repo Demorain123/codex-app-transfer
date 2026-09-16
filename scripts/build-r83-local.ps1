@@ -88,14 +88,12 @@ $PatchedR76Output = Replace-Required $PatchedR76Output $OldSafeEnvelope $NewSafe
 $R83CoreBlock = @'
 $PatchedR77 = $OriginalR77.Replace('r77', 'r83').Replace('R77', 'R83').Replace('+77', '+83')
 foreach ($Marker in @(
-    "$R83OutputText = $OriginalR76Output.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",
-    "$R83EntryText = $OriginalR76Local.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",
-    "build-r83-output-ui-local.ps1",
-    ".build-r83-output.generated.ps1",
-    "R83_EXACT_TOKEN_TELEMETRY_PASS",
-    "R83_LOCAL_ENTRYPOINT_PASS",
-    "state.ingestExternalUsage = ingestExternalUsage;",
-    "data-above-composer-conversation-id"
+    'build-r83-output-ui-local.ps1',
+    '.build-r83-output.generated.ps1',
+    'R83_EXACT_TOKEN_TELEMETRY_PASS',
+    'R83_LOCAL_ENTRYPOINT_PASS',
+    'state.ingestExternalUsage = ingestExternalUsage;',
+    'data-above-composer-conversation-id'
 )) {
     if (-not $PatchedR77.Contains($Marker)) { throw "r83 retargeted r77 source verification failed: $Marker" }
 }
@@ -115,8 +113,8 @@ $SimulatedR83Core = $OriginalR77.Replace('r77','r83').Replace('R77','R83').Repla
 foreach ($Check in @(
     @("`$R83OutputText = `$OriginalR76Output.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",'r83 output identity source'),
     @("`$R83EntryText = `$OriginalR76Local.Replace('r76', 'r83').Replace('R76', 'R83').Replace('+76', '+83')",'r83 entry identity source'),
-    @("build-r83-output-ui-local.ps1",'r83 generated output source path'),
-    @(".build-r83-output.generated.ps1",'r83 generated output temp path'),
+    @('build-r83-output-ui-local.ps1','r83 generated output source path'),
+    @('.build-r83-output.generated.ps1','r83 generated output temp path'),
     @('R83_EXACT_TOKEN_TELEMETRY_PASS','r83 exact telemetry marker'),
     @('R83_LOCAL_ENTRYPOINT_PASS','r83 entry marker'),
     @('state.ingestExternalUsage = ingestExternalUsage;','r83 external usage bridge'),

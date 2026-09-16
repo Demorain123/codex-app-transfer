@@ -72,49 +72,56 @@
     return best || paneForComposer(composers[0]);
   }
 
-  function normalizePaneThreadId(value) {
+  function normalizePaneId(value) {
     return String(value || '').replace(/^local:/i, '').trim().toLowerCase();
   }
 
-  function threadIdFromNode(node) {
+  function idFromNode(node, attrs) {
     if (!(node instanceof Element)) return '';
-    const attrs = [
-      'data-above-composer-conversation-id', 'data-conversation-id', 'data-thread-id',
-      'data-session-id', 'data-app-action-sidebar-thread-id', 'data-turn-thread-id',
-    ];
     for (const attr of attrs) {
-      const value = normalizePaneThreadId(node.getAttribute(attr));
+      const value = normalizePaneId(node.getAttribute(attr));
       if (value) return value;
     }
     return '';
   }
 
-  function paneThreadId(pane, composer) {
+  function paneIdentityFromAttrs(pane, composer, attrs) {
     let current = composer instanceof Element ? composer : null;
     for (let depth = 0; depth < 12 && current; depth += 1) {
-      const value = threadIdFromNode(current);
+      const value = idFromNode(current, attrs);
       if (value) return value;
       if (pane instanceof Element && current === pane) break;
       current = current.parentElement;
     }
     const scope = pane instanceof Element ? pane : (composer instanceof Element ? composer.parentElement : null);
-    if (scope instanceof Element) {
-      const selectors = [
-        '[data-above-composer-conversation-id]', '[data-conversation-id]', '[data-thread-id]',
-        '[data-session-id]', '[data-app-action-sidebar-thread-id]', '[data-turn-thread-id]',
-      ];
-      for (const selector of selectors) {
-        const nodes = scope.querySelectorAll(selector);
-        for (const node of nodes) {
-          const value = threadIdFromNode(node);
-          if (value) return value;
-        }
+    if (!(scope instanceof Element)) return '';
+    for (const attr of attrs) {
+      const nodes = scope.querySelectorAll('[' + attr + ']');
+      for (const node of nodes) {
+        const value = idFromNode(node, [attr]);
+        if (value) return value;
       }
+    }
+    return '';
+  }
+
+  function paneSessionId(pane, composer) {
+    return paneIdentityFromAttrs(pane, composer, ['data-session-id']);
+  }
+
+  function paneThreadId(pane, composer) {
+    const value = paneIdentityFromAttrs(pane, composer, [
+      'data-above-composer-conversation-id', 'data-conversation-id', 'data-thread-id',
+      'data-app-action-sidebar-thread-id', 'data-turn-thread-id',
+    ]);
+    if (value) return value;
+    const scope = pane instanceof Element ? pane : (composer instanceof Element ? composer.parentElement : null);
+    if (scope instanceof Element) {
       const links = scope.querySelectorAll('a[href]');
       for (const link of links) {
         const href = String(link.getAttribute('href') || '');
         const match = href.match(/([0-9a-f]{8}-[0-9a-f-]{20,})/i);
-        if (match) return normalizePaneThreadId(match[1]);
+        if (match) return normalizePaneId(match[1]);
       }
     }
     return '';
@@ -127,8 +134,8 @@
     return match ? String(match[1]).toLowerCase() : '';
   }
 
-  function shortPaneThreadId(value) {
-    const id = normalizePaneThreadId(value);
+  function shortPaneId(value) {
+    const id = normalizePaneId(value);
     if (!id) return '--';
     return id.length > 12 ? id.slice(0, 8) + '…' : id;
   }
@@ -145,8 +152,11 @@
       const parent = composer.parentElement;
       if (!(parent instanceof Element)) return;
       const pane = paneForComposer(composer);
+      let sessionId = paneSessionId(pane, composer);
       let threadId = paneThreadId(pane, composer);
-      if (!threadId && index === 0) threadId = normalizePaneThreadId(state.metrics && state.metrics.externalThreadId);
+      const externalThreadId = normalizePaneId(state.metrics && state.metrics.externalThreadId);
+      if (!threadId && index === 0) threadId = externalThreadId;
+      if (!sessionId && index === 0 && threadId && threadId === externalThreadId) sessionId = externalThreadId;
       const agentId = paneAgentId(pane);
       let bar = null;
       for (const child of Array.from(parent.children || [])) {
@@ -161,9 +171,9 @@
         bar.title = 'Click for live telemetry charts';
         bar.addEventListener('click', function(event) {
           event.stopPropagation();
-          const paneId = normalizePaneThreadId(bar.getAttribute(PANE_THREAD_ATTR));
-          const externalId = normalizePaneThreadId(state.metrics && state.metrics.externalThreadId);
-          if (paneId && externalId && paneId !== externalId) return;
+          const paneThread = normalizePaneId(bar.getAttribute(PANE_THREAD_ATTR));
+          const external = normalizePaneId(state.metrics && state.metrics.externalThreadId);
+          if (paneThread && external && paneThread !== external) return;
           toggleAnalytics(bar);
         });
       }
@@ -172,6 +182,7 @@
       } else if (bar.id === STATUS_ID) {
         bar.removeAttribute('id');
       }
+      bar.setAttribute(PANE_SESSION_ATTR, sessionId || '');
       bar.setAttribute(PANE_THREAD_ATTR, threadId || '');
       bar.setAttribute(PANE_AGENT_ATTR, agentId || '');
       bar.style.cssText = statusBarInlineStyle();
@@ -194,15 +205,21 @@
     return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function statusHtmlForPane(threadId, agentId) {
-    const paneId = normalizePaneThreadId(threadId);
-    const externalId = normalizePaneThreadId(state.metrics && state.metrics.externalThreadId);
-    const ownsExactMetrics = !!paneId && !!externalId && paneId === externalId;
-    const singleUnknown = !paneId && findComposerRoots().length === 1;
-    const sidTitle = paneId ? ('session/thread id: ' + paneId) : 'session/thread id unavailable';
-    const sid = '<span class="cas-status-item cas-status-muted" title="' + escapeStatusText(sidTitle) + '">sid ' + shortPaneThreadId(paneId) + '</span>';
-    const agent = agentId ? '<span class="cas-status-item cas-status-muted cas-status-secondary" title="agent id: ' + escapeStatusText(agentId) + '">agent ' + escapeStatusText(agentId) + '</span>' : '';
-    if (ownsExactMetrics || singleUnknown) return statusHtml() + sid + agent;
+  function identityChip(label, value, title, extraClass) {
+    const id = normalizePaneId(value);
+    if (!id) return '<span class="cas-status-item cas-status-muted ' + (extraClass || '') + '">' + label + ' --</span>';
+    return '<span class="cas-status-item cas-status-muted ' + (extraClass || '') + '" title="' + escapeStatusText(title + ': ' + id) + '">' + label + ' ' + shortPaneId(id) + '</span>';
+  }
+
+  function statusHtmlForPane(sessionId, threadId, agentId) {
+    const paneThread = normalizePaneId(threadId);
+    const externalThread = normalizePaneId(state.metrics && state.metrics.externalThreadId);
+    const ownsExactMetrics = !!paneThread && !!externalThread && paneThread === externalThread;
+    const singleUnknown = !paneThread && findComposerRoots().length === 1;
+    const sid = identityChip('sid', sessionId, 'session id', '');
+    const tid = identityChip('tid', threadId, 'thread id', 'cas-status-secondary');
+    const agent = agentId ? identityChip('agent', agentId, 'agent id', 'cas-status-secondary') : '';
+    if (ownsExactMetrics || singleUnknown) return statusHtml() + sid + tid + agent;
     return [
       '<span class="cas-status-item">ctx --</span>',
       '<span class="cas-status-item">in --</span>',
@@ -212,6 +229,7 @@
       '<span class="cas-status-item cas-status-tertiary">total --</span>',
       '<span class="cas-status-spacer"></span>',
       sid,
+      tid,
       agent,
     ].join('');
   }
@@ -223,9 +241,10 @@
     readModelLabel();
     const bars = ensureStatusBars();
     for (const bar of bars) {
+      const sessionId = bar.getAttribute(PANE_SESSION_ATTR) || '';
       const threadId = bar.getAttribute(PANE_THREAD_ATTR) || '';
       const agentId = bar.getAttribute(PANE_AGENT_ATTR) || '';
-      bar.innerHTML = statusHtmlForPane(threadId, agentId);
+      bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId);
       let width = 9999;
       try { width = bar.getBoundingClientRect().width; } catch {}
       bar.querySelectorAll('.cas-status-item').forEach(function(node) { node.style.whiteSpace = 'nowrap'; });

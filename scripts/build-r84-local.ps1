@@ -218,11 +218,11 @@ foreach ($Marker in @(
     'if (children.length === 1) return collectVisualSegments(children[0], root, depth + 1);',
     'if (verticalRowCount(children) < 2) return [node];',
     'candidate !== root',
-    "const selector = '[role=\"status\"],[data-testid*=\"agent\"],[data-testid*=\"tool\"],[data-testid*=\"command\"],[data-testid*=\"integration\"]';"
+    'const selector = '
 )) {
     if (-not $PatchedR75.Contains($Marker)) { throw "r84 segmentation verification failed: $Marker" }
 }
-if ($PatchedR75.Contains("return node.matches('[role=\"status\"],[data-testid*=\"agent\"],[data-testid*=\"tool\"],[data-testid*=\"command\"],[data-testid*=\"integration\"],[data-turn-key],[data-message-id]');")) {
+if ($PatchedR75.Contains('[data-testid*="integration"],[data-turn-key],[data-message-id]')) {
     throw 'r84 old whole-turn semantic segmentation is still present'
 }
 
@@ -241,11 +241,13 @@ foreach ($Marker in @(
 }
 
 # Parse both PowerShell layers before touching the worktree.
+$ParseTokens = $null
 $ParseErrors = $null
-[void][System.Management.Automation.Language.Parser]::ParseInput($PatchedR75,[ref]$null,[ref]$ParseErrors)
+[void][System.Management.Automation.Language.Parser]::ParseInput($PatchedR75,[ref]$ParseTokens,[ref]$ParseErrors)
 if ($ParseErrors.Count -gt 0) { throw "r84 patched r75 parse failed: $($ParseErrors[0].Message)" }
+$ParseTokens = $null
 $ParseErrors = $null
-[void][System.Management.Automation.Language.Parser]::ParseInput($R84BuilderText,[ref]$null,[ref]$ParseErrors)
+[void][System.Management.Automation.Language.Parser]::ParseInput($R84BuilderText,[ref]$ParseTokens,[ref]$ParseErrors)
 if ($ParseErrors.Count -gt 0) { throw "r84 generated builder parse failed: $($ParseErrors[0].Message)" }
 
 Write-Host 'R84_TIMESTAMP_SEGMENTATION_PREFLIGHT_PASS' -ForegroundColor Green

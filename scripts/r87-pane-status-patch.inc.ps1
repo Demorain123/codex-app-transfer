@@ -106,6 +106,7 @@ $R87R75PatchCode = @'
 
     foreach ($R87PaneMarker in @(
         'function findComposerRoots() {',
+        'function findComposerRoot() {',
         'function threadIdForComposer(composer) {',
         'function ensureStatusBars() {',
         'data-cas-statusbar-host',
@@ -142,12 +143,12 @@ $R87ExternalIngestBody = [System.IO.File]::ReadAllText($R87ExternalIngestPath).R
 $R87MainCollectorBody = [System.IO.File]::ReadAllText($R87MainCollectorPath).Replace("`r`n","`n").Replace("`r","`n")
 $R87R76Normalized = $PatchedR76Output.Replace("`r`n","`n").Replace("`r","`n")
 
-$R87IngestRegex = [regex]::new("(?s)\$ExternalUsageIngest\s*=\s*@'\n.*?\n'@\n\n(?=\$MainProcessCollector\s*=)")
+$R87IngestRegex = [regex]::new('(?s)\$ExternalUsageIngest\s*=\s*@''\n.*?\n''@\n\n(?=\$MainProcessCollector\s*=)')
 if (-not $R87IngestRegex.IsMatch($R87R76Normalized)) { throw 'r87 could not locate r76 external usage ingest block' }
 $R87IngestAssignment = '$ExternalUsageIngest = @''' + "`n" + $R87ExternalIngestBody.TrimEnd("`n") + "`n'@`n`n"
 $R87R76Normalized = $R87IngestRegex.Replace($R87R76Normalized,$R87IngestAssignment,1)
 
-$R87CollectorRegex = [regex]::new("(?s)\$MainProcessCollector\s*=\s*@'\n.*?\n'@\n\n(?=try\s*\{)")
+$R87CollectorRegex = [regex]::new('(?s)\$MainProcessCollector\s*=\s*@''\n.*?\n''@\n\n(?=try\s*\{)')
 if (-not $R87CollectorRegex.IsMatch($R87R76Normalized)) { throw 'r87 could not locate r76 main-process collector block' }
 $R87CollectorAssignment = '$MainProcessCollector = @''' + "`n" + $R87MainCollectorBody.TrimEnd("`n") + "`n'@`n`n"
 $PatchedR76Output = $R87CollectorRegex.Replace($R87R76Normalized,$R87CollectorAssignment,1)
@@ -170,10 +171,16 @@ $R87Core = $R87Core.Replace($R87R83PatchNeedle,$R87R83PatchNeedle + $R87R83Patch
 
 # r83's original preflight expected the single-active-thread expression. The
 # r87 overlay deliberately replaces that contract with visible multi-pane ids.
-$R87Core = $R87Core.Replace(
-    "@('const activeThreadExpression = \"(() => {\" +','r76 active-thread expression')",
-    "@('const visibleThreadExpression = \"(() => {\" +','r87 visible-thread expression')"
-)
+$R87OldActiveCheck = @'
+@('const activeThreadExpression = "(() => {" +','r76 active-thread expression')
+'@.Trim()
+$R87NewActiveCheck = @'
+@('const visibleThreadExpression = "(() => {" +','r87 visible-thread expression')
+'@.Trim()
+if (-not $R87Core.Contains($R87OldActiveCheck)) {
+    throw 'r87 could not locate r83 single-active-thread preflight marker'
+}
+$R87Core = $R87Core.Replace($R87OldActiveCheck,$R87NewActiveCheck)
 
 foreach ($R87OverlayMarker in @(
     'R87_MULTI_PANE_STATUS_RUNTIME_PATCH',

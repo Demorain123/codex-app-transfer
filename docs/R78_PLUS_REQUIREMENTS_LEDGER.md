@@ -16,46 +16,46 @@ This ledger is the acceptance contract for the post-r76/r77 work. A requirement 
 
 For every formal release capability from r43 through r65, record one of `materialized`, `already-equivalent`, or `not-applicable-with-evidence`, with source paths/tests. Do not mark the range complete from branch names or historical commits alone.
 
-The authoritative historical source branches currently present in this repository are:
+Current repository branch discovery gives these historical inputs. r60 and r61 have multiple surviving variants and therefore remain **candidates** until their lineage/behavior is audited rather than arbitrarily picking one.
 
-| Rev | Historical source branch |
+| Rev | Historical branch input(s) |
 | --- | --- |
-| r43 | `dev-r43-rewrite-health-mcp-overlay-local` |
-| r44 | `dev-r44-orchestrate-anything-trellis-local` |
-| r45 | `dev-r45-rewrite-hook-skill-rebuild-local` |
-| r46 | `dev-r46-r45-official-guardrails-local` |
-| r47 | `dev-r47-r42-43-44-rebase-local` |
-| r48 | `dev-r48-session-hooks-local` |
-| r49 | `dev-r49-scripts-hooks-local` |
-| r50 | `dev-r50-trellis-addon-local` |
-| r51 | `dev-r51-skill-lineage-hook-local` |
-| r52 | `dev-r52-global-sessionstart-local` |
-| r53 | `dev-r53-r51-r41-regression-local` |
-| r54 | `dev-r54-no-hook-duplicate-rebuild-local` |
-| r55 | `dev-r55-hook-triage-local` |
-| r56 | `dev-r56-post-compact-continuity-local` |
-| r57 | `dev-r57-windows-process-health-local` |
-| r58 | `dev-r58-chatgpt-lifecycle-local` |
-| r59 | `dev-r59-gpt56-luna-max-local` |
-| r60 | `dev-r60-consent-transcript-structure-local` |
-| r61 | `dev-r61-transition-diagnostics-local` |
-| r62 | `dev-r62-canonical-local-rebase` |
-| r63 | `dev-r63-scope-separation-local` |
-| r64 | `dev-r64-auq-local-only-owned-primitive` |
+| r43 | `dev-r43-health-mcp-hardening-local` |
+| r44 | `dev-r44-responses-terminal-semantics` |
+| r45 | `dev-r45-model-switch-continuity-local` |
+| r46 | `dev-r46-model-switch-old-thread-recovery-local` |
+| r47 | `dev-r47-codex-temp-dir-local` |
+| r48 | `dev-r48-provider-temp-control-local` |
+| r49 | `dev-r49-unified-codex-temp-launch-local` |
+| r50 | `dev-r50-same-session-cross-model-replay-local` |
+| r51 | `dev-r51-model-switch-classifier-compact-handoff-local` |
+| r52 | `dev-r52-cross-model-compaction-history-portable-local` |
+| r53 | `dev-r53-sub2api-oauth-compact-max-output-local` |
+| r54 | `dev-r54-sub2api-compact-responses-sse-local` |
+| r55 | `dev-r55-detached-mcp-helper-install-safe-local` |
+| r56 | `dev-r56-compact-sse-summary-fallback-local` |
+| r57 | `dev-r57-external-mcp-source-migration-local` |
+| r58 | `dev-r58-windows-chatgpt-lifecycle-guard-local` |
+| r59 | `dev-r59-interrupted-tail-same-id-recovery-local` |
+| r60 | `dev-r60-recovery-session-catalog-local`; `dev-r60-sub2api-post-compact-replay-local`; `dev-r60-sub2api-post-compaction-replay-local` |
+| r61 | `dev-r61-model-switch-compact-resume-once`; `dev-r61-sub2api-compaction-loop-guard-local` |
+| r62 | `dev-r62-compact-summary-repair-retry-local` |
+| r63 | `dev-r63-auth-epoch-encrypted-history-fence-local` |
+| r64 | `dev-r64-post-compact-continuation-guard-local` |
 | r65 | `dev-r65-first-turn-startup-generation-gate-local` |
 
-These branch names are discovery inputs, not proof that their behavior is present in the current build. Each revision still requires source/test evidence. In particular, older summaries that mapped r59-r64 to unrelated later compatibility features are not authoritative and must not be used for carry-forward acceptance.
+Branch names are discovery inputs, not acceptance evidence. Each revision still requires source/test evidence and, where multiple variants survive, lineage comparison. Older summaries with different r43-r65 names must not be treated as authoritative without current-repository evidence.
 
 ## r66-r69 negative invariant
 
 The following experimental Hook A/B lines must **not** return as runtime behavior:
 
-- `CAS-R66-POST-COMPACT-HOOKS-AB`
-- `CAS-R67-HOOKS-RESTORED-SELECTIVE-STATE`
-- `CAS-R68-SESSIONSTART-ONLY-HOOKS-AB`
-- `CAS-R69-SESSIONSTART-POSTCOMPACT-HOOKS-AB`
+- `dev-r66-post-compact-hooks-ab-local`
+- `dev-r67-hooks-restored-selective-state-local`
+- `dev-r68-sessionstart-only-ab-local`
+- `dev-r69-sessionstart-postcompact-ab-local`
 
-A verifier must fail if these experimental markers/behaviors are materialized into the daily build.
+A verifier must fail if these experimental behaviors are materialized into the daily build. Merely mentioning these names in a verifier/ledger is not materialization.
 
 ## Hook health: read-only only
 

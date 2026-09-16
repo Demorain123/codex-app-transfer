@@ -22,6 +22,11 @@ function Write-Utf8NoBom([string]$Path,[string]$Text) {
     [System.IO.File]::WriteAllText($Path,$Text,$Utf8NoBom)
 }
 
+function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label) {
+    if (-not $Text.Contains($Old)) { throw "r84 expected text missing: $Label" }
+    return $Text.Replace($Old,$New)
+}
+
 function Replace-BlockRequired([string]$Text,[string]$StartMarker,[string]$EndMarker,[string]$Replacement,[string]$Label) {
     $Start = $Text.IndexOf($StartMarker)
     if ($Start -lt 0) { throw "r84 block start missing: $Label" }
@@ -240,6 +245,48 @@ foreach ($Marker in @(
     if (-not $R84BuilderText.Contains($Marker)) { throw "r84 retarget verification failed: $Marker" }
 }
 
+# The nested r83/r84 builder intentionally requires a clean tracked worktree.
+# Therefore do not patch tracked r75 before invoking it. Instead inject the
+# reviewed r84 timestamp source as the first operation INSIDE the nested build
+# try-block, which runs only after that clean-worktree gate has passed. Base64
+# keeps nested here-strings/quotes opaque and the SHA-256 check ensures the
+# exact preflighted source is what the generated timestamp wrapper reads.
+$PatchedR75Bytes = $Utf8NoBom.GetBytes($PatchedR75)
+$PatchedR75Base64 = [Convert]::ToBase64String($PatchedR75Bytes)
+$Sha = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $PatchedR75Sha256 = ([BitConverter]::ToString($Sha.ComputeHash($PatchedR75Bytes))).Replace('-','').ToLowerInvariant()
+} finally {
+    $Sha.Dispose()
+}
+
+$InstallNeedle = @'
+try {
+    Write-Host '[r84 1/4] Selectively materializing r43-r65 onto the current r70+ tree...' -ForegroundColor Cyan
+'@
+$InstallBlock = @'
+try {
+    $R84TimestampSourceBase64 = '__R84_TIMESTAMP_BASE64__'
+    $R84TimestampSourceText = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($R84TimestampSourceBase64))
+    [System.IO.File]::WriteAllText($R75Builder,$R84TimestampSourceText,[System.Text.UTF8Encoding]::new($false))
+    $R84TimestampSourceHash = (Get-FileHash -LiteralPath $R75Builder -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($R84TimestampSourceHash -ne '__R84_TIMESTAMP_SHA256__') {
+        throw "r84 temporary timestamp source hash mismatch: $R84TimestampSourceHash"
+    }
+    Write-Host 'R84_TEMP_TIMESTAMP_SOURCE_INSTALLED' -ForegroundColor Green
+    Write-Host '[r84 1/4] Selectively materializing r43-r65 onto the current r70+ tree...' -ForegroundColor Cyan
+'@
+$InstallBlock = $InstallBlock.Replace('__R84_TIMESTAMP_BASE64__',$PatchedR75Base64).Replace('__R84_TIMESTAMP_SHA256__',$PatchedR75Sha256)
+$R84BuilderText = Replace-Required $R84BuilderText $InstallNeedle $InstallBlock 'install timestamp source after nested clean-worktree gate'
+
+foreach ($Marker in @(
+    'R84_TEMP_TIMESTAMP_SOURCE_INSTALLED',
+    '$R84TimestampSourceHash = (Get-FileHash -LiteralPath $R75Builder -Algorithm SHA256).Hash.ToLowerInvariant()',
+    $PatchedR75Sha256
+)) {
+    if (-not $R84BuilderText.Contains($Marker)) { throw "r84 post-clean-gate injection verification failed: $Marker" }
+}
+
 # Parse both PowerShell layers before touching the worktree.
 $ParseTokens = $null
 $ParseErrors = $null
@@ -255,10 +302,14 @@ Write-Host '  - generic data-turn-key/data-message-id containers are identity on
 Write-Host '  - wrapper-only chains unwrap until real visual output blocks'
 Write-Host '  - vertically stacked assistant/tool/agent blocks become independent timestamp surfaces'
 Write-Host '  - horizontal icon/label rows remain atomic'
+Write-Host '  - timestamp source is installed only after the nested clean-worktree gate passes'
+Write-Host '  - the installed timestamp source is SHA-256 checked before package generation'
 Write-Host '  - r83 exact telemetry and r43-r65 carry-forward chain are unchanged'
 
 try {
-    Write-Utf8NoBom $R75Builder $PatchedR75
+    # Only the generated wrapper is written here. The tracked r75 source must
+    # remain pristine until the nested builder has completed its own clean-tree
+    # preflight; the generated wrapper installs/restores r75 inside its try/finally.
     Write-Utf8NoBom $TempR84Builder $R84BuilderText
 
     $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$TempR84Builder)
@@ -278,6 +329,9 @@ try {
     }
 }
 finally {
+    # Belt-and-suspenders restoration: nested r84 already restores all tracked
+    # sources in its own finally, but restore the exact entry content here too
+    # if an unexpected failure occurred between temporary install and cleanup.
     Write-Utf8NoBom $R75Builder $OriginalR75
     Remove-Item -LiteralPath $TempR84Builder -Force -ErrorAction SilentlyContinue
     Write-Host '[r84] restored temporary timestamp source patches; worktree remains pull-friendly'

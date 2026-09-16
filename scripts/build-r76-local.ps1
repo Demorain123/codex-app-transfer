@@ -39,7 +39,8 @@ function Ensure-LineAfter([string]$Value, [string]$Anchor, [string]$Line, [strin
     if (-not $Value.Contains($Anchor)) {
         throw "r76 entrypoint anchor missing: $Label"
     }
-    return $Value.Replace($Anchor, $Anchor + "`n" + $Line)
+    $Eol = if ($Value.Contains("`r`n")) { "`r`n" } else { "`n" }
+    return $Value.Replace($Anchor, $Anchor + $Eol + $Line)
 }
 
 # Avoid an outer/inner generated-script filename collision while the r75-based
@@ -56,7 +57,8 @@ $Text = Replace-Required $Text $Old $New 'outer generated builder path'
 # Do not use multiline here-string matching for this migration. Nested builders
 # rewrite temporary PowerShell sources with UTF-8 and may change CRLF/LF style;
 # matching semantic single-line anchors keeps the migration strict without
-# making line-ending style part of the contract.
+# making line-ending style part of the contract. Insertions preserve the target
+# file's existing EOL style so this layer never creates mixed line endings.
 $SpacerAnchor = "      '#' + STATUS_ID + ' .cas-status-spacer{flex:1 1 auto;min-width:2px;}',"
 $Container720 = "      '@container (max-width:720px){#' + STATUS_ID + ' .cas-status-secondary{display:none;}}',"
 $Container560 = "      '@container (max-width:560px){#' + STATUS_ID + ' .cas-status-tertiary{display:none;}}',"

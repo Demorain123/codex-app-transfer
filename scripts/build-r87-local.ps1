@@ -58,18 +58,12 @@ foreach ($Marker in @(
     if (-not $GuardText.Contains($Marker)) { throw "r87 guard invariant missing: $Marker" }
 }
 
-# The compatibility guard itself must stay passive. These call shapes are
-# forbidden inside the component so a future UI edit cannot silently turn the
-# read-only status card into an active provider probe or retry path.
 foreach ($Forbidden in @('fetch(', 'providersApi.', 'invoke(', 'axios.', '$http.', 'retryRequest(')) {
     if ($GuardText.Contains($Forbidden)) { throw "r87 guard contains forbidden active-call shape: $Forbidden" }
 }
 
-# Gate the expensive carry-forward/package build on the actual historical text
-# transforms that feed the nested r77/r78/r83 chain. All three preflights are
-# no-write: r75 validates timestamp block/poll transforms, r76-output validates
-# telemetry/launcher transforms, and r76-entry validates native/LF/CRLF plus a
-# second idempotent pass.
+# Exercise the historical generated-text layers before starting any expensive
+# carry-forward/package work. Each sub-preflight must be no-write.
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $R75Builder -PreflightOnly
 if ($LASTEXITCODE -ne 0) { throw "r87 r75 transform preflight failed with exit code $LASTEXITCODE" }
 Write-Host 'R87_R75_TEXT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
@@ -82,6 +76,13 @@ Write-Host 'R87_R76_OUTPUT_TRANSFORM_PREFLIGHT_PASS' -ForegroundColor Green
 if ($LASTEXITCODE -ne 0) { throw "r87 r76 entrypoint preflight failed with exit code $LASTEXITCODE" }
 Write-Host 'R87_R76_ENTRY_EOL_PREFLIGHT_PASS' -ForegroundColor Green
 
+$GeneratorDirty = @(git -C $RepoRoot status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0) { throw 'r87 generator preflight worktree check failed' }
+if ($GeneratorDirty.Count -gt 0) {
+    throw "r87 generator preflights modified tracked files:`n$($GeneratorDirty -join "`n")"
+}
+Write-Host 'R87_GENERATOR_PREFLIGHT_WORKTREE_CLEAN_PASS' -ForegroundColor Green
+
 $OriginalR86 = [System.IO.File]::ReadAllText($R86Builder)
 $OriginalR77 = [System.IO.File]::ReadAllText($R77Builder)
 $R87BuilderText = Retarget-R86Text $OriginalR86
@@ -89,14 +90,6 @@ $R87StampText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Stamp))
 $R87ObserverText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Observer))
 $R87ObserverPatchText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86ObserverPatch))
 
-# r86 preflight verified the legacy r77 assistantRootsNow source before the
-# strict observer replacement. During a real nested build, however, r78 installs
-# the r86+ observer first, so the generated r77 telemetry builder no longer sees
-# the legacy assistant-root block and used to fail before telemetry generation.
-# Treat the strict/live-only observer as the authoritative replacement for those
-# two legacy r77 timestamp edits, while keeping every non-timestamp r77 failure
-# strict. Also relax the generated-source verification to the assistantRootsNow
-# function shared by both the legacy fallback and strict observer implementations.
 $OldR77MissingGuard = @'
     if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r77 expected text missing: $Label" }
     return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
@@ -135,10 +128,6 @@ if (-not $R87BuilderText.Contains($R77CreateNeedle)) {
 }
 $R87BuilderText = $R87BuilderText.Replace($R77CreateNeedle,$R77CreateReplacement)
 
-# PRE-MATERIALIZATION SIMULATION: exercise the exact condition that failed in
-# the first r87 full build. The strict observer must intentionally no longer
-# contain r77's legacy assistantRootsNow body, while still exposing the strict
-# ownership/baseline markers that authorize the two timestamp-only no-ops.
 $R77OldRootsMatch = [regex]::Match($OriginalR77, '(?s)\$OldAssistantRoots\s*=\s*@''\r?\n(?<body>.*?)\r?\n''@')
 if (-not $R77OldRootsMatch.Success) { throw 'r87 preflight could not extract r77 legacy assistant roots' }
 $R77OldRoots = $R77OldRootsMatch.Groups['body'].Value.Replace("`r`n","`n")
@@ -177,9 +166,6 @@ foreach ($Marker in @(
 
 Assert-PowerShellParses $R87BuilderText 'retargeted r87 wrapper'
 
-# Keep the already-proven r43-r65/r70/r86 pipeline intact. r87 only adds a
-# tracked read-only UI guard plus a version retarget. The generated timestamp
-# helpers are untracked build inputs and are removed in finally.
 Write-Host 'R87_SUB2API_COMPAT_GUARD_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - Compatibility Guard is read-only and contains no active provider calls'
 Write-Host '  - no /health, /models, /responses probe is issued by the guard'
@@ -189,6 +175,7 @@ Write-Host '  - r86 timestamp correctness pipeline is inherited and retargeted, 
 Write-Host '  - r75/r76 generated text transforms are exercised in no-write preflight before carry-forward'
 Write-Host '  - r77 legacy timestamp-root recovery safely yields to the r86+ strict observer during full builds'
 Write-Host '  - r76 entrypoint UI migration is preflighted across native/LF/CRLF before carry-forward starts'
+Write-Host '  - generator preflights must leave tracked worktree clean'
 Write-Host '  - r43-r65 selective carry-forward and r66-r69 negative guards remain inherited'
 
 try {

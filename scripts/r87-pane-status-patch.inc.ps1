@@ -10,14 +10,12 @@ foreach ($R87PanePath in @($R87PaneRuntimePath,$R87ExternalIngestPath,$R87MainCo
     if (-not (Test-Path -LiteralPath $R87PanePath)) { throw "r87 pane-status helper missing: $R87PanePath" }
 }
 
-$R87PaneRuntimeBody = [System.IO.File]::ReadAllText($R87PaneRuntimePath)
-
 # ---------------------------------------------------------------------------
 # Renderer/status runtime: make r75 patch the r74 telemetry runtime when the
 # r75 generated builder actually executes. This avoids editing r74/r76 tracked
 # sources before nested clean-worktree gates.
 # ---------------------------------------------------------------------------
-$R87R75PatchNeedle = "$Patched = $Original.Replace('r74', 'r75').Replace('R74', 'R75').Replace('+74', '+75')"
+$R87R75PatchNeedle = '$Patched = $Original.Replace(''r74'', ''r75'').Replace(''R74'', ''R75'').Replace(''+74'', ''+75'')'
 $R87R75PatchCode = @'
 
     # R87_MULTI_PANE_STATUS_RUNTIME_PATCH
@@ -26,25 +24,25 @@ $R87R75PatchCode = @'
     $R87PaneRuntimeBody = [System.IO.File]::ReadAllText($R87PaneRuntimePath)
 
     $R87OldStatusConst = "  const STATUS_ID = 'cas-live-statusbar';"
-    $R87NewStatusConst = @'
+    $R87NewStatusConst = @"
   const STATUS_ID = 'cas-live-statusbar';
   const STATUS_ATTR = 'data-cas-live-statusbar';
   const STATUS_HOST_ATTR = 'data-cas-statusbar-host';
-'@
+"@
     $Patched = Replace-Required $Patched $R87OldStatusConst $R87NewStatusConst 'r87 multi-pane status constants'
 
-    $R87OldInsideOwnUi = @'
+    $R87OldInsideOwnUi = @"
   function insideOwnUi(node) {
     if (!(node instanceof Element)) return false;
     return !!node.closest('#' + STATUS_ID + ',#' + MIRROR_ID + ',#' + ANALYTICS_ID);
   }
-'@
-    $R87NewInsideOwnUi = @'
+"@
+    $R87NewInsideOwnUi = @"
   function insideOwnUi(node) {
     if (!(node instanceof Element)) return false;
     return !!node.closest('#' + STATUS_ID + ',#' + MIRROR_ID + ',#' + ANALYTICS_ID + ',[' + STATUS_ATTR + '=\"true\"],[' + STATUS_HOST_ATTR + '=\"true\"]');
   }
-'@
+"@
     $Patched = Replace-Required $Patched $R87OldInsideOwnUi $R87NewInsideOwnUi 'r87 own-ui multi-pane guard'
 
     $Patched = Replace-BlockRequired `
@@ -54,7 +52,7 @@ $R87R75PatchCode = @'
         $R87PaneRuntimeBody `
         'r87 multi-pane composer/status runtime'
 
-    $R87OldRefreshUi = @'
+    $R87OldRefreshUi = @"
   function refreshUi() {
     ensureStyle();
     readModelLabel();
@@ -64,8 +62,8 @@ $R87R75PatchCode = @'
     sampleHistory(false);
     renderAnalytics();
   }
-'@
-    $R87NewRefreshUi = @'
+"@
+    $R87NewRefreshUi = @"
   function refreshUi() {
     ensureStyle();
     readModelLabel();
@@ -74,16 +72,16 @@ $R87R75PatchCode = @'
     sampleHistory(false);
     renderAnalytics();
   }
-'@
+"@
     $Patched = Replace-Required $Patched $R87OldRefreshUi $R87NewRefreshUi 'r87 render every visible pane statusbar'
 
-    $R87OldCleanupIds = @'
+    $R87OldCleanupIds = @"
     for (const id of [STATUS_ID, MIRROR_ID, ANALYTICS_ID, STYLE_ID]) {
       const node = document.getElementById(id);
       if (node) node.remove();
     }
-'@
-    $R87NewCleanupIds = @'
+"@
+    $R87NewCleanupIds = @"
     document.querySelectorAll('[' + STATUS_HOST_ATTR + '=\"true\"]').forEach(function(node) { node.remove(); });
     const paneStyle = document.getElementById('cas-r87-pane-status-style');
     if (paneStyle) paneStyle.remove();
@@ -91,19 +89,19 @@ $R87R75PatchCode = @'
       const node = document.getElementById(id);
       if (node) node.remove();
     }
-'@
+"@
     $Patched = Replace-Required $Patched $R87OldCleanupIds $R87NewCleanupIds 'r87 multi-pane cleanup'
 
-    $R87OldOutsideClick = @'
+    $R87OldOutsideClick = @"
     const bar = document.getElementById(STATUS_ID);
     const mirror = document.getElementById(MIRROR_ID);
     if ((bar && bar.contains(event.target)) || (mirror && mirror.contains(event.target))) return;
-'@
-    $R87NewOutsideClick = @'
+"@
+    $R87NewOutsideClick = @"
     const bar = event.target instanceof Element ? event.target.closest('[' + STATUS_ATTR + '=\"true\"]') : null;
     const mirror = document.getElementById(MIRROR_ID);
     if (bar || (mirror && mirror.contains(event.target))) return;
-'@
+"@
     $Patched = Replace-Required $Patched $R87OldOutsideClick $R87NewOutsideClick 'r87 multi-pane analytics outside-click guard'
 
     foreach ($R87PaneMarker in @(
@@ -188,4 +186,6 @@ foreach ($R87OverlayMarker in @(
         throw "r87 pane overlay materialization marker missing: $R87OverlayMarker"
     }
 }
+Assert-PowerShellParses $PatchedR75 'r87 patched r75 pane-status builder'
+Assert-PowerShellParses $R87Core 'r87 patched r83 multi-pane collector builder'
 Write-Host 'R87_MULTI_PANE_STATUS_OVERLAY_PREFLIGHT_PASS' -ForegroundColor Green

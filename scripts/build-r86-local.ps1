@@ -126,27 +126,27 @@ $StampBody = @'
     return null;
   }
 
+  function isFinalAssistantSurface(segment) {
+    if (!(segment instanceof Element) || isUserAuthoredSurface(segment)) return false;
+    if (segment.matches('[data-local-conversation-final-assistant]')) return true;
+    if (segment.querySelector('[data-local-conversation-final-assistant]')) return true;
+    // A generic data-message-author-role="assistant" wrapper may contain an
+    // entire multi-step turn, so it is identity/root only, never final by itself.
+    return !!segment.querySelector('[data-assistant-message-sent-time]');
+  }
+
   function nativeTimeForSegment(segment, root) {
     if (!(segment instanceof Element) || isUserAuthoredSurface(segment)) return null;
     const own = nativeSentTimeForSegment(segment);
     if (own) return own;
-
-    // Only a final assistant surface may consult its own native action row.
-    // Progress/tool/prose segments never inherit a timestamp from the broad
-    // turn/root container.
-    const isFinal = segment.matches('[data-local-conversation-final-assistant],[data-message-author-role="assistant"]') ||
-      !!segment.querySelector('[data-local-conversation-final-assistant]');
-    if (!isFinal) return null;
+    if (!isFinalAssistantSurface(segment)) return null;
     const actionRow = actionRowForSegment(segment, root);
     if (!actionRow) return null;
     return nativeSentTimeForSegment(actionRow);
   }
 
   function actionRowForSegment(segment, root) {
-    if (!(segment instanceof Element) || isUserAuthoredSurface(segment)) return null;
-    const isFinal = segment.matches('[data-local-conversation-final-assistant],[data-message-author-role="assistant"]') ||
-      !!segment.querySelector('[data-local-conversation-final-assistant]');
-    if (!isFinal) return null;
+    if (!(segment instanceof Element) || !isFinalAssistantSurface(segment)) return null;
     const turn = segment.closest('[data-turn-key],[data-chatgpt-conversation-turn="true"]') ||
       (root instanceof Element ? root.closest('[data-turn-key],[data-chatgpt-conversation-turn="true"]') : null) ||
       segment;
@@ -388,6 +388,7 @@ foreach ($Marker in @(
     'function isUserAuthoredSurface(node) {',
     'isUserAuthoredSurface(candidate)',
     'function nativeSentTimeForSegment(segment) {',
+    'function isFinalAssistantSurface(segment) {',
     'state.timestampBaselineElements = new WeakSet();',
     'if (!hasRecentLiveUsage()) return;',
     "try { sweepOutputSegments(false); } catch {}",
@@ -407,6 +408,7 @@ Assert-PowerShellParses $R86BuilderText 'generated r86 builder'
 
 Write-Host 'R86_TIMESTAMP_CORRECTNESS_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - user-authored bubbles are excluded from timestamp surfaces'
+Write-Host '  - generic assistant wrappers are identity only; they are not treated as final replies'
 Write-Host '  - progress/tool/prose outputs cannot inherit a broad root/native sent-time'
 Write-Host '  - legacy r74-r85 structural timestamp cache is cleared and no longer reused'
 Write-Host '  - historical baseline/remounted DOM is never assigned Date.now()'

@@ -67,6 +67,52 @@ $R87StampText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Stamp))
 $R87ObserverText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86Observer))
 $R87ObserverPatchText = Retarget-R86Text ([System.IO.File]::ReadAllText($R86ObserverPatch))
 
+# r86 preflight verified the legacy r77 assistantRootsNow source before the
+# strict observer replacement. During a real nested build, however, r78 installs
+# the r86+ observer first, so the generated r77 telemetry builder no longer sees
+# the legacy assistant-root block and used to fail before telemetry generation.
+# Treat the strict/live-only observer as the authoritative replacement for those
+# two legacy r77 timestamp edits, while keeping every non-timestamp r77 failure
+# strict. Also relax the generated-source verification to the assistantRootsNow
+# function shared by both the legacy fallback and strict observer implementations.
+$OldR77MissingGuard = @'
+    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r77 expected text missing: $Label" }
+    return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
+'@
+$NewR77MissingGuard = @'
+    if (-not $NormalizedText.Contains($NormalizedOld)) {
+        if (($Label -eq 'timestamp fallback assistant roots' -or $Label -eq 'timestamp mutation fallback root') -and
+            $NormalizedText.Contains('function strictAssistantRootFor(node) {') -and
+            $NormalizedText.Contains('state.timestampBaselineElements = new WeakSet();')) {
+            Write-Host 'R77_TIMESTAMP_ROOT_RECOVERY_SUPERSEDED_PASS' -ForegroundColor Green
+            return $NormalizedText
+        }
+        throw "r77 expected text missing: $Label"
+    }
+    return $NormalizedText.Replace($NormalizedOld, $NormalizedNew)
+'@
+if (-not $R87BuilderText.Contains($OldR77MissingGuard)) {
+    throw 'r87 could not locate the EOL-safe r77 missing-source guard'
+}
+$R87BuilderText = $R87BuilderText.Replace($OldR77MissingGuard,$NewR77MissingGuard)
+
+$R77CreateNeedle = @'
+$PatchedR77 = Replace-Required $OriginalR77 $OldR77ReplaceRequired $NewR77ReplaceRequired 'make r77 multiline replacements EOL-safe'
+'@
+$R77CreateReplacement = @'
+$PatchedR77 = Replace-Required $OriginalR77 $OldR77ReplaceRequired $NewR77ReplaceRequired 'make r77 multiline replacements EOL-safe'
+$R77LegacyVerifyMarker = "    'assistantRootForAny(node)',"
+$R77CommonVerifyMarker = "    'function assistantRootsNow() {',"
+if (-not $PatchedR77.Contains($R77LegacyVerifyMarker)) {
+    throw 'r87 could not locate the r77 legacy assistant-root verification marker'
+}
+$PatchedR77 = $PatchedR77.Replace($R77LegacyVerifyMarker,$R77CommonVerifyMarker)
+'@
+if (-not $R87BuilderText.Contains($R77CreateNeedle)) {
+    throw 'r87 could not locate r77 compatibility materialization point'
+}
+$R87BuilderText = $R87BuilderText.Replace($R77CreateNeedle,$R77CreateReplacement)
+
 foreach ($Marker in @(
     "`$R87Core = `$OriginalR83.Replace('r83','r87').Replace('R83','R87').Replace('+83','+87')",
     'r87-timestamp-stamp.js',
@@ -74,7 +120,9 @@ foreach ($Marker in @(
     'r87-r78-observer-patch.inc.ps1',
     'R87_TIMESTAMP_CORRECTNESS_PREFLIGHT_PASS',
     'R87_R77_COMPAT_PREFLIGHT_PASS',
-    'R87_TIMESTAMP_CORRECTNESS_PASS'
+    'R87_TIMESTAMP_CORRECTNESS_PASS',
+    'R77_TIMESTAMP_ROOT_RECOVERY_SUPERSEDED_PASS',
+    '$R77CommonVerifyMarker'
 )) {
     if (-not $R87BuilderText.Contains($Marker)) { throw "r87 retargeted r86 builder invariant missing: $Marker" }
 }
@@ -90,6 +138,7 @@ Write-Host '  - no /health, /models, /responses probe is issued by the guard'
 Write-Host '  - generic 502/503/timeout turn replay is not added'
 Write-Host '  - transport fallback remains explicitly Sub2API-owned / not probed'
 Write-Host '  - r86 timestamp correctness pipeline is inherited and retargeted, not rewritten'
+Write-Host '  - r77 legacy timestamp-root recovery safely yields to the r86+ strict observer during full builds'
 Write-Host '  - r43-r65 selective carry-forward and r66-r69 negative guards remain inherited'
 
 try {

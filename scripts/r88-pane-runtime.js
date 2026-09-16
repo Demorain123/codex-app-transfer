@@ -76,6 +76,10 @@
     return String(value || '').replace(/^local:/i, '').trim().toLowerCase();
   }
 
+  function normalizePaneThreadId(value) {
+    return normalizePaneId(value);
+  }
+
   function idFromNode(node, attrs) {
     if (!(node instanceof Element)) return '';
     for (const attr of attrs) {

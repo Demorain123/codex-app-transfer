@@ -31,6 +31,17 @@ function Replace-Required-OrAlready([string]$Value, [string]$Old, [string]$New, 
     throw "r76 entrypoint expected old/new text missing: $Label"
 }
 
+function Ensure-LineAfter([string]$Value, [string]$Anchor, [string]$Line, [string]$Label) {
+    if ($Value.Contains($Line)) {
+        Write-Host "R76_ENTRY_IDEMPOTENT_ALREADY_PASS: $Label" -ForegroundColor Green
+        return $Value
+    }
+    if (-not $Value.Contains($Anchor)) {
+        throw "r76 entrypoint anchor missing: $Label"
+    }
+    return $Value.Replace($Anchor, $Anchor + "`n" + $Line)
+}
+
 # Avoid an outer/inner generated-script filename collision while the r75-based
 # finalizer is converted to r76 identity.
 $Old = '$TempBuilder = Join-Path $PSScriptRoot ''.build-r76-output-ui-local.generated.ps1'''
@@ -42,30 +53,19 @@ $Text = Replace-Required $Text $Old $New 'outer generated builder path'
 # those rules never fire. Make the status bar a size query container and adapt
 # optional metrics to the actual composer/status width instead.
 #
-# Newer nested package builders can arrive here after part of this r76 UI
-# migration has already been materialized in the temporary r74 source. Accept
-# that state only when the exact desired replacement is already present; any
-# unknown drift still fails closed.
-$OldSpacer = @'
-      '#' + STATUS_ID + ' .cas-status-spacer{flex:1 1 auto;min-width:2px;}',
-'@
-$NewSpacer = @'
-      '#' + STATUS_ID + ' .cas-status-spacer{flex:1 1 auto;min-width:2px;}',
-      '@container (max-width:720px){#' + STATUS_ID + ' .cas-status-secondary{display:none;}}',
-      '@container (max-width:560px){#' + STATUS_ID + ' .cas-status-tertiary{display:none;}}',
-'@
-$OldBar = @'
-      bar.id = STATUS_ID;
-      bar.title = 'Click for live telemetry charts';
-'@
-$NewBar = @'
-      bar.id = STATUS_ID;
-      bar.style.containerType = 'inline-size';
-      bar.title = 'Click for live telemetry charts';
-'@
+# Do not use multiline here-string matching for this migration. Nested builders
+# rewrite temporary PowerShell sources with UTF-8 and may change CRLF/LF style;
+# matching semantic single-line anchors keeps the migration strict without
+# making line-ending style part of the contract.
+$SpacerAnchor = "      '#' + STATUS_ID + ' .cas-status-spacer{flex:1 1 auto;min-width:2px;}',"
+$Container720 = "      '@container (max-width:720px){#' + STATUS_ID + ' .cas-status-secondary{display:none;}}',"
+$Container560 = "      '@container (max-width:560px){#' + STATUS_ID + ' .cas-status-tertiary{display:none;}}',"
+$BarAnchor = '      bar.id = STATUS_ID;'
+$ContainerTypeLine = "      bar.style.containerType = 'inline-size';"
 
-$AdaptiveR74 = Replace-Required-OrAlready $OriginalR74 $OldSpacer $NewSpacer 'status container-query rules'
-$AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 $OldBar $NewBar 'status container type'
+$AdaptiveR74 = Ensure-LineAfter $OriginalR74 $SpacerAnchor $Container720 'status container-query <=720 rule'
+$AdaptiveR74 = Ensure-LineAfter $AdaptiveR74 $Container720 $Container560 'status container-query <=560 rule'
+$AdaptiveR74 = Ensure-LineAfter $AdaptiveR74 $BarAnchor $ContainerTypeLine 'status container type'
 
 # OpenAI's current token accounting distinguishes active request/context usage
 # (last_token_usage) from lifetime cumulative thread usage (total_token_usage).
@@ -79,6 +79,19 @@ $AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 `
     '<span>Session</span><span>' `
     '<span>Session total</span><span>' `
     'mirror cumulative total label'
+
+foreach ($Marker in @(
+    $Container720,
+    $Container560,
+    $ContainerTypeLine,
+    "    const session = 'total ' + shortNumber(effectiveSessionTotal());",
+    '<span>Session total</span><span>'
+)) {
+    if (-not $AdaptiveR74.Contains($Marker)) {
+        throw "r76 entrypoint post-migration invariant missing: $Marker"
+    }
+}
+Write-Host 'R76_ENTRY_UI_MIGRATION_PREFLIGHT_PASS' -ForegroundColor Green
 
 try {
     [System.IO.File]::WriteAllText($R74Builder, $AdaptiveR74, $Utf8NoBom)

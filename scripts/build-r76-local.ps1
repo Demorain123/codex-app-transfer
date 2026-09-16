@@ -20,6 +20,17 @@ function Replace-Required([string]$Value, [string]$Old, [string]$New, [string]$L
     return $Value.Replace($Old, $New)
 }
 
+function Replace-Required-OrAlready([string]$Value, [string]$Old, [string]$New, [string]$Label) {
+    if ($Value.Contains($Old)) {
+        return $Value.Replace($Old, $New)
+    }
+    if ($Value.Contains($New)) {
+        Write-Host "R76_ENTRY_IDEMPOTENT_ALREADY_PASS: $Label" -ForegroundColor Green
+        return $Value
+    }
+    throw "r76 entrypoint expected old/new text missing: $Label"
+}
+
 # Avoid an outer/inner generated-script filename collision while the r75-based
 # finalizer is converted to r76 identity.
 $Old = '$TempBuilder = Join-Path $PSScriptRoot ''.build-r76-output-ui-local.generated.ps1'''
@@ -30,6 +41,11 @@ $Text = Replace-Required $Text $Old $New 'outer generated builder path'
 # column can be ~650-750 px wide while the app viewport remains >1500 px, so
 # those rules never fire. Make the status bar a size query container and adapt
 # optional metrics to the actual composer/status width instead.
+#
+# Newer nested package builders can arrive here after part of this r76 UI
+# migration has already been materialized in the temporary r74 source. Accept
+# that state only when the exact desired replacement is already present; any
+# unknown drift still fails closed.
 $OldSpacer = @'
       '#' + STATUS_ID + ' .cas-status-spacer{flex:1 1 auto;min-width:2px;}',
 '@
@@ -48,18 +64,18 @@ $NewBar = @'
       bar.title = 'Click for live telemetry charts';
 '@
 
-$AdaptiveR74 = Replace-Required $OriginalR74 $OldSpacer $NewSpacer 'status container-query rules'
-$AdaptiveR74 = Replace-Required $AdaptiveR74 $OldBar $NewBar 'status container type'
+$AdaptiveR74 = Replace-Required-OrAlready $OriginalR74 $OldSpacer $NewSpacer 'status container-query rules'
+$AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 $OldBar $NewBar 'status container type'
 
 # OpenAI's current token accounting distinguishes active request/context usage
 # (last_token_usage) from lifetime cumulative thread usage (total_token_usage).
 # Calling the latter merely "session" is easy to misread when it reaches tens or
 # hundreds of millions, so r76 labels it explicitly as cumulative total.
-$AdaptiveR74 = Replace-Required $AdaptiveR74 `
+$AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 `
     "    const session = 'session ' + shortNumber(effectiveSessionTotal());" `
     "    const session = 'total ' + shortNumber(effectiveSessionTotal());" `
     'status cumulative total label'
-$AdaptiveR74 = Replace-Required $AdaptiveR74 `
+$AdaptiveR74 = Replace-Required-OrAlready $AdaptiveR74 `
     '<span>Session</span><span>' `
     '<span>Session total</span><span>' `
     'mirror cumulative total label'

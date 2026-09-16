@@ -1,18 +1,47 @@
+  function timestampComposerRoots() {
+    try {
+      if (typeof findComposerRoots === 'function') {
+        const roots = findComposerRoots();
+        if (Array.isArray(roots)) return roots.filter(function(root) { return root instanceof Element && isVisible(root); });
+      }
+    } catch {}
+    try {
+      const one = findComposerRoot();
+      return one instanceof Element && isVisible(one) ? [one] : [];
+    } catch { return []; }
+  }
+
+  function timestampPaneScopeFor(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    if (!(element instanceof Element)) return null;
+    const composers = timestampComposerRoots();
+    if (!composers.length) return null;
+    let current = element;
+    for (let depth = 0; current instanceof Element && current !== document.body && depth < 12; depth += 1) {
+      const contained = composers.filter(function(composer) { return current === composer || current.contains(composer); });
+      if (contained.length === 1) return current;
+      if (contained.length > 1) break;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
   function activeGenerationUiPresent() {
-    const composer = findComposerRoot();
-    if (!(composer instanceof Element)) return false;
-    const scope = composer.parentElement instanceof Element ? composer.parentElement : composer;
-    const controls = scope.querySelectorAll('button,[role="button"]');
-    for (const control of controls) {
-      if (!(control instanceof Element) || !isVisible(control) || insideOwnUi(control)) continue;
-      const hint = [
-        control.getAttribute('aria-label'),
-        control.getAttribute('title'),
-        control.getAttribute('data-testid'),
-        control.getAttribute('data-state'),
-        control.textContent,
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (/(^|[\s:_-])(stop|cancel|interrupt|abort)([\s:_-]|$)|停止|取消|中止|终止/i.test(hint)) return true;
+    const composers = timestampComposerRoots();
+    for (const composer of composers) {
+      const scope = composer.parentElement instanceof Element ? composer.parentElement : composer;
+      const controls = scope.querySelectorAll('button,[role="button"]');
+      for (const control of controls) {
+        if (!(control instanceof Element) || !isVisible(control) || insideOwnUi(control)) continue;
+        const hint = [
+          control.getAttribute('aria-label'),
+          control.getAttribute('title'),
+          control.getAttribute('data-testid'),
+          control.getAttribute('data-state'),
+          control.textContent,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (/(^|[\s:_-])(stop|cancel|interrupt|abort)([\s:_-]|$)|停止|取消|中止|终止/i.test(hint)) return true;
+      }
     }
     return false;
   }
@@ -26,10 +55,21 @@
     return keyed.length ? keyed[keyed.length - 1] : null;
   }
 
+  function latestConversationTurnFor(node) {
+    const scope = timestampPaneScopeFor(node);
+    if (!(scope instanceof Element)) return latestConversationTurn();
+    const preferred = Array.from(scope.querySelectorAll('[data-chatgpt-conversation-turn="true"]'))
+      .filter(function(turn) { return turn instanceof Element && !insideComposer(turn) && !insideOwnUi(turn); });
+    if (preferred.length) return preferred[preferred.length - 1];
+    const keyed = Array.from(scope.querySelectorAll('[data-turn-key]'))
+      .filter(function(turn) { return turn instanceof Element && !insideComposer(turn) && !insideOwnUi(turn); });
+    return keyed.length ? keyed[keyed.length - 1] : null;
+  }
+
   function isLatestTurnSurface(node) {
     const element = node instanceof Element ? node : node && node.parentElement;
     if (!(element instanceof Element)) return false;
-    const latest = latestConversationTurn();
+    const latest = latestConversationTurnFor(element);
     if (!(latest instanceof Element)) return true;
     return element === latest || latest.contains(element) || element.contains(latest);
   }
@@ -39,7 +79,7 @@
     if (!(element instanceof Element) || insideComposer(element) || insideOwnUi(element) || isUserAuthoredSurface(element)) return null;
     if (!hasRecentLiveUsage()) return null;
 
-    const latest = latestConversationTurn();
+    const latest = latestConversationTurnFor(element);
     const semantic = element.closest('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
     if (semantic instanceof Element && !isUserAuthoredSurface(semantic)) {
       if (!(latest instanceof Element) || semantic === latest || latest.contains(semantic) || semantic.contains(latest)) return semantic;
@@ -119,7 +159,8 @@
   function hasRecentLiveUsage() {
     // Exact token_count telemetry can legitimately arrive only after a long
     // model/tool turn completes. While Codex exposes a visible stop/cancel
-    // control, the current UI itself is stronger evidence that a turn is live.
+    // control in any visible pane, the current UI itself is stronger evidence
+    // that at least one turn is live.
     if (activeGenerationUiPresent()) return true;
     const updated = Number(state.metrics && state.metrics.externalUpdatedAt);
     if (!Number.isFinite(updated) || updated <= 0) return false;
@@ -144,8 +185,8 @@
     // Historical DOM that was present at runtime install never receives "now".
     // React remounts/text churn are not trustworthy generation-time evidence.
     if (state.timestampBaselineElements.has(segment) || state.timestampBaselineKeys.has(key)) return;
-    // Estimated timestamps are restricted to the newest turn. This keeps the
-    // live-stop fallback from stamping virtualized/remounted historical turns.
+    // Estimated timestamps are restricted to the newest turn in the segment's
+    // own visible pane, not the newest turn elsewhere in a split view.
     if (!isLatestTurnSurface(segment)) return;
     if (!hasRecentLiveUsage()) return;
     stampSegment(segment, root, Date.now(), 'first observed live output mutation locally');

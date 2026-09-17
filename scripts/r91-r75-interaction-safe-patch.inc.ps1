@@ -90,12 +90,15 @@ $R91StampApplyVerified = @'
     $Patched = Replace-BlockRequired $Patched '  function stampSegment(segment, root, epoch, source) {' '  function baselineExistingDom() {' $NewStamp 'visible in-flow timestamp rail'
     foreach ($Marker in @(
         'function timestampWouldTouchNativeControl(segment) {',
-        'if (timestampWouldTouchNativeControl(segment)) return;',
-        'pointer-events:none;user-select:none;opacity:.72;'
+        'timestampWouldTouchNativeControl(segment)) return;',
+        'pointer-events:none;'
     )) {
         if (-not $Patched.Contains($Marker)) {
             throw "r91 final r75 timestamp materialization invariant missing: $Marker"
         }
+    }
+    if ($Patched.Contains('pointer-events:auto;')) {
+        throw 'r91 final timestamp materialization retained pointer-events:auto'
     }
     Write-Host 'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS' -ForegroundColor Green
 '@
@@ -104,8 +107,8 @@ $PatchedR75 = Replace-R91NormalizedRequired $PatchedR75 $R91StampApplyLine $R91S
 
 foreach ($Marker in @(
     'function timestampWouldTouchNativeControl(segment) {',
-    'if (timestampWouldTouchNativeControl(segment)) return;',
-    'pointer-events:none;user-select:none;opacity:.72;',
+    'timestampWouldTouchNativeControl(segment)) return;',
+    'pointer-events:none;',
     'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS'
 )) {
     if (-not $PatchedR75.Contains($Marker)) {

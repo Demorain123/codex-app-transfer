@@ -114,8 +114,9 @@
     const element = node instanceof Element ? node : node && node.parentElement;
     if (!(element instanceof Element)) return false;
     const latest = latestConversationTurnFor(element);
-    if (latest instanceof Element) return element === latest || latest.contains(element) || element.contains(latest);
-    return isNearComposerLiveTail(element);
+    if (latest instanceof Element && (element === latest || latest.contains(element) || element.contains(latest))) return true;
+    if (isNearComposerLiveTail(element) && activeGenerationUiPresentFor(element)) return true;
+    return false;
   }
 
   function hasRecentLiveUsageFor(node) {
@@ -151,7 +152,7 @@
     if (semantic instanceof Element && !isUserAuthoredSurface(semantic)) return semantic;
 
     const latest = latestConversationTurnFor(element);
-    if (latest instanceof Element) return latest;
+    if (latest instanceof Element && (element === latest || latest.contains(element) || element.contains(latest))) return latest;
 
     let current = element;
     const pane = paneForNode(element);
@@ -274,8 +275,21 @@
   function sweepLiveTailSegments() {
     for (const composer of findComposerRoots()) {
       if (!activeGenerationUiPresentFor(composer)) continue;
-      const root = latestConversationTurnFor(composer);
-      if (root instanceof Element) stampLiveRoot(root);
+      const pane = paneForComposer(composer);
+      const scope = pane instanceof Element ? pane : document;
+      const candidates = Array.from(scope.querySelectorAll('[data-message-author-role="assistant"],[role="status"],[data-testid],p,pre'))
+        .filter(function(candidate) {
+          return candidate instanceof Element && isVisible(candidate) && !insideComposer(candidate) && !insideOwnUi(candidate) && !isUserAuthoredSurface(candidate) && isNearComposerLiveTail(candidate);
+        })
+        .sort(function(a, b) {
+          try { return a.getBoundingClientRect().bottom - b.getBoundingClientRect().bottom; }
+          catch { return 0; }
+        })
+        .slice(-12);
+      for (const candidate of candidates) {
+        const root = liveTailRootFor(candidate);
+        if (root instanceof Element) stampLiveRoot(root);
+      }
     }
   }
 

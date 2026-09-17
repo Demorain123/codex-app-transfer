@@ -26,6 +26,30 @@
     return false;
   }
 
+  function liveTailTextFor(node) {
+    const pane = paneForNode(node);
+    const scope = pane instanceof Element ? pane : document;
+    const nodes = Array.from(scope.querySelectorAll('[role="status"],[data-testid],p,span,div'))
+      .filter(function(candidate) {
+        if (!(candidate instanceof Element) || !isVisible(candidate) || insideComposer(candidate) || insideOwnUi(candidate) || isUserAuthoredSurface(candidate)) return false;
+        return isNearComposerLiveTail(candidate);
+      })
+      .sort(function(a, b) {
+        try { return a.getBoundingClientRect().bottom - b.getBoundingClientRect().bottom; }
+        catch { return 0; }
+      })
+      .slice(-24);
+    return nodes.map(function(candidate) { return normalizedText(candidate); }).join(' ').slice(-2200).toLowerCase();
+  }
+
+  function turnLooksUserAuthored(turn) {
+    if (!(turn instanceof Element)) return false;
+    if (turn.matches('[data-message-author-role="user"],[data-message-author="user"]')) return true;
+    const user = turn.querySelector('[data-message-author-role="user"],[data-message-author="user"]');
+    const assistant = turn.querySelector('[data-message-author-role="assistant"],[data-local-conversation-final-assistant],[data-assistant-message-sent-time]');
+    return !!user && !assistant;
+  }
+
   function activeGenerationUiPresentFor(node) {
     const pane = paneForNode(node);
     const fallbackComposer = findComposerRoot();
@@ -49,10 +73,9 @@
     if (visibleBusyHint(scope)) return true;
 
     const latest = latestConversationTurnFor(node);
-    const tailScope = latest instanceof Element ? latest : scope;
-    const tailText = normalizedText(tailScope).slice(-1600).toLowerCase();
+    const tailText = liveTailTextFor(node) || (latest instanceof Element ? normalizedText(latest).slice(-1600).toLowerCase() : '');
     if (/(^|\b)(thinking|working|generating|running|pausing|waiting|step\s*\d+\s*\/\s*\d+)(\b|$)|思考|处理中|正在生成|正在运行|等待中|暂停片刻/i.test(tailText)) {
-      return latest instanceof Element ? isNearComposerLiveTail(latest) || isNearComposerLiveTail(node) : isNearComposerLiveTail(node);
+      return true;
     }
     return false;
   }
@@ -61,11 +84,11 @@
     const pane = paneForNode(node);
     const scope = pane instanceof Element ? pane : document;
     const preferred = Array.from(scope.querySelectorAll('[data-chatgpt-conversation-turn="true"]'))
-      .filter(function(candidate) { return candidate instanceof Element && !insideComposer(candidate) && !insideOwnUi(candidate) && isVisible(candidate); });
+      .filter(function(candidate) { return candidate instanceof Element && !insideComposer(candidate) && !insideOwnUi(candidate) && !turnLooksUserAuthored(candidate) && isVisible(candidate); });
     if (preferred.length) return preferred[preferred.length - 1];
 
     const keyed = Array.from(scope.querySelectorAll('[data-turn-key]'))
-      .filter(function(candidate) { return candidate instanceof Element && !insideComposer(candidate) && !insideOwnUi(candidate) && isVisible(candidate); });
+      .filter(function(candidate) { return candidate instanceof Element && !insideComposer(candidate) && !insideOwnUi(candidate) && !turnLooksUserAuthored(candidate) && isVisible(candidate); });
     if (keyed.length) return keyed[keyed.length - 1];
 
     const composer = composerForPane(pane) || findComposerRoot();

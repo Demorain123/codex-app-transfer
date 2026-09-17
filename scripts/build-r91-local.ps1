@@ -10,10 +10,11 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R90Source = Join-Path $PSScriptRoot 'build-r90-local.ps1'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
 $R91InteractionPatch = Join-Path $PSScriptRoot 'r91-r75-interaction-safe-patch.inc.ps1'
+$R91FinalStamp = Join-Path $PSScriptRoot 'r91-timestamp-stamp.js'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r91-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r91-r89-pane-runtime-patch.generated.inc.ps1'
 
-foreach ($Path in @($R90Source,$R89PanePatch,$R91InteractionPatch)) {
+foreach ($Path in @($R90Source,$R89PanePatch,$R91InteractionPatch,$R91FinalStamp)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r91 required source missing: $Path" }
 }
 foreach ($Path in @($TempBuilder,$TempPanePatch)) {
@@ -51,6 +52,7 @@ if ($Dirty.Count -gt 0) { throw "r91 requires a clean tracked worktree:`n$($Dirt
 $Builder = Normalize-Eol ([System.IO.File]::ReadAllText($R90Source))
 $PanePatch = Normalize-Eol ([System.IO.File]::ReadAllText($R89PanePatch))
 $InteractionPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R91InteractionPatch))
+$FinalStampText = Normalize-Eol ([System.IO.File]::ReadAllText($R91FinalStamp))
 
 # Keep the already-proven r90 semantic/ownership pipeline, but generate r91
 # identity and point its pane owner-layer include at our temporary interaction-
@@ -110,8 +112,10 @@ foreach ($Marker in @(
     'function timestampWouldTouchNativeControl(segment) {',
     'r91 r75 NewStamp interaction guard',
     'r91 final r75 materialization assertion',
+    'R91_FINAL_STAMP_OWNER_INSTALLED_PASS',
     'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS',
-    'R91_FINAL_NEWSTAMP_MATERIALIZATION_PREFLIGHT_PASS'
+    'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS',
+    'R91_R75_FALLBACK_MATERIALIZATION_PREFLIGHT_PASS'
 )) {
     if (-not $PanePatch.Contains($Marker)) { throw "r91 pane patch invariant missing: $Marker" }
 }
@@ -122,6 +126,25 @@ foreach ($Marker in @(
 )) {
     if (-not $Builder.Contains($Marker)) { throw "r91 generated builder invariant missing: $Marker" }
 }
+
+foreach ($Marker in @(
+    'function nativeSentTimeForSegment(segment) {',
+    'function actionRowForSegment(segment, root) {',
+    'function timestampWouldTouchNativeControl(segment) {',
+    'if (!(actionRow && host) && timestampWouldTouchNativeControl(segment)) return;',
+    'segment.querySelector(interactive)',
+    "actionRow.insertAdjacentElement('afterend', badge);",
+    'segment.appendChild(badge);',
+    'pointer-events:none;user-select:none;opacity:.78;'
+)) {
+    if (-not $FinalStampText.Contains($Marker)) { throw "r91 final stamp source invariant missing: $Marker" }
+}
+if ($FinalStampText.Contains('pointer-events:auto;')) {
+    throw 'r91 final stamp source retained pointer-events:auto'
+}
+& node --check $R91FinalStamp
+if ($LASTEXITCODE -ne 0) { throw 'r91 final timestamp stamp JavaScript syntax check failed' }
+Write-Host 'R91_FINAL_STAMP_SOURCE_PREFLIGHT_PASS' -ForegroundColor Green
 
 Assert-PowerShellParses $InteractionPatch 'interaction-safe owner patch include'
 Assert-PowerShellParses $PanePatch 'interaction-safe pane include'
@@ -144,8 +167,9 @@ try {
 
     if ($PreflightOnly) {
         Write-Host 'R91_INTERACTION_SAFE_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
-        Write-Host '  - native button/role=button/summary/details/aria-expanded/aria-controls hosts are never structurally stamped'
-        Write-Host '  - timestamp badges are click-through and cannot consume native pointer events'
+        Write-Host '  - the final r86/r78 timestamp stamp owner is replaced by the reviewed r91 interaction-safe source'
+        Write-Host '  - fallback append skips native button/role=button/summary/details/aria-expanded/aria-controls surfaces'
+        Write-Host '  - action-row sibling timestamps remain available while badges are click-through'
         Write-Host '  - r90 semantic grouping, remount protection, WAITING ownership and truth-first telemetry are inherited'
     } else {
         Write-Host ''

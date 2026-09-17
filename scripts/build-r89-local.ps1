@@ -72,8 +72,11 @@ Write-Host 'R89_SINGLE_BAR_FULL_ID_CONTRACT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'function isNearComposerLiveTail(node) {',
     'function visibleBusyHint(scope) {',
+    'function liveTailTextFor(node) {',
+    'function turnLooksUserAuthored(turn) {',
     'function activeGenerationUiPresentFor(node) {',
     'function liveTailRootFor(node) {',
+    'if (isNearComposerLiveTail(element) && activeGenerationUiPresentFor(element)) return true;',
     'function sweepLiveTailSegments() {',
     'try { sweepLiveTailSegments(); } catch {}',
     'state.timestampBaselineElements = new WeakSet();',
@@ -154,6 +157,8 @@ try {
         Write-Host '  - legacy/orphan and duplicate pane bars are removed before mounting'
         Write-Host '  - full sid/tid/agent values are rendered and click-copyable; no short-id truncation remains'
         Write-Host '  - sid never falls back to thread id; unknown session remains sid --'
+        Write-Host '  - pure user turns are excluded from live assistant-tail discovery'
+        Write-Host '  - live-tail geometry can bypass an older assistant turn when Thinking/Step is below it'
         Write-Host '  - live-tail timestamps accept busy UI, Thinking/Step tail text, or fresh token telemetry'
         Write-Host '  - historical baseline/remount protection and user-message exclusion remain intact'
     } else {

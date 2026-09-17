@@ -13,10 +13,11 @@ $R75Builder = Join-Path $PSScriptRoot 'build-r75-output-ui-local.ps1'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
 $R91InteractionPatch = Join-Path $PSScriptRoot 'r91-r75-interaction-safe-patch.inc.ps1'
 $R91FinalStamp = Join-Path $PSScriptRoot 'r91-timestamp-stamp.js'
+$R91ObserverPerfPatch = Join-Path $PSScriptRoot 'r91-timestamp-observer-performance-patch.inc.ps1'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r91-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r91-r89-pane-runtime-patch.generated.inc.ps1'
 
-foreach ($Path in @($R90Source,$R74Builder,$R75Builder,$R89PanePatch,$R91InteractionPatch,$R91FinalStamp)) {
+foreach ($Path in @($R90Source,$R74Builder,$R75Builder,$R89PanePatch,$R91InteractionPatch,$R91FinalStamp,$R91ObserverPerfPatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r91 required source missing: $Path" }
 }
 foreach ($Path in @($TempBuilder,$TempPanePatch)) {
@@ -55,6 +56,7 @@ $Builder = Normalize-Eol ([System.IO.File]::ReadAllText($R90Source))
 $PanePatch = Normalize-Eol ([System.IO.File]::ReadAllText($R89PanePatch))
 $InteractionPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R91InteractionPatch))
 $FinalStampText = Normalize-Eol ([System.IO.File]::ReadAllText($R91FinalStamp))
+$ObserverPerfPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R91ObserverPerfPatch))
 $R74Text = Normalize-Eol ([System.IO.File]::ReadAllText($R74Builder))
 $R75Text = Normalize-Eol ([System.IO.File]::ReadAllText($R75Builder))
 
@@ -109,7 +111,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
 '@
 $Builder = Replace-Required $Builder $OldReplaceBlock $NewReplaceBlock 'EOL-safe Replace-BlockRequired'
 
-$PanePatch = $PanePatch + "`n`n" + $InteractionPatch
+$PanePatch = $PanePatch + "`n`n" + $InteractionPatch + "`n`n" + $ObserverPerfPatch
 
 foreach ($Marker in @(
     'R91_INTERACTION_SAFE_TIMESTAMP_PATCH',
@@ -121,7 +123,9 @@ foreach ($Marker in @(
     'R91_FINAL_TIMESTAMP_BLOCK_SCOPED_PASS',
     'R91_GLOBAL_TIMESTAMP_BADGE_CLICKTHROUGH_PASS',
     'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS',
-    'R91_R75_FALLBACK_MATERIALIZATION_PREFLIGHT_PASS'
+    'R91_R75_FALLBACK_MATERIALIZATION_PREFLIGHT_PASS',
+    'R91_TIMESTAMP_OBSERVER_PERFORMANCE_PATCH',
+    'R91_BOUNDED_TIMESTAMP_OBSERVER_SOURCE_PASS'
 )) {
     if (-not $PanePatch.Contains($Marker)) { throw "r91 pane patch invariant missing: $Marker" }
 }
@@ -164,7 +168,7 @@ foreach ($Marker in @(
     'function actionRowForSegment(segment, root) {',
     'function timestampWouldTouchNativeControl(segment) {',
     'if (!(actionRow && host) && timestampWouldTouchNativeControl(segment)) return;',
-    'segment.querySelector(interactive)',
+    "segment.querySelector(':scope > button,:scope > [role=\"button\"],:scope > a[href],:scope > summary,:scope > details,:scope > [aria-expanded],:scope > [aria-controls]')",
     "actionRow.insertAdjacentElement('afterend', badge);",
     'segment.appendChild(badge);',
     'pointer-events:none;user-select:none;opacity:.78;'
@@ -177,6 +181,18 @@ if ($FinalStampText.Contains('pointer-events:auto;')) {
 & node --check $R91FinalStamp
 if ($LASTEXITCODE -ne 0) { throw 'r91 final timestamp stamp JavaScript syntax check failed' }
 Write-Host 'R91_FINAL_STAMP_SOURCE_PREFLIGHT_PASS' -ForegroundColor Green
+
+foreach ($Marker in @(
+    'function ensureTimestampPerfState() {',
+    'latestTurnCache: new WeakMap()',
+    'now - cached.at < 300',
+    'count++ >= 24',
+    'R91_BOUNDED_TIMESTAMP_OBSERVER_SOURCE_PASS'
+)) {
+    if (-not $ObserverPerfPatch.Contains($Marker)) { throw "r91 observer perf patch invariant missing: $Marker" }
+}
+Assert-PowerShellParses $ObserverPerfPatch 'bounded timestamp observer patch include'
+Write-Host 'R91_BOUNDED_TIMESTAMP_OBSERVER_PREFLIGHT_PASS' -ForegroundColor Green
 
 Assert-PowerShellParses $InteractionPatch 'interaction-safe owner patch include'
 Assert-PowerShellParses $PanePatch 'interaction-safe pane include'
@@ -202,6 +218,7 @@ try {
         Write-Host '  - the final r86/r78 timestamp stamp owner is replaced by the reviewed r91 interaction-safe source'
         Write-Host '  - fallback append skips native button/role=button/summary/details/aria-expanded/aria-controls surfaces'
         Write-Host '  - action-row sibling timestamps remain available while badges are click-through'
+        Write-Host '  - long-thread timestamp work is bounded to mutation-local nodes and the live tail instead of repeated full-history sweeps'
         Write-Host '  - r90 semantic grouping, remount protection, WAITING ownership and truth-first telemetry are inherited'
     } else {
         Write-Host ''

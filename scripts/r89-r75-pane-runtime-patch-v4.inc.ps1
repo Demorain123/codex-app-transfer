@@ -1,8 +1,8 @@
 # R89_PANE_RUNTIME_GENERATION_PATCH_V4
 # This code executes inside the generated r89/r86 builder after r86 has produced
 # the temporary r75 source. Large JavaScript bodies live in separately syntax-
-# checked r89-pane-runtime.js; this include only wires them into the real r74
-# telemetry runtime owner layer through generated r75 source.
+# checked sources; this include wires them into the real r74/r76 telemetry owner
+# layer through generated r75 source.
 
 $R89R75InjectionPoint = '# r75 is deliberately a tiny local finalizer layered on r74.'
 if (-not $PatchedR75.Contains($R89R75InjectionPoint)) {
@@ -12,20 +12,27 @@ if (-not $PatchedR75.Contains($R89R75InjectionPoint)) {
 $R89R75RuntimePatch = @'
 # R89_PANE_RUNTIME_PATCH
 $R89PaneJsPath = Join-Path $PSScriptRoot 'r89-pane-runtime.js'
-if (-not (Test-Path -LiteralPath $R89PaneJsPath)) { throw "r89 pane JavaScript source missing: $R89PaneJsPath" }
+$R89TelemetryTruthJsPath = Join-Path $PSScriptRoot 'r89-telemetry-truth.js'
+foreach ($Path in @($R89PaneJsPath,$R89TelemetryTruthJsPath)) {
+    if (-not (Test-Path -LiteralPath $Path)) { throw "r89 runtime JavaScript source missing: $Path" }
+}
 $R89PaneJs = [System.IO.File]::ReadAllText($R89PaneJsPath)
+$R89TelemetryTruthJs = [System.IO.File]::ReadAllText($R89TelemetryTruthJsPath)
 
 function Get-R89PaneJsBlock([string]$Text,[string]$StartMarker,[string]$EndMarker,[string]$Label) {
     $Start = $Text.IndexOf($StartMarker)
-    if ($Start -lt 0) { throw "r89 pane JS start marker missing: $Label" }
+    if ($Start -lt 0) { throw "r89 JS start marker missing: $Label" }
     $Start += $StartMarker.Length
     $End = $Text.IndexOf($EndMarker,$Start)
-    if ($End -le $Start) { throw "r89 pane JS end marker missing: $Label" }
+    if ($End -le $Start) { throw "r89 JS end marker missing: $Label" }
     return $Text.Substring($Start,$End-$Start).Trim([char[]]"`r`n")
 }
 
 $R89ComposerBlock = Get-R89PaneJsBlock $R89PaneJs '// R89_COMPOSER_BLOCK_START' '// R89_COMPOSER_BLOCK_END' 'composer block'
 $R89RefreshBlock = Get-R89PaneJsBlock $R89PaneJs '// R89_REFRESH_BLOCK_START' '// R89_REFRESH_BLOCK_END' 'refresh block'
+$R89ExternalIngestBlock = Get-R89PaneJsBlock $R89TelemetryTruthJs '// R89_EXTERNAL_INGEST_BLOCK_START' '// R89_EXTERNAL_INGEST_BLOCK_END' 'external exact ingest block'
+$R89GlobalSpeedBlock = Get-R89PaneJsBlock $R89TelemetryTruthJs '// R89_GLOBAL_SPEED_BLOCK_START' '// R89_GLOBAL_SPEED_BLOCK_END' 'global speed isolation block'
+$R89PaneTruthBlock = Get-R89PaneJsBlock $R89TelemetryTruthJs '// R89_PANE_TRUTH_BLOCK_START' '// R89_PANE_TRUTH_BLOCK_END' 'pane telemetry truth block'
 
 $R89StatusConstantOld = "  const STATUS_ID = 'cas-live-statusbar';"
 $R89StatusConstantNew = $R89StatusConstantOld + "`n  const PANE_STATUS_ATTR = 'data-cas-pane-statusbar';`n  const PANE_SESSION_ATTR = 'data-cas-pane-session-id';`n  const PANE_THREAD_ATTR = 'data-cas-pane-thread-id';`n  const PANE_AGENT_ATTR = 'data-cas-pane-agent-id';"
@@ -36,7 +43,19 @@ $R89InsideOwnNew = "    return !!node.closest('#' + STATUS_ID + ',#' + MIRROR_ID
 $Original = Replace-Required $Original $R89InsideOwnOld $R89InsideOwnNew 'r89 own-ui pane status exclusion'
 
 $Original = Replace-BlockRequired $Original '  function findComposerRoot() {' '  function effectiveSpeed() {' $R89ComposerBlock 'r89 canonical pane status mounting'
+$Original = Replace-BlockRequired $Original '  function effectiveSpeed() {' '  function effectiveCacheHit() {' $R89GlobalSpeedBlock 'r89 isolate global/native speed from custom pane telemetry'
+$Original = Replace-BlockRequired $Original '  function statusHtmlForPane(sessionId, threadId, agentId) {' '  function bindIdentityCopy(bar) {' $R89PaneTruthBlock 'r89 pane-owned exact telemetry presentation'
+$Original = Replace-Required $Original 'bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId);' 'bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId, bar);' 'r89 pass bar to pane-live truth renderer'
 $Original = Replace-BlockRequired $Original '  function refreshUi() {' '  function poll() {' $R89RefreshBlock 'r89 pane status refresh'
+
+# r76 owns authoritative local-session JSONL ingestion. Replace that function at
+# its owner layer so exact fields are copied to a dedicated snapshot before the
+# legacy/native Usage poll can overwrite generic display fields.
+$Original = Replace-BlockRequired $Original '  function ingestExternalUsage(envelope) {' '  state.refresh = refreshUi;' $R89ExternalIngestBlock 'r89 exact external JSONL snapshot ingest'
+
+# The legacy analytics widget is global, not pane-scoped. Label that explicitly
+# instead of implying that its samples belong to the pane whose bar was clicked.
+$Original = Replace-Required $Original 'Live telemetry · recent samples' 'Global/native telemetry · not pane-scoped' 'r89 legacy analytics ownership label'
 
 $R89CleanupOld = '    for (const id of [STATUS_ID, MIRROR_ID, ANALYTICS_ID, STYLE_ID]) {'
 $R89CleanupNew = "    document.querySelectorAll('#' + STATUS_ID + ',[' + PANE_STATUS_ATTR + '=true]').forEach(function(node) { node.remove(); });`n    for (const id of [MIRROR_ID, ANALYTICS_ID, STYLE_ID]) {"
@@ -53,8 +72,12 @@ foreach ($Marker in @(
     "const PANE_STATUS_ATTR = 'data-cas-pane-statusbar';",
     "const PANE_SESSION_ATTR = 'data-cas-pane-session-id';",
     'r89-pane-runtime.js',
+    'r89-telemetry-truth.js',
     'Get-R89PaneJsBlock',
     'r89 canonical pane status mounting',
+    'r89 isolate global/native speed from custom pane telemetry',
+    'r89 pane-owned exact telemetry presentation',
+    'r89 exact external JSONL snapshot ingest',
     'r89 cleanup all legacy and pane status bars'
 )) {
     if (-not $PatchedR75.Contains($Marker)) {

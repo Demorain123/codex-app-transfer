@@ -168,7 +168,8 @@ foreach ($Marker in @(
     'function actionRowForSegment(segment, root) {',
     'function timestampWouldTouchNativeControl(segment) {',
     'if (!(actionRow && host) && timestampWouldTouchNativeControl(segment)) return;',
-    "segment.querySelector(':scope > button,:scope > [role=\"button\"],:scope > a[href],:scope > summary,:scope > details,:scope > [aria-expanded],:scope > [aria-controls]')",
+    "segment.querySelector(':scope > button",
+    'role="button"',
     "actionRow.insertAdjacentElement('afterend', badge);",
     'segment.appendChild(badge);',
     'pointer-events:none;user-select:none;opacity:.78;'

@@ -12,6 +12,40 @@ function Replace-R91NormalizedRequired([string]$Text,[string]$Old,[string]$New,[
     return $TextN.Replace($OldN,$NewN)
 }
 
+# The real final timestamp owner is the r86/r78 stamp helper. r75's $NewStamp
+# is later replaced wholesale by that helper, so install the reviewed r91 stamp
+# into the isolated generated helper file that the nested r78 generation reads.
+$R91FinalStampSourcePath = Join-Path $PSScriptRoot 'r91-timestamp-stamp.js'
+if (-not (Test-Path -LiteralPath $R91FinalStampSourcePath)) {
+    throw "r91 final stamp source missing: $R91FinalStampSourcePath"
+}
+$R91StampTargetName = [System.IO.Path]::GetFileName([string]$StampSource)
+if ($R91StampTargetName -ne '.r91-timestamp-stamp.generated.js') {
+    throw "r91 refuses to overwrite non-isolated stamp target: $R91StampTargetName"
+}
+$R91FinalStampBody = [System.IO.File]::ReadAllText($R91FinalStampSourcePath)
+foreach ($Marker in @(
+    'function timestampWouldTouchNativeControl(segment) {',
+    'if (!(actionRow && host) && timestampWouldTouchNativeControl(segment)) return;',
+    'segment.querySelector(interactive)',
+    'pointer-events:none;user-select:none;opacity:.78;'
+)) {
+    if (-not $R91FinalStampBody.Contains($Marker)) {
+        throw "r91 final stamp owner source missing marker: $Marker"
+    }
+}
+if ($R91FinalStampBody.Contains('pointer-events:auto;')) {
+    throw 'r91 final stamp owner source retained pointer-events:auto'
+}
+[System.IO.File]::WriteAllText($StampSource,$R91FinalStampBody,[System.Text.UTF8Encoding]::new($false))
+$StampBody = $R91FinalStampBody
+$R91InstalledStamp = [System.IO.File]::ReadAllText($StampSource)
+if ($R91InstalledStamp -ne $R91FinalStampBody) {
+    throw 'r91 final stamp owner helper round-trip mismatch'
+}
+Write-Host 'R91_FINAL_STAMP_OWNER_INSTALLED_PASS' -ForegroundColor Green
+Write-Host 'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS' -ForegroundColor Green
+
 $R91NewStampOld = @'
   function stampSegment(segment, root, epoch, source) {
     if (!(segment instanceof Element) || insideComposer(segment) || insideOwnUi(segment)) return;
@@ -63,7 +97,7 @@ $R91StampApplyVerified = @'
             throw "r91 final r75 timestamp materialization invariant missing: $Marker"
         }
     }
-    Write-Host 'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS' -ForegroundColor Green
+    Write-Host 'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS' -ForegroundColor Green
 '@
 
 $PatchedR75 = Replace-R91NormalizedRequired $PatchedR75 $R91StampApplyLine $R91StampApplyVerified 'r91 final r75 materialization assertion'
@@ -72,7 +106,7 @@ foreach ($Marker in @(
     'function timestampWouldTouchNativeControl(segment) {',
     'if (timestampWouldTouchNativeControl(segment)) return;',
     'pointer-events:none;user-select:none;opacity:.72;',
-    'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS'
+    'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS'
 )) {
     if (-not $PatchedR75.Contains($Marker)) {
         throw "r91 generated r75 interaction-safe source missing marker: $Marker"
@@ -135,5 +169,5 @@ foreach ($Marker in @(
     }
 }
 
-Write-Host 'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS' -ForegroundColor Green
-Write-Host 'R91_FINAL_NEWSTAMP_MATERIALIZATION_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R91_R75_FALLBACK_INTERACTION_SAFE_PASS' -ForegroundColor Green
+Write-Host 'R91_R75_FALLBACK_MATERIALIZATION_PREFLIGHT_PASS' -ForegroundColor Green

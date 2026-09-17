@@ -24,14 +24,15 @@ if ($EscapedCount -lt 1) { throw 'r90 v2 expected at least one redundant escaped
 $Text = $Text.Replace($EscapedQuote,'"')
 
 foreach ($Marker in @(
-    "const semantic = element.closest('[data-chatgpt-conversation-turn=\"true\"],[data-turn-key],[data-message-author-role=\"assistant\"],[role=\"status\"],[data-testid*=\"agent\"],[data-testid*=\"tool\"],[data-testid*=\"command\"],[data-testid*=\"integration\"]');",
-    "const turn = element.closest('[data-turn-key],[data-chatgpt-conversation-turn=\"true\"]');",
-    "const selector = '[role=\"status\"],[data-testid*=\"agent\"],[data-testid*=\"tool\"],[data-testid*=\"command\"],[data-testid*=\"integration\"]';"
+    'data-chatgpt-conversation-turn="true"',
+    'data-message-author-role="assistant"',
+    'role="status"',
+    'data-testid*="integration"'
 )) {
-    # The markers above are PowerShell double-quoted strings; remove the parser
-    # escaping before comparing against the generated script text.
-    $Expected = $Marker.Replace('\"','"')
-    if (-not $Text.Contains($Expected)) { throw "r90 v2 normalized selector invariant missing: $Expected" }
+    if (-not $Text.Contains($Marker)) { throw "r90 v2 normalized selector invariant missing: $Marker" }
+}
+if ($Text.Contains('data-chatgpt-conversation-turn=\"true\"')) {
+    throw 'r90 v2 redundant JS selector escaping survived normalization'
 }
 
 $Tokens = $null

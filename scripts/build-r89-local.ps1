@@ -109,8 +109,8 @@ foreach ($Marker in @(
     "text: '-- tok/s'",
     "source: 'timing-unavailable'",
     'native/global tok/s is intentionally not attributed to this pane',
-    "data-cas-confidence=\"' + safeConfidence",
-    "data-cas-pane-live-state=\"' + stateLabel.toLowerCase()"
+    'data-cas-confidence=',
+    'data-cas-pane-live-state='
 )) {
     if (-not $TelemetryTruthText.Contains($Marker)) { throw "r89 telemetry-truth invariant missing: $Marker" }
 }

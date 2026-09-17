@@ -158,6 +158,30 @@ try {
     # that exact generator instead of reconstructing its nested r87/r86 chain.
     $R89 = $OriginalR88.Replace('r88','r89').Replace('R88','R89').Replace('+88','+89')
 
+    # r89 intentionally evolved several r88 runtime contracts. Synchronize the
+    # inherited r88 preflight itself to those current contracts before executing
+    # it, otherwise a valid r89 source is rejected by stale r88 marker text.
+    foreach ($Pair in @(
+        @('function liveSemanticRootFor(node) {','function liveTailRootFor(node) {'),
+        @('margin:0 0 22px 0','margin:0 0 24px 0'),
+        @('r89 pane-scoped composer/status mounting','r89 canonical pane status mounting'),
+        @('status bars reserve 22px below-bar space','status bars reserve 24px below-bar space')
+    )) {
+        if (-not $R89.Contains($Pair[0])) {
+            throw "r89 inherited r88 contract source missing: $($Pair[0])"
+        }
+        $R89 = $R89.Replace($Pair[0],$Pair[1])
+    }
+    foreach ($Marker in @(
+        'function liveTailRootFor(node) {',
+        'margin:0 0 24px 0',
+        'r89 canonical pane status mounting',
+        'status bars reserve 24px below-bar space'
+    )) {
+        if (-not $R89.Contains($Marker)) { throw "r89 inherited r88 contract sync missing: $Marker" }
+    }
+    Write-Host 'R89_INHERITED_R88_CONTRACT_SYNC_PASS' -ForegroundColor Green
+
     foreach ($Marker in @(
         "`$R89Observer = Join-Path `$PSScriptRoot 'r89-timestamp-observer.js'",
         "`$R89PaneJs = Join-Path `$PSScriptRoot 'r89-pane-runtime.js'",

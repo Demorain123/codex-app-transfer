@@ -10,11 +10,12 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R88Builder = Join-Path $PSScriptRoot 'build-r88-local.ps1'
 $R89Observer = Join-Path $PSScriptRoot 'r89-timestamp-observer.js'
 $R89PaneJs = Join-Path $PSScriptRoot 'r89-pane-runtime.js'
+$R89TelemetryTruthJs = Join-Path $PSScriptRoot 'r89-telemetry-truth.js'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r89-from-r88.generated.ps1'
 $TempObserverCheck = Join-Path $PSScriptRoot '.r89-observer-syntax.generated.mjs'
 
-foreach ($Path in @($R88Builder,$R89Observer,$R89PaneJs,$R89PanePatch)) {
+foreach ($Path in @($R88Builder,$R89Observer,$R89PaneJs,$R89TelemetryTruthJs,$R89PanePatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r89 required file missing: $Path" }
 }
 
@@ -22,6 +23,7 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $OriginalR88 = [System.IO.File]::ReadAllText($R88Builder)
 $ObserverText = [System.IO.File]::ReadAllText($R89Observer)
 $PaneJsText = [System.IO.File]::ReadAllText($R89PaneJs)
+$TelemetryTruthText = [System.IO.File]::ReadAllText($R89TelemetryTruthJs)
 $PanePatchText = [System.IO.File]::ReadAllText($R89PanePatch)
 
 function Write-Utf8NoBom([string]$Path,[string]$Text) {
@@ -92,11 +94,43 @@ foreach ($Marker in @(
 }
 Write-Host 'R89_LIVE_TAIL_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 
+# Truth contract: exact pane snapshots are isolated from native/global Usage,
+# pane tok/s never borrows that global number, and unavailable timing is shown
+# explicitly rather than guessed from unrelated wall time.
+foreach ($Marker in @(
+    'R89_TELEMETRY_TRUTH_JS',
+    'R89_EXTERNAL_INGEST_BLOCK_START',
+    'state.metrics.externalExact = exact;',
+    'externalExactFingerprint',
+    'CAS-R89-NO-GLOBAL-SPEED-AS-PANE-TPS',
+    'function paneTelemetryOwnership(threadId) {',
+    'function paneIsLiveForStatus(bar) {',
+    'function paneSpeedPresentation(ownership, live) {',
+    "text: '-- tok/s'",
+    "source: 'timing-unavailable'",
+    'native/global tok/s is intentionally not attributed to this pane',
+    "data-cas-confidence=\"' + safeConfidence",
+    "data-cas-pane-live-state=\"' + stateLabel.toLowerCase()"
+)) {
+    if (-not $TelemetryTruthText.Contains($Marker)) { throw "r89 telemetry-truth invariant missing: $Marker" }
+}
+foreach ($Forbidden in @(
+    'return Number.isFinite(m.nativeSpeed) ? m.nativeSpeed : m.outputSpeed;',
+    'estimated average from pane-owned output-token deltas'
+)) {
+    if ($TelemetryTruthText.Contains($Forbidden)) { throw "r89 telemetry-truth contains forbidden ambiguous-speed behavior: $Forbidden" }
+}
+Write-Host 'R89_TELEMETRY_TRUTH_CONTRACT_PASS' -ForegroundColor Green
+
 foreach ($Marker in @(
     'R89_PANE_RUNTIME_GENERATION_PATCH_V4',
     'R89_PANE_RUNTIME_PATCH',
     'r89-pane-runtime.js',
+    'r89-telemetry-truth.js',
     'r89 canonical pane status mounting',
+    'r89 isolate global/native speed from custom pane telemetry',
+    'r89 pane-owned exact telemetry presentation',
+    'r89 exact external JSONL snapshot ingest',
     'r89 cleanup all legacy and pane status bars',
     "Write-Host 'R89_PANE_RUNTIME_R75_SOURCE_PASS'"
 )) {
@@ -115,6 +149,10 @@ try {
     node --check $R89PaneJs
     if ($LASTEXITCODE -ne 0) { throw 'r89 pane runtime JavaScript syntax check failed' }
     Write-Host 'R89_PANE_RUNTIME_JS_PREFLIGHT_PASS' -ForegroundColor Green
+
+    node --check $R89TelemetryTruthJs
+    if ($LASTEXITCODE -ne 0) { throw 'r89 telemetry truth JavaScript syntax check failed' }
+    Write-Host 'R89_TELEMETRY_TRUTH_JS_PREFLIGHT_PASS' -ForegroundColor Green
 
     # The r88 builder already survived Windows full-build validation. Retarget
     # that exact generator instead of reconstructing its nested r87/r86 chain.
@@ -163,6 +201,9 @@ try {
         Write-Host '  - legacy/orphan and duplicate pane bars are removed before mounting'
         Write-Host '  - full sid/tid/agent values are rendered and click-copyable; no short-id truncation remains'
         Write-Host '  - sid never falls back to thread id; unknown session remains sid --'
+        Write-Host '  - pane counts use pane-owned exact local-session JSONL snapshots, isolated from native/global Usage'
+        Write-Host '  - pane tok/s never borrows native/global speed; without matched model-response timing it is -- tok/s'
+        Write-Host '  - LIVE/IDLE/UNOWNED is explicit so an exact snapshot cannot be mistaken for current activity'
         Write-Host '  - live-tail timestamps accept busy UI, Thinking/Step tail text, or fresh token telemetry'
         Write-Host '  - pure user turns are excluded and live-tail geometry may outrank an older assistant turn'
         Write-Host '  - historical baseline/remount protection and user-message exclusion remain intact'
@@ -172,6 +213,8 @@ try {
         Write-Host '  - duplicate status-bar regression removed'
         Write-Host '  - status bar remains inline inside the composer shell'
         Write-Host '  - full copyable pane identities exposed'
+        Write-Host '  - pane metrics distinguish exact snapshot ownership from live state'
+        Write-Host '  - global/native tok/s is never relabeled as pane-local model speed'
         Write-Host '  - live output timestamps restored with pane-tail safety gates'
         Write-Host '  - visible/package identity is r89 / 2.4.5+89'
     }

@@ -51,6 +51,8 @@ foreach ($Marker in @(
     'if (roots.length) return roots;',
     'function removeLegacyOrDuplicateStatusBars() {',
     'function statusBarForComposer(composer) {',
+    'bar.nextSibling === composer',
+    'parent.insertBefore(bar, composer)',
     'data-cas-copy-value',
     'navigator.clipboard.writeText(value)',
     'function sessionIdFromVisibleMetadata(scope) {',
@@ -63,21 +65,23 @@ foreach ($Forbidden in @(
     'shortPaneId(',
     'sessionId = externalThreadId',
     "sid ' + shortPaneId",
-    "tid ' + shortPaneId"
+    "tid ' + shortPaneId",
+    'position:fixed'
 )) {
     if ($PaneJsText.Contains($Forbidden)) { throw "r89 pane runtime contains forbidden r88 behavior: $Forbidden" }
 }
 Write-Host 'R89_SINGLE_BAR_FULL_ID_CONTRACT_PASS' -ForegroundColor Green
+Write-Host 'R89_INLINE_COMPOSER_STATUS_CONTRACT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'function isNearComposerLiveTail(node) {',
     'function visibleBusyHint(scope) {',
-    'function liveTailTextFor(node) {',
-    'function turnLooksUserAuthored(turn) {',
+    'function isPureUserTurn(node) {',
     'function activeGenerationUiPresentFor(node) {',
     'function liveTailRootFor(node) {',
-    'if (isNearComposerLiveTail(element) && activeGenerationUiPresentFor(element)) return true;',
+    'function liveTailCandidatesForComposer(composer) {',
     'function sweepLiveTailSegments() {',
+    'isNearComposerLiveTail(element)',
     'try { sweepLiveTailSegments(); } catch {}',
     'state.timestampBaselineElements = new WeakSet();',
     'first observed live output mutation locally',
@@ -93,10 +97,12 @@ foreach ($Marker in @(
     'R89_PANE_RUNTIME_PATCH',
     'r89-pane-runtime.js',
     'r89 canonical pane status mounting',
-    'r89 cleanup all legacy and pane status bars'
+    'r89 cleanup all legacy and pane status bars',
+    "Write-Host 'R89_PANE_RUNTIME_R75_SOURCE_PASS'"
 )) {
     if (-not $PanePatchText.Contains($Marker)) { throw "r89 pane patch invariant missing: $Marker" }
 }
+Write-Host 'R89_PANE_OWNER_LAYER_CONTRACT_PASS' -ForegroundColor Green
 Assert-PowerShellParses $PanePatchText 'r89 pane generation include'
 Write-Host 'R89_PANE_PATCH_PS_PARSE_PASS' -ForegroundColor Green
 
@@ -120,7 +126,6 @@ try {
         "`$R89PanePatch = Join-Path `$PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'",
         'R89_GENERATED_HELPER_ISOLATION_PASS',
         'R89_INNER_HELPER_BINDING_PASS',
-        'R89_PANE_RUNTIME_R75_SOURCE_PASS',
         'R89_TIMESTAMP_CORRECTNESS_PREFLIGHT_PASS',
         'R89_PANE_RUNTIME_UI_FIX_PASS',
         'visible/package identity is r89 / 2.4.5+89'
@@ -154,17 +159,18 @@ try {
     if ($PreflightOnly) {
         Write-Host 'R89_RUNTIME_CORRECTNESS_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - one canonical visible editor maps to one composer/status bar'
+        Write-Host '  - status bar stays inline in the composer shell directly before the canonical input component'
         Write-Host '  - legacy/orphan and duplicate pane bars are removed before mounting'
         Write-Host '  - full sid/tid/agent values are rendered and click-copyable; no short-id truncation remains'
         Write-Host '  - sid never falls back to thread id; unknown session remains sid --'
-        Write-Host '  - pure user turns are excluded from live assistant-tail discovery'
-        Write-Host '  - live-tail geometry can bypass an older assistant turn when Thinking/Step is below it'
         Write-Host '  - live-tail timestamps accept busy UI, Thinking/Step tail text, or fresh token telemetry'
+        Write-Host '  - pure user turns are excluded and live-tail geometry may outrank an older assistant turn'
         Write-Host '  - historical baseline/remount protection and user-message exclusion remain intact'
     } else {
         Write-Host ''
         Write-Host 'R89_RUNTIME_CORRECTNESS_PASS' -ForegroundColor Green
         Write-Host '  - duplicate status-bar regression removed'
+        Write-Host '  - status bar remains inline inside the composer shell'
         Write-Host '  - full copyable pane identities exposed'
         Write-Host '  - live output timestamps restored with pane-tail safety gates'
         Write-Host '  - visible/package identity is r89 / 2.4.5+89'

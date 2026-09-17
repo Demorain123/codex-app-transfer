@@ -8,13 +8,15 @@ Set-StrictMode -Version Latest
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R90Source = Join-Path $PSScriptRoot 'build-r90-local.ps1'
+$R74Builder = Join-Path $PSScriptRoot 'build-r74-output-ui-local.ps1'
+$R75Builder = Join-Path $PSScriptRoot 'build-r75-output-ui-local.ps1'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
 $R91InteractionPatch = Join-Path $PSScriptRoot 'r91-r75-interaction-safe-patch.inc.ps1'
 $R91FinalStamp = Join-Path $PSScriptRoot 'r91-timestamp-stamp.js'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r91-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r91-r89-pane-runtime-patch.generated.inc.ps1'
 
-foreach ($Path in @($R90Source,$R89PanePatch,$R91InteractionPatch,$R91FinalStamp)) {
+foreach ($Path in @($R90Source,$R74Builder,$R75Builder,$R89PanePatch,$R91InteractionPatch,$R91FinalStamp)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r91 required source missing: $Path" }
 }
 foreach ($Path in @($TempBuilder,$TempPanePatch)) {
@@ -53,6 +55,8 @@ $Builder = Normalize-Eol ([System.IO.File]::ReadAllText($R90Source))
 $PanePatch = Normalize-Eol ([System.IO.File]::ReadAllText($R89PanePatch))
 $InteractionPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R91InteractionPatch))
 $FinalStampText = Normalize-Eol ([System.IO.File]::ReadAllText($R91FinalStamp))
+$R74Text = Normalize-Eol ([System.IO.File]::ReadAllText($R74Builder))
+$R75Text = Normalize-Eol ([System.IO.File]::ReadAllText($R75Builder))
 
 # Keep the already-proven r90 semantic/ownership pipeline, but generate r91
 # identity and point its pane owner-layer include at our temporary interaction-
@@ -114,6 +118,8 @@ foreach ($Marker in @(
     'r91 final r75 materialization assertion',
     'R91_FINAL_STAMP_OWNER_INSTALLED_PASS',
     'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS',
+    'R91_FINAL_TIMESTAMP_BLOCK_SCOPED_PASS',
+    'R91_GLOBAL_TIMESTAMP_BADGE_CLICKTHROUGH_PASS',
     'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS',
     'R91_R75_FALLBACK_MATERIALIZATION_PREFLIGHT_PASS'
 )) {
@@ -127,8 +133,34 @@ foreach ($Marker in @(
     if (-not $Builder.Contains($Marker)) { throw "r91 generated builder invariant missing: $Marker" }
 }
 
+# Cover every known timestamp pointer-event source before entering the expensive
+# nested build. r74 owns the global BADGE_ATTR stylesheet; r75 owns the legacy
+# fallback NewStamp; r91 owns the final r86/r78 stamp body.
+$R74PointerAutoCount = ([regex]::Matches($R74Text,[regex]::Escape('pointer-events:auto;'))).Count
+$R75PointerAutoCount = ([regex]::Matches($R75Text,[regex]::Escape('pointer-events:auto;'))).Count
+$R91PointerAutoCount = ([regex]::Matches($FinalStampText,[regex]::Escape('pointer-events:auto;'))).Count
+if ($R74PointerAutoCount -ne 1) { throw "r91 expected exactly one r74 timestamp pointer-events:auto source, found $R74PointerAutoCount" }
+if ($R75PointerAutoCount -ne 1) { throw "r91 expected exactly one r75 timestamp pointer-events:auto source, found $R75PointerAutoCount" }
+if ($R91PointerAutoCount -ne 0) { throw "r91 final stamp source retained $R91PointerAutoCount pointer-events:auto occurrence(s)" }
 foreach ($Marker in @(
-    'function nativeSentTimeForSegment(segment) {',
+    'white-space:nowrap;pointer-events:auto;user-select:text;opacity:.78;',
+    "'[' + BADGE_ATTR + ']'"
+)) {
+    if (-not $R74Text.Contains($Marker)) { throw "r91 r74 global badge source coverage missing: $Marker" }
+}
+if (-not $R75Text.Contains('white-space:nowrap;pointer-events:auto;user-select:text;opacity:.72;')) {
+    throw 'r91 r75 fallback badge source coverage missing'
+}
+foreach ($Marker in @(
+    'R91_GLOBAL_TIMESTAMP_BADGE_CLICKTHROUGH_PASS',
+    'R91_FINAL_TIMESTAMP_BLOCK_SCOPED_PASS'
+)) {
+    if (-not $InteractionPatch.Contains($Marker)) { throw "r91 interaction patch coverage marker missing: $Marker" }
+}
+Write-Host 'R91_TIMESTAMP_POINTER_EVENT_SOURCE_COVERAGE_PASS' -ForegroundColor Green
+
+foreach ($Marker in @(
+    'function nativeSentTimeForSegment(segment) {'
     'function actionRowForSegment(segment, root) {',
     'function timestampWouldTouchNativeControl(segment) {',
     'if (!(actionRow && host) && timestampWouldTouchNativeControl(segment)) return;',

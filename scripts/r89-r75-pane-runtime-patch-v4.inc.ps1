@@ -45,8 +45,8 @@ $Original = Replace-Required $Original $R89InsideOwnOld $R89InsideOwnNew 'r89 ow
 $Original = Replace-BlockRequired $Original '  function findComposerRoot() {' '  function effectiveSpeed() {' $R89ComposerBlock 'r89 canonical pane status mounting'
 $Original = Replace-BlockRequired $Original '  function effectiveSpeed() {' '  function effectiveCacheHit() {' $R89GlobalSpeedBlock 'r89 isolate global/native speed from custom pane telemetry'
 $Original = Replace-BlockRequired $Original '  function statusHtmlForPane(sessionId, threadId, agentId) {' '  function bindIdentityCopy(bar) {' $R89PaneTruthBlock 'r89 pane-owned exact telemetry presentation'
-$Original = Replace-Required $Original 'bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId);' 'bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId, bar);' 'r89 pass bar to pane-live truth renderer'
 $Original = Replace-BlockRequired $Original '  function refreshUi() {' '  function poll() {' $R89RefreshBlock 'r89 pane status refresh'
+$Original = Replace-Required $Original 'bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId);' 'bar.innerHTML = statusHtmlForPane(sessionId, threadId, agentId, bar);' 'r89 pass bar to pane-live truth renderer'
 
 # r76 owns authoritative local-session JSONL ingestion. Replace that function at
 # its owner layer so exact fields are copied to a dedicated snapshot before the

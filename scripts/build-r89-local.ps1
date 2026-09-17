@@ -78,10 +78,10 @@ Write-Host 'R89_INLINE_COMPOSER_STATUS_CONTRACT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'function isNearComposerLiveTail(node) {',
     'function visibleBusyHint(scope) {',
-    'function isPureUserTurn(node) {',
+    'function turnLooksUserAuthored(turn) {',
     'function activeGenerationUiPresentFor(node) {',
+    'function latestConversationTurnFor(node) {',
     'function liveTailRootFor(node) {',
-    'function liveTailCandidatesForComposer(composer) {',
     'function sweepLiveTailSegments() {',
     'isNearComposerLiveTail(element)',
     'try { sweepLiveTailSegments(); } catch {}',

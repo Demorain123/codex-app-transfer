@@ -108,8 +108,9 @@ $PanePatch = $PanePatch + "`n`n" + $InteractionPatch
 foreach ($Marker in @(
     'R91_INTERACTION_SAFE_TIMESTAMP_PATCH',
     'function timestampWouldTouchNativeControl(segment) {',
-    'r91 interactive timestamp host guard',
-    'r91 timestamp badge click-through'
+    'r91 r75 NewStamp interaction guard',
+    'r91 final r75 materialization assertion',
+    'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS'
 )) {
     if (-not $PanePatch.Contains($Marker)) { throw "r91 pane patch invariant missing: $Marker" }
 }

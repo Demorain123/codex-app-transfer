@@ -4,6 +4,14 @@
 # wholesale from its $NewStamp here-string, so interaction safety must patch
 # that source-of-truth rather than transient $Original/r74 content.
 
+function Replace-R91NormalizedRequired([string]$Text,[string]$Old,[string]$New,[string]$Label) {
+    $TextN = $Text.Replace("`r`n","`n").Replace("`r","`n")
+    $OldN = $Old.Replace("`r`n","`n").Replace("`r","`n")
+    $NewN = $New.Replace("`r`n","`n").Replace("`r","`n")
+    if (-not $TextN.Contains($OldN)) { throw "r91 normalized expected text missing: $Label" }
+    return $TextN.Replace($OldN,$NewN)
+}
+
 $R91NewStampOld = @'
   function stampSegment(segment, root, epoch, source) {
     if (!(segment instanceof Element) || insideComposer(segment) || insideOwnUi(segment)) return;
@@ -26,7 +34,7 @@ $R91NewStampNew = @'
     if (timestampWouldTouchNativeControl(segment)) return;
 '@
 
-$PatchedR75 = Replace-Required $PatchedR75 $R91NewStampOld $R91NewStampNew 'r91 r75 NewStamp interaction guard'
+$PatchedR75 = Replace-R91NormalizedRequired $PatchedR75 $R91NewStampOld $R91NewStampNew 'r91 r75 NewStamp interaction guard'
 
 $R91BadgeCssOld = 'white-space:nowrap;pointer-events:auto;user-select:text;opacity:.72;'
 $R91BadgeCssNew = 'white-space:nowrap;pointer-events:none;user-select:none;opacity:.72;'
@@ -58,7 +66,7 @@ $R91StampApplyVerified = @'
     Write-Host 'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS' -ForegroundColor Green
 '@
 
-$PatchedR75 = Replace-Required $PatchedR75 $R91StampApplyLine $R91StampApplyVerified 'r91 final r75 materialization assertion'
+$PatchedR75 = Replace-R91NormalizedRequired $PatchedR75 $R91StampApplyLine $R91StampApplyVerified 'r91 final r75 materialization assertion'
 
 foreach ($Marker in @(
     'function timestampWouldTouchNativeControl(segment) {',

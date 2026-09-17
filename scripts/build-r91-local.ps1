@@ -9,10 +9,11 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R90Source = Join-Path $PSScriptRoot 'build-r90-local.ps1'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
+$R91InteractionPatch = Join-Path $PSScriptRoot 'r91-r75-interaction-safe-patch.inc.ps1'
 $TempBuilder = Join-Path $PSScriptRoot '.build-r91-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r91-r89-pane-runtime-patch.generated.inc.ps1'
 
-foreach ($Path in @($R90Source,$R89PanePatch)) {
+foreach ($Path in @($R90Source,$R89PanePatch,$R91InteractionPatch)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r91 required source missing: $Path" }
 }
 foreach ($Path in @($TempBuilder,$TempPanePatch)) {
@@ -49,6 +50,7 @@ if ($Dirty.Count -gt 0) { throw "r91 requires a clean tracked worktree:`n$($Dirt
 
 $Builder = Normalize-Eol ([System.IO.File]::ReadAllText($R90Source))
 $PanePatch = Normalize-Eol ([System.IO.File]::ReadAllText($R89PanePatch))
+$InteractionPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R91InteractionPatch))
 
 # Keep the already-proven r90 semantic/ownership pipeline, but generate r91
 # identity and point its pane owner-layer include at our temporary interaction-
@@ -101,46 +103,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
 '@
 $Builder = Replace-Required $Builder $OldReplaceBlock $NewReplaceBlock 'EOL-safe Replace-BlockRequired'
 
-$InteractionPatch = @'
-
-# R91_INTERACTION_SAFE_TIMESTAMP_PATCH
-# Never insert timestamp DOM into native clickable/collapsible controls. Doing
-# so can perturb React-managed children and interfere with expanding historical
-# tool/progress rows. Exact/estimated timestamps fail closed on unsafe hosts.
-$R91InteractiveGuardOld = @'
-  function stampSegment(segment, root, epoch, source) {
-    if (!(segment instanceof Element) || insideComposer(segment) || insideOwnUi(segment)) return;
-'@
-$R91InteractiveGuardNew = @'
-  function timestampWouldTouchNativeControl(segment) {
-    if (!(segment instanceof Element)) return false;
-    const interactive = 'button,[role="button"],a[href],summary,details,[aria-expanded],[aria-controls]';
-    if (segment.matches(interactive)) return true;
-    if (segment.closest(interactive)) return true;
-    try {
-      if (segment.querySelector(':scope > button,:scope > [role="button"],:scope > a[href],:scope > summary,:scope > details,:scope > [aria-expanded],:scope > [aria-controls]')) return true;
-    } catch {}
-    return false;
-  }
-
-  function stampSegment(segment, root, epoch, source) {
-    if (!(segment instanceof Element) || insideComposer(segment) || insideOwnUi(segment)) return;
-    if (timestampWouldTouchNativeControl(segment)) return;
-'@
-$Original = Replace-Required $Original $R91InteractiveGuardOld $R91InteractiveGuardNew 'r91 interactive timestamp host guard'
-$Original = Replace-Required $Original 'white-space:nowrap;pointer-events:auto;user-select:text;opacity:.72;' 'white-space:nowrap;pointer-events:none;user-select:none;opacity:.72;' 'r91 timestamp badge click-through'
-
-foreach ($Marker in @(
-    'function timestampWouldTouchNativeControl(segment) {',
-    'if (timestampWouldTouchNativeControl(segment)) return;',
-    'pointer-events:none;user-select:none;opacity:.72;'
-)) {
-    if (-not $Original.Contains($Marker)) { throw "r91 interaction-safe runtime invariant missing: $Marker" }
-}
-Write-Host 'R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS' -ForegroundColor Green
-'@
-
-$PanePatch = $PanePatch + $InteractionPatch
+$PanePatch = $PanePatch + "`n`n" + $InteractionPatch
 
 foreach ($Marker in @(
     'R91_INTERACTION_SAFE_TIMESTAMP_PATCH',
@@ -158,6 +121,7 @@ foreach ($Marker in @(
     if (-not $Builder.Contains($Marker)) { throw "r91 generated builder invariant missing: $Marker" }
 }
 
+Assert-PowerShellParses $InteractionPatch 'interaction-safe owner patch include'
 Assert-PowerShellParses $PanePatch 'interaction-safe pane include'
 Assert-PowerShellParses $Builder 'retargeted r91 builder'
 Write-Host 'R91_INTERACTION_SAFE_PREFLIGHT_CONTRACT_PASS' -ForegroundColor Green

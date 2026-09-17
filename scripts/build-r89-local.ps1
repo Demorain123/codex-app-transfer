@@ -53,7 +53,7 @@ foreach ($Marker in @(
     'if (roots.length) return roots;',
     'function removeLegacyOrDuplicateStatusBars() {',
     'function statusBarForComposer(composer) {',
-    'bar.nextSibling === composer',
+    'child.nextSibling === composer',
     'parent.insertBefore(bar, composer)',
     'data-cas-copy-value',
     'navigator.clipboard.writeText(value)',

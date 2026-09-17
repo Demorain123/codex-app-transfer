@@ -125,7 +125,8 @@
     return '<span class="cas-status-item ' + (extraClass || '') + '" data-cas-metric-source="' + safeSource + '" data-cas-confidence="' + safeConfidence + '" title="' + safeTitle + '">' + safeText + '</span>';
   }
 
-  function paneSpeedPresentation(ownership, activity) {
+  function paneSpeedPresentation(ownership, live) {
+    const activity = String(live || 'unknown');
     if (!ownership.owned) {
       return { text: '-- tok/s', source: 'unowned', confidence: 'unavailable', title: 'Unavailable: exact telemetry belongs to another thread.' };
     }

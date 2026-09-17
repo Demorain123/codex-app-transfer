@@ -144,7 +144,7 @@ if ($R75PointerAutoCount -ne 1) { throw "r91 expected exactly one r75 timestamp 
 if ($R91PointerAutoCount -ne 0) { throw "r91 final stamp source retained $R91PointerAutoCount pointer-events:auto occurrence(s)" }
 foreach ($Marker in @(
     'white-space:nowrap;pointer-events:auto;user-select:text;opacity:.78;',
-    "'[' + BADGE_ATTR + ']'"
+    "[' + BADGE_ATTR + ']{position:absolute;"
 )) {
     if (-not $R74Text.Contains($Marker)) { throw "r91 r74 global badge source coverage missing: $Marker" }
 }
@@ -160,7 +160,7 @@ foreach ($Marker in @(
 Write-Host 'R91_TIMESTAMP_POINTER_EVENT_SOURCE_COVERAGE_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
-    'function nativeSentTimeForSegment(segment) {'
+    'function nativeSentTimeForSegment(segment) {',
     'function actionRowForSegment(segment, root) {',
     'function timestampWouldTouchNativeControl(segment) {',
     'if (!(actionRow && host) && timestampWouldTouchNativeControl(segment)) return;',

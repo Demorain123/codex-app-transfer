@@ -61,8 +61,12 @@
     const interactive = 'button,[role="button"],a[href],summary,details,[aria-expanded],[aria-controls]';
     if (segment.matches(interactive)) return true;
     if (segment.closest(interactive)) return true;
+    // Do not treat an arbitrary deep descendant action/copy button as ownership
+    // of the whole output segment. That made r91 suppress nearly every timestamp
+    // in real Codex turns. Only a direct native-control child makes fallback
+    // append structurally unsafe.
     try {
-      if (segment.querySelector(interactive)) return true;
+      if (segment.querySelector(':scope > button,:scope > [role="button"],:scope > a[href],:scope > summary,:scope > details,:scope > [aria-expanded],:scope > [aria-controls]')) return true;
     } catch {}
     return false;
   }

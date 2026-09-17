@@ -88,18 +88,42 @@ $R91StampApplyLine = @'
 
 $R91StampApplyVerified = @'
     $Patched = Replace-BlockRequired $Patched '  function stampSegment(segment, root, epoch, source) {' '  function baselineExistingDom() {' $NewStamp 'visible in-flow timestamp rail'
+
+    # r74 also ships a global BADGE_ATTR stylesheet. Keep that fallback CSS
+    # click-through as well; otherwise an unrelated stylesheet occurrence can
+    # still advertise pointer-events:auto even though the final inline stamp is
+    # already safe.
+    $R91GlobalBadgeCssOld = 'white-space:nowrap;pointer-events:auto;user-select:text;opacity:.78;'
+    $R91GlobalBadgeCssNew = 'white-space:nowrap;pointer-events:none;user-select:none;opacity:.78;'
+    if ($Patched.Contains($R91GlobalBadgeCssOld)) {
+        $Patched = $Patched.Replace($R91GlobalBadgeCssOld,$R91GlobalBadgeCssNew)
+    } elseif (-not $Patched.Contains($R91GlobalBadgeCssNew)) {
+        throw 'r91 global timestamp badge stylesheet source missing'
+    }
+
+    $R91StampStart = $Patched.IndexOf('  function timestampWouldTouchNativeControl(segment) {')
+    $R91StampEnd = if ($R91StampStart -ge 0) { $Patched.IndexOf('  function baselineExistingDom() {',$R91StampStart) } else { -1 }
+    if ($R91StampStart -lt 0 -or $R91StampEnd -le $R91StampStart) {
+        throw 'r91 could not isolate final timestamp stamp block'
+    }
+    $R91StampBlock = $Patched.Substring($R91StampStart,$R91StampEnd-$R91StampStart)
     foreach ($Marker in @(
         'function timestampWouldTouchNativeControl(segment) {',
         'timestampWouldTouchNativeControl(segment)) return;',
         'pointer-events:none;'
     )) {
-        if (-not $Patched.Contains($Marker)) {
-            throw "r91 final r75 timestamp materialization invariant missing: $Marker"
+        if (-not $R91StampBlock.Contains($Marker)) {
+            throw "r91 final timestamp block invariant missing: $Marker"
         }
     }
-    if ($Patched.Contains('pointer-events:auto;')) {
-        throw 'r91 final timestamp materialization retained pointer-events:auto'
+    if ($R91StampBlock.Contains('pointer-events:auto;')) {
+        throw 'r91 final timestamp block retained pointer-events:auto'
     }
+    if ($Patched.Contains($R91GlobalBadgeCssOld)) {
+        throw 'r91 global timestamp badge stylesheet retained pointer-events:auto'
+    }
+    Write-Host 'R91_FINAL_TIMESTAMP_BLOCK_SCOPED_PASS' -ForegroundColor Green
+    Write-Host 'R91_GLOBAL_TIMESTAMP_BADGE_CLICKTHROUGH_PASS' -ForegroundColor Green
     Write-Host 'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS' -ForegroundColor Green
 '@
 
@@ -109,6 +133,8 @@ foreach ($Marker in @(
     'function timestampWouldTouchNativeControl(segment) {',
     'timestampWouldTouchNativeControl(segment)) return;',
     'pointer-events:none;',
+    'R91_FINAL_TIMESTAMP_BLOCK_SCOPED_PASS',
+    'R91_GLOBAL_TIMESTAMP_BADGE_CLICKTHROUGH_PASS',
     'R91_FINAL_TIMESTAMP_MATERIALIZATION_PASS'
 )) {
     if (-not $PatchedR75.Contains($Marker)) {

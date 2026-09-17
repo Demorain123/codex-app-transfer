@@ -49,6 +49,7 @@
         state.metrics.externalExactChangedAt = Date.now();
         state.metrics.externalExactFingerprint = fingerprint;
       }
+      exact.changedAt = Number(state.metrics.externalExactChangedAt) || Date.now();
       state.metrics.externalExact = exact;
     }
 
@@ -84,15 +85,36 @@
     };
   }
 
-  function paneIsLiveForStatus(bar) {
-    if (!(bar instanceof Element)) return false;
+  function paneActivityState(bar) {
+    if (!(bar instanceof Element)) return 'unknown';
     const composer = bar.nextElementSibling;
-    if (!(composer instanceof Element)) return false;
-    try {
-      return typeof activeGenerationUiPresentFor === 'function' && activeGenerationUiPresentFor(composer) === true;
-    } catch {
-      return false;
+    if (!(composer instanceof Element)) return 'unknown';
+    const pane = paneForNode(composer);
+    const scope = pane instanceof Element ? pane : (composer.parentElement || composer);
+    if (!(scope instanceof Element)) return 'unknown';
+
+    const controls = scope.querySelectorAll('button,[role="button"]');
+    let sendVisible = false;
+    for (const control of controls) {
+      if (!(control instanceof Element) || !isVisible(control) || insideOwnUi(control)) continue;
+      const hint = [
+        control.getAttribute('aria-label'), control.getAttribute('title'),
+        control.getAttribute('data-testid'), control.getAttribute('data-state'),
+        control.textContent,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (/(^|[\s:_-])(stop|cancel|interrupt|abort|pause)([\s:_-]|$)|停止|取消|中止|终止|暂停/i.test(hint)) return 'live';
+      if (/(^|[\s:_-])(send|submit)([\s:_-]|$)|发送|提交/i.test(hint)) sendVisible = true;
     }
+
+    const busy = scope.querySelectorAll('[aria-busy="true"],[data-loading="true"],[data-state="loading"],[data-state="pending"],[data-state="running"]');
+    for (const node of busy) {
+      if (node instanceof Element && isVisible(node) && !insideOwnUi(node)) return 'live';
+    }
+    return sendVisible ? 'idle' : 'unknown';
+  }
+
+  function paneIsLiveForStatus(bar) {
+    return paneActivityState(bar) === 'live';
   }
 
   function metricChip(text, source, confidence, title, extraClass) {
@@ -103,12 +125,12 @@
     return '<span class="cas-status-item ' + (extraClass || '') + '" data-cas-metric-source="' + safeSource + '" data-cas-confidence="' + safeConfidence + '" title="' + safeTitle + '">' + safeText + '</span>';
   }
 
-  function paneSpeedPresentation(ownership, live) {
+  function paneSpeedPresentation(ownership, activity) {
     if (!ownership.owned) {
       return { text: '-- tok/s', source: 'unowned', confidence: 'unavailable', title: 'Unavailable: exact telemetry belongs to another thread.' };
     }
-    if (!live) {
-      return { text: '-- tok/s', source: 'idle', confidence: 'unavailable', title: 'Idle: no pane-local generation is active.' };
+    if (activity !== 'live') {
+      return { text: '-- tok/s', source: activity, confidence: 'unavailable', title: activity === 'idle' ? 'Idle: no pane-local generation is active.' : 'Unavailable: pane activity state is not proven live.' };
     }
     return {
       text: '-- tok/s',
@@ -120,27 +142,29 @@
 
   function statusHtmlForPane(sessionId, threadId, agentId, bar) {
     const ownership = paneTelemetryOwnership(threadId);
-    const live = ownership.owned && paneIsLiveForStatus(bar);
+    const activity = ownership.owned ? paneActivityState(bar) : 'unowned';
     const exact = ownership.owned ? ownership.exact : null;
-    const stateLabel = !ownership.owned ? 'UNOWNED' : (live ? 'LIVE' : 'IDLE');
+    const stateLabel = !ownership.owned ? 'UNOWNED' : activity.toUpperCase();
     const stateTitle = !ownership.owned
       ? 'No pane-owned exact JSONL snapshot is available.'
-      : (live
-        ? 'LIVE pane; counts are exact JSONL snapshots and may update at token_count boundaries.'
-        : 'IDLE pane; counts are the last exact JSONL snapshot, not live activity.');
+      : (activity === 'live'
+        ? 'LIVE is backed by pane-scoped stop/busy UI evidence. Counts are exact JSONL snapshots and may update only at token_count boundaries.'
+        : (activity === 'idle'
+          ? 'IDLE is backed by a visible pane send/submit control. Counts are the last exact JSONL snapshot, not live activity.'
+          : 'UNKNOWN: there is not enough pane-local UI evidence to claim LIVE or IDLE.'));
 
     const context = exact && Number.isFinite(exact.contextPercent) ? ('ctx ' + exact.contextPercent.toFixed(1) + '%') : 'ctx --';
     const input = exact && Number.isFinite(exact.inputTokens) ? ('in ' + shortNumber(exact.inputTokens)) : 'in --';
     const output = exact && Number.isFinite(exact.outputTokens) ? ('out ' + shortNumber(exact.outputTokens)) : 'out --';
     const cache = exact && Number.isFinite(exact.cacheHitPercent) ? ('cache ' + exact.cacheHitPercent.toFixed(1) + '%') : 'cache --';
     const total = exact && Number.isFinite(exact.sessionTotalTokens) ? ('total ' + shortNumber(exact.sessionTotalTokens)) : 'total --';
-    const speed = paneSpeedPresentation(ownership, live);
+    const speed = paneSpeedPresentation(ownership, activity);
     const exactTitle = ownership.owned
-      ? 'Exact snapshot from local Codex session JSONL last_token_usage / total_token_usage.'
+      ? 'Exact snapshot from local Codex session JSONL last_token_usage / total_token_usage. Snapshot exactness does not imply the pane is currently live.'
       : 'Unavailable: this pane does not own the current exact JSONL snapshot.';
 
     const metrics = [
-      metricChip(stateLabel, ownership.owned ? 'pane-state' : 'unowned', ownership.owned ? 'scoped' : 'unavailable', stateTitle, 'cas-status-state'),
+      metricChip(stateLabel, ownership.owned ? 'pane-ui-evidence' : 'unowned', ownership.owned ? 'scoped' : 'unavailable', stateTitle, 'cas-status-state'),
       metricChip(context, ownership.owned ? 'exact-jsonl' : 'unowned', ownership.owned ? 'exact-snapshot' : 'unavailable', exactTitle, ''),
       metricChip(input, ownership.owned ? 'exact-jsonl' : 'unowned', ownership.owned ? 'exact-snapshot' : 'unavailable', exactTitle, ''),
       metricChip(output, ownership.owned ? 'exact-jsonl' : 'unowned', ownership.owned ? 'exact-snapshot' : 'unavailable', exactTitle, ''),

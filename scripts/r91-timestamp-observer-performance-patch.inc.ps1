@@ -218,7 +218,7 @@ foreach ($Marker in @(
 }
 
 foreach ($Forbidden in @(
-    "scope.querySelectorAll('[role=\"status\"],[data-testid],p,span,div')",
+    'scope.querySelectorAll(''[role="status"],[data-testid],p,span,div'')',
     'try { sweepOutputSegments(false); } catch {}' + [char]10 + '    }, 90);'
 )) {
     if ($ObserverBody.Contains($Forbidden)) {

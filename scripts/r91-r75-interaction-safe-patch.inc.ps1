@@ -79,3 +79,29 @@ foreach ($Marker in @(
     }
 }
 Write-Host 'R91_INTERACTION_SAFE_R75_SOURCE_PASS' -ForegroundColor Green
+
+# Execute the exact patched r75 source once in -PreflightOnly mode before any
+# expensive carry-forward/package build. This closes the previous blind spot
+# where the source contained the r91 patch but final $NewStamp materialization
+# was not actually exercised until the full build.
+$R91R75ProbePath = Join-Path $PSScriptRoot '.r91-r75-materialization-preflight.generated.ps1'
+if (Test-Path -LiteralPath $R91R75ProbePath) {
+    throw "r91 refuses pre-existing r75 materialization probe: $R91R75ProbePath"
+}
+try {
+    [System.IO.File]::WriteAllText($R91R75ProbePath,$PatchedR75,[System.Text.UTF8Encoding]::new($false))
+    $R91ProbeOutput = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File $R91R75ProbePath -PreflightOnly 2>&1)
+    $R91ProbeExit = $LASTEXITCODE
+    foreach ($Line in $R91ProbeOutput) { Write-Host ([string]$Line) }
+    if ($R91ProbeExit -ne 0) {
+        throw "r91 final r75 materialization probe failed with exit code $R91ProbeExit"
+    }
+    $R91ProbeText = ($R91ProbeOutput | ForEach-Object { [string]$_ }) -join "`n"
+    if (-not $R91ProbeText.Contains('R91_INTERACTION_SAFE_TIMESTAMP_OWNER_PASS')) {
+        throw 'r91 final r75 materialization probe did not execute interaction-safe owner assertion'
+    }
+    Write-Host 'R91_FINAL_NEWSTAMP_MATERIALIZATION_PREFLIGHT_PASS' -ForegroundColor Green
+}
+finally {
+    Remove-Item -LiteralPath $R91R75ProbePath -Force -ErrorAction SilentlyContinue
+}

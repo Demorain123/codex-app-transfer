@@ -251,12 +251,16 @@
 
     function ingestNotification(value) {
       if (!value || typeof value !== 'object') return false;
-      const method = String(value.method || value.type || '');
       const params = value.params && typeof value.params === 'object'
         ? value.params
         : (value.payload && typeof value.payload === 'object' ? value.payload : value);
+      const nestedMethod = params && typeof params === 'object'
+        ? String(params.method || params.type || '')
+        : '';
+      const outerMethod = String(value.method || value.type || '');
+      const method = outerMethod === 'event_msg' && nestedMethod ? nestedMethod : (outerMethod || nestedMethod);
       if (method === 'turn/completed' || method === 'turn_completed' || method === 'task_complete') {
-        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || null;
+        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
           ? params.turn
           : {
@@ -269,7 +273,7 @@
         return !!rememberLifecycle(threadId, turn);
       }
       if (method === 'turn/started' || method === 'turn_started' || method === 'task_started') {
-        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || null;
+        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
           ? params.turn
           : {
@@ -281,7 +285,7 @@
       }
       if (method === 'thread/tokenUsage/updated' || method === 'thread_token_usage_updated') {
         return !!rememberUsage(
-          params.threadId || params.thread_id,
+          params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
           params.turnId || params.turn_id,
           params.tokenUsage || params.token_usage
         );

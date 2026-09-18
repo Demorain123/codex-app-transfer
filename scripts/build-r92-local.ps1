@@ -10,6 +10,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R90Source = Join-Path $PSScriptRoot 'build-r90-local.ps1'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
 $R92ExactOverlayPatch = Join-Path $PSScriptRoot 'r92-r75-exact-overlay-patch.inc.ps1'
+$R92FinalObserverPatch = Join-Path $PSScriptRoot 'r92-r78-exact-overlay-patch.inc.ps1'
 $R92OverlayJs = Join-Path $PSScriptRoot 'r92-exact-timestamp-overlay.js'
 $R92DisabledStampJs = Join-Path $PSScriptRoot 'r92-timestamp-stamp-disabled.js'
 
@@ -22,6 +23,7 @@ foreach ($Path in @(
     $R90Source,
     $R89PanePatch,
     $R92ExactOverlayPatch,
+    $R92FinalObserverPatch,
     $R92OverlayJs,
     $R92DisabledStampJs
 )) {
@@ -66,6 +68,7 @@ if ($Dirty.Count -gt 0) { throw "r92 requires a clean tracked worktree:`n$($Dirt
 $Builder = Normalize-Eol ([System.IO.File]::ReadAllText($R90Source))
 $PanePatch = Normalize-Eol ([System.IO.File]::ReadAllText($R89PanePatch))
 $ExactOverlayPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R92ExactOverlayPatch))
+$FinalObserverPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R92FinalObserverPatch))
 $OverlayJs = Normalize-Eol ([System.IO.File]::ReadAllText($R92OverlayJs))
 $DisabledStampJs = Normalize-Eol ([System.IO.File]::ReadAllText($R92DisabledStampJs))
 
@@ -96,6 +99,8 @@ foreach ($Marker in @(
     'R92_EXACT_TIMESTAMP_OVERLAY_GENERATION_PATCH',
     'R92_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS',
     'R92_R86_STRICT_TIMESTAMP_VERIFIER_SUPERSEDED_PASS',
+    'R92_FINAL_R78_OBSERVER_PATCH_INSTALLED_PASS',
+    'R92_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
     'R92_R77_TIMESTAMP_ROOT_COMPAT_SUPERSEDED_PASS',
     'R92_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS',
     'R92_R77_TELEMETRY_PRESERVED_TIMESTAMP_SUPERSEDED_PASS',
@@ -108,6 +113,15 @@ foreach ($Marker in @(
 if (-not $DisabledStampJs.Contains('R92_LEGACY_TIMESTAMP_STAMP_DISABLED')) {
     throw 'r92 disabled stamp marker missing'
 }
+foreach ($Marker in @(
+    'R92_R78_EXACT_OVERLAY_FINAL_OWNER',
+    'R92_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
+    'r92 exact-only timestamp overlay final owner'
+)) {
+    if (-not $FinalObserverPatch.Contains($Marker)) { throw "r92 final observer patch contract missing: $Marker" }
+}
+Assert-PowerShellParses $FinalObserverPatch 'r92 final r78 observer patch include'
+Write-Host 'R92_FINAL_R78_OBSERVER_PATCH_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R92_EXACT_OVERLAY_PREFLIGHT_CONTRACT_PASS' -ForegroundColor Green
 
 try {

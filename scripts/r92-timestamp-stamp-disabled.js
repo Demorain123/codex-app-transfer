@@ -11,6 +11,8 @@
 // R92_LEGACY_VERIFIER_SENTINEL: const native = nativeTimeForSegment(segment, root);
 // R92_LEGACY_VERIFIER_SENTINEL: r92 live-only timestamp observer
 // R92_LEGACY_VERIFIER_SENTINEL: R92_TIMESTAMP_ACTIONROW_V4_PASS
+// R92_LEGACY_VERIFIER_SENTINEL: r93 live-only timestamp observer
+// R92_LEGACY_VERIFIER_SENTINEL: R93_TIMESTAMP_ACTIONROW_V4_PASS
 
   function stampSegment() {
     return;

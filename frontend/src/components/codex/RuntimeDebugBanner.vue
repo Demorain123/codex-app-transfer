@@ -111,7 +111,8 @@ function stopPolling() {
 function startPolling() {
   stopPolling()
   void refresh()
-  pollTimer = window.setInterval(() => void refresh(), 2500)
+  // doctor scans AppX/app.asar compatibility state, so keep debug polling deliberately coarse.
+  pollTimer = window.setInterval(() => void refresh(), 8000)
 }
 
 watch(

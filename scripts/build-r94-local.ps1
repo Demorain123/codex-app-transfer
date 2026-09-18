@@ -204,6 +204,10 @@ foreach ($Marker in @(
     'R94_LOCAL_ROLLOUT_TURN_BRIDGE_PASS',
     'R94_TURN_SCOPED_STATUS_PASS',
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
+    'r94NormalizePaneId',
+    'R94_TURN_STATUS_PANE_OWNER_PASS',
+    'R94_TURN_STATUS_BASE_OWNER_PASS',
+    'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
     'exact-turn-capability'
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }

@@ -150,6 +150,8 @@
 
   function r94CreateCapability() {
     const exactByKey = new Map();
+    const latestKeyByThread = new Map();
+    let capabilitySequence = 0;
 
     function keyFor(threadId, turnId) {
       const t = String(threadId || '').replace(/^local:/i, '').trim().toLowerCase();
@@ -219,6 +221,8 @@
       current.completedAt = nextCompletedAt;
       current.durationMs = nextDurationMs;
       current.lifecycleFingerprint = lifecycleFingerprint;
+      current.capabilitySequence = ++capabilitySequence;
+      if (ids.threadId) latestKeyByThread.set(ids.threadId, ids.key);
       if (Number.isFinite(completed) && completed > 0) {
         const epoch = completed > 10000000000 ? completed : completed * 1000;
         current.timestamp = {
@@ -276,6 +280,8 @@
 
       current.usage = usage;
       current.usageFingerprint = fingerprint;
+      current.capabilitySequence = ++capabilitySequence;
+      if (ids.threadId) latestKeyByThread.set(ids.threadId, key);
       exactByKey.delete(key);
       exactByKey.set(key, current);
       r94TrimCache(exactByKey);
@@ -352,17 +358,30 @@
     function latestForThread(threadId) {
       const normalized = String(threadId || '').replace(/^local:/i, '').trim().toLowerCase();
       if (!normalized) return null;
-      const values = Array.from(exactByKey.values());
-      for (let index = values.length - 1; index >= 0; index -= 1) {
-        const record = values[index];
+
+      const directKey = latestKeyByThread.get(normalized);
+      const direct = directKey ? exactByKey.get(directKey) : null;
+      if (direct) return direct;
+
+      // Native timestamp reads can touch historical visible turns. They must
+      // never redefine which turn is the latest telemetry/lifecycle turn.
+      let best = null;
+      let bestSequence = -1;
+      for (const record of exactByKey.values()) {
         const candidate = String(record && record.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
-        if (candidate === normalized) return record;
+        const sequence = Number(record && record.capabilitySequence);
+        if (candidate !== normalized || !Number.isFinite(sequence) || sequence <= bestSequence) continue;
+        best = record;
+        bestSequence = sequence;
       }
-      return null;
+      if (best && best.turnId) latestKeyByThread.set(normalized, keyFor(normalized, best.turnId));
+      return best;
     }
 
     function clear() {
       exactByKey.clear();
+      latestKeyByThread.clear();
+      capabilitySequence = 0;
     }
 
     return Object.freeze({

@@ -80,25 +80,25 @@ $R93StatusInjection = @'
     if (-not (Test-Path -LiteralPath $R93StatusFinalizerPath)) { throw "r93 status finalizer missing at runtime build owner: $R93StatusFinalizerPath" }
     . $R93StatusFinalizerPath
 '@
-$R94StatusOverlayFinalizerPath = Join-Path $PSScriptRoot 'r94-status-overlay-finalizer.ps1'
-if (-not (Test-Path -LiteralPath $R94StatusOverlayFinalizerPath)) {
-    throw "r94 status overlay finalizer missing: $R94StatusOverlayFinalizerPath"
+$R94ComposerStatusFinalizerPath = Join-Path $PSScriptRoot 'r94-composer-status-finalizer.ps1'
+if (-not (Test-Path -LiteralPath $R94ComposerStatusFinalizerPath)) {
+    throw "r94 composer status finalizer missing: $R94ComposerStatusFinalizerPath"
 }
-$R94StatusOverlayFinalizerText = [System.IO.File]::ReadAllText($R94StatusOverlayFinalizerPath)
+$R94ComposerStatusFinalizerText = [System.IO.File]::ReadAllText($R94ComposerStatusFinalizerPath)
 foreach ($Marker in @(
-    'R94_STATUS_OVERLAY_FINALIZER',
-    'R94_STATUS_OVERLAY_FINAL_OWNER_PASS',
-    'R94_NATIVE_COMPOSER_DOM_READONLY_PASS',
-    'R94_STATUS_SHARED_RAF_PASS'
+    'R94_COMPOSER_STATUS_INSIDE_FINALIZER',
+    'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
+    'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
+    'R94_NO_STATUS_VIEWPORT_TRACKING_PASS'
 )) {
-    if (-not $R94StatusOverlayFinalizerText.Contains($Marker)) {
-        throw "r94 status overlay finalizer source missing marker: $Marker"
+    if (-not $R94ComposerStatusFinalizerText.Contains($Marker)) {
+        throw "r94 composer status finalizer source missing marker: $Marker"
     }
 }
 $R94StatusOverlayInjection = @'
-    $R94StatusOverlayFinalizerPath = Join-Path $PSScriptRoot 'r94-status-overlay-finalizer.ps1'
-    if (-not (Test-Path -LiteralPath $R94StatusOverlayFinalizerPath)) { throw "r94 status overlay finalizer missing at runtime build owner: $R94StatusOverlayFinalizerPath" }
-    . $R94StatusOverlayFinalizerPath
+    $R94ComposerStatusFinalizerPath = Join-Path $PSScriptRoot 'r94-composer-status-finalizer.ps1'
+    if (-not (Test-Path -LiteralPath $R94ComposerStatusFinalizerPath)) { throw "r94 composer status finalizer missing at runtime build owner: $R94ComposerStatusFinalizerPath" }
+    . $R94ComposerStatusFinalizerPath
 '@
 $R94TurnNotificationFinalizerPath = Join-Path $PSScriptRoot 'r94-turn-notification-finalizer.ps1'
 if (-not (Test-Path -LiteralPath $R94TurnNotificationFinalizerPath)) {
@@ -127,6 +127,6 @@ if (-not $PatchedR75.Contains('R93StatusFinalizerPath')) {
     throw 'r93 final r75 source missing status finalizer binding'
 }
 Write-Host 'R93_STATUS_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
-Write-Host 'R94_STATUS_OVERLAY_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
+Write-Host 'R94_COMPOSER_STATUS_INSIDE_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
 Write-Host 'R94_TURN_NOTIFICATION_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
 

@@ -17,6 +17,12 @@ $R94DisabledStampJs = Join-Path $PSScriptRoot 'r94-timestamp-stamp-disabled.js'
 $R93StatusFinalizer = Join-Path $PSScriptRoot 'r93-status-finalizer.ps1'
 $R94ComposerStatusFinalizer = Join-Path $PSScriptRoot 'r94-composer-status-finalizer.ps1'
 $R94TurnNotificationFinalizer = Join-Path $PSScriptRoot 'r94-turn-notification-finalizer.ps1'
+$R94RuntimeDebugBanner = Join-Path $RepoRoot 'frontend\src\components\codex\RuntimeDebugBanner.vue'
+$R94AppLayout = Join-Path $RepoRoot 'frontend\src\layout\AppLayout.vue'
+$R94SettingsPage = Join-Path $RepoRoot 'frontend\src\pages\SettingsPage.vue'
+$R94ProcessRs = Join-Path $RepoRoot 'src-tauri\src\admin\services\desktop\process.rs'
+$R94DesktopHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\desktop.rs'
+$R94ThemeInjectorRs = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
 
 $TempBuilder = Join-Path $PSScriptRoot '.build-r94-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'
@@ -33,7 +39,13 @@ foreach ($Path in @(
     $R94DisabledStampJs,
     $R93StatusFinalizer,
     $R94ComposerStatusFinalizer,
-    $R94TurnNotificationFinalizer
+    $R94TurnNotificationFinalizer,
+    $R94RuntimeDebugBanner,
+    $R94AppLayout,
+    $R94SettingsPage,
+    $R94ProcessRs,
+    $R94DesktopHandlerRs,
+    $R94ThemeInjectorRs
 )) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r94 required source missing: $Path" }
 }
@@ -83,6 +95,12 @@ $DisabledStampJs = Normalize-Eol ([System.IO.File]::ReadAllText($R94DisabledStam
 $StatusFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R93StatusFinalizer))
 $ComposerStatusFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R94ComposerStatusFinalizer))
 $TurnNotificationFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R94TurnNotificationFinalizer))
+$RuntimeDebugBannerText = Normalize-Eol ([System.IO.File]::ReadAllText($R94RuntimeDebugBanner))
+$AppLayoutText = Normalize-Eol ([System.IO.File]::ReadAllText($R94AppLayout))
+$SettingsPageText = Normalize-Eol ([System.IO.File]::ReadAllText($R94SettingsPage))
+$ProcessRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ProcessRs))
+$DesktopHandlerRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94DesktopHandlerRs))
+$ThemeInjectorRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ThemeInjectorRs))
 
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
@@ -215,6 +233,29 @@ foreach ($Marker in @(
 Assert-PowerShellParses $ComposerStatusFinalizer 'r94 composer status finalizer'
 Assert-PowerShellParses $TurnNotificationFinalizer 'r94 turn notification finalizer'
 Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Green
+
+foreach ($Pair in @(
+    @($RuntimeDebugBannerText, 'CAS-R94-RUNTIME-DEBUG-BANNER-V1'),
+    @($RuntimeDebugBannerText, 'DBG94-1'),
+    @($RuntimeDebugBannerText, 'runtimeDebugMode'),
+    @($AppLayoutText, 'RuntimeDebugBanner'),
+    @($SettingsPageText, "toggle('runtimeDebugMode', false)"),
+    @($ProcessRsText, 'CAS-R94-RUNTIME-DEBUG-CDP-GATE'),
+    @($ProcessRsText, 'runtime_debug_enabled'),
+    @($DesktopHandlerRsText, 'CAS-R94-RUNTIME-DEBUG-REINJECT'),
+    @($DesktopHandlerRsText, 'reinject_after_codex_restart_with_mode'),
+    @($ThemeInjectorRsText, 'CAS-R94-RUNTIME-DEBUG-IDENTITY'),
+    @($ThemeInjectorRsText, 'RUNTIME_DEBUG_PROTOCOL'),
+    @($ThemeInjectorRsText, 'apply_runtime_debug_banner'),
+    @($ThemeInjectorRsText, 'cas-transfer-runtime-debug-banner'),
+    @($ThemeInjectorRsText, 'window.__casR94TurnCapability'),
+    @($ThemeInjectorRsText, "data-cas-status-inside-composer")
+)) {
+    if (-not $Pair[0].Contains($Pair[1])) {
+        throw "r94 runtime debug identity contract missing: $($Pair[1])"
+    }
+}
+Write-Host 'R94_RUNTIME_DEBUG_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
@@ -372,6 +413,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - repeated token_count/lifecycle payloads are fingerprint-deduped before UI refresh'
         Write-Host '  - composer status prefers exact threadId+turnId usage and only falls back to thread snapshot when no newer turn identity exists'
         Write-Host '  - duplicate fallback timestamp is suppressed whenever Codex already renders an exact native time'
+        Write-Host '  - Runtime Debug is off by default; when enabled it shows DBG94-1 identity in Transfer and injects live MATCH/LEGACY/MISSING evidence into Codex'
     } else {
         Write-Host ''
         Write-Host 'R94_EXACT_TURN_RUNTIME_PASS' -ForegroundColor Green
@@ -381,6 +423,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'
         Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
         Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'
+        Write-Host '  - optional Runtime Debug (DBG94-1) exposes package/runtime/PID evidence in Transfer and the live Codex renderer'
         Write-Host '  - visible/package identity is r94 / 2.4.5+94'
     }
 }

@@ -150,6 +150,11 @@ $MainProcessCollector = @'
     return null;
   };
 
+  // CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE
+  // Keep r76's bounded read-only tailing, but preserve the exact turn identity
+  // already written by Codex. This normalizes rollout task_started /
+  // turn_context / token_count / task_complete into one recent-turn envelope;
+  // it never edits the rollout and never treats cumulative totals as context.
   const latestUsageInfo = async (filePath) => {
     const fs = process.getBuiltinModule('fs').promises;
     let handle;
@@ -160,35 +165,136 @@ $MainProcessCollector = @'
       if (previous && previous.size === stat.size) return previous.envelope;
       if (!stat.size) return previous?.envelope || null;
 
-      // token_count rows are small and normally near EOF. Start with 2 MiB;
-      // retry with an 8 MiB tail only when a very large tool/output row sits
-      // after the last token_count. Never parse unrelated transcript rows.
+      const normalizeTurnId = (value) => String(value || '').trim().toLowerCase();
+      const rowEpoch = (row, fallback) => {
+        const parsed = Date.parse(String(row?.timestamp || ''));
+        return Number.isFinite(parsed) ? parsed : fallback;
+      };
       const limits = [2 * 1024 * 1024, 8 * 1024 * 1024];
+
       for (const limit of limits) {
         const length = Math.min(stat.size, limit);
         const buffer = Buffer.allocUnsafe(length);
         await handle.read(buffer, 0, length, stat.size - length);
         const lines = buffer.toString('utf8').split(/\r?\n/);
-        for (let index = lines.length - 1; index >= 0; index -= 1) {
+
+        let activeTurnId = '';
+        const turnMeta = new Map();
+        let latestUsage = null;
+        let latestTerminal = null;
+
+        const ensureTurn = (turnId) => {
+          const id = normalizeTurnId(turnId);
+          if (!id) return null;
+          let meta = turnMeta.get(id);
+          if (!meta) {
+            meta = { turnId: id, startedAt: null, completedAt: null, durationMs: null, status: null };
+            turnMeta.set(id, meta);
+          }
+          return meta;
+        };
+
+        for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index];
-          if (!line || !line.includes('token_count') || !line.includes('last_token_usage')) continue;
-          try {
-            const row = JSON.parse(line);
-            const payload = row && row.type === 'event_msg' && row.payload && row.payload.type === 'token_count'
-              ? row.payload
-              : null;
-            const info = payload && payload.info && typeof payload.info === 'object' ? payload.info : null;
+          if (!line || !/(token_count|task_started|task_complete|turn_started|turn_complete|turn_context)/.test(line)) continue;
+
+          let row;
+          try { row = JSON.parse(line); } catch { continue; }
+          const payload = row && row.type === 'event_msg' && row.payload && typeof row.payload === 'object'
+            ? row.payload
+            : row;
+          const type = String(payload?.type || row?.type || '').toLowerCase();
+
+          if (type === 'task_started' || type === 'turn_started') {
+            const id = normalizeTurnId(payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId);
+            if (id) {
+              activeTurnId = id;
+              const meta = ensureTurn(id);
+              const started = Date.parse(String(payload?.started_at || payload?.startedAt || row?.timestamp || ''));
+              if (meta && Number.isFinite(started)) meta.startedAt = started;
+              if (meta) meta.status = String(payload?.status || 'inProgress');
+            }
+            continue;
+          }
+
+          if (type === 'turn_context') {
+            const id = normalizeTurnId(payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId);
+            if (id) {
+              activeTurnId = id;
+              ensureTurn(id);
+            }
+            continue;
+          }
+
+          if (type === 'token_count') {
+            const info = payload?.info && typeof payload.info === 'object' ? payload.info : null;
             if (!info || !info.last_token_usage || !info.total_token_usage) continue;
-            const envelope = {
+            latestUsage = {
               info,
-              updatedAt: Date.parse(row.timestamp || '') || Date.now(),
+              updatedAt: rowEpoch(row, Date.now()),
+              turnId: activeTurnId || null,
+              lineIndex: index,
             };
-            localUsageSnapshotCache.set(filePath, { size: stat.size, envelope });
-            return envelope;
-          } catch {}
+            continue;
+          }
+
+          if (type === 'task_complete' || type === 'turn_complete') {
+            const id = normalizeTurnId(
+              payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId || activeTurnId
+            );
+            if (!id) continue;
+            const meta = ensureTurn(id);
+            const completed = Date.parse(String(payload?.completed_at || payload?.completedAt || row?.timestamp || ''));
+            if (meta) {
+              if (Number.isFinite(completed)) meta.completedAt = completed;
+              const duration = Number(payload?.duration_ms ?? payload?.durationMs);
+              if (Number.isFinite(duration)) meta.durationMs = duration;
+              meta.status = String(payload?.status || (payload?.error ? 'failed' : 'completed'));
+            }
+            latestTerminal = meta;
+            // When the bounded tail begins after task_started, a token_count may
+            // precede the matching task_complete without an active turn id. The
+            // immediately following terminal event is the only safe recovery.
+            if (latestUsage && !latestUsage.turnId && latestUsage.lineIndex < index) {
+              latestUsage.turnId = id;
+            }
+            if (activeTurnId === id) activeTurnId = '';
+          }
         }
-        if (length === stat.size) break;
+
+        if (!latestUsage) {
+          if (length === stat.size) break;
+          continue;
+        }
+
+        const usageTurnId = normalizeTurnId(latestUsage.turnId);
+        const usageTurn = usageTurnId ? (turnMeta.get(usageTurnId) || null) : null;
+        const activeTurn = activeTurnId ? (turnMeta.get(activeTurnId) || { turnId: activeTurnId }) : null;
+        const envelope = {
+          info: latestUsage.info,
+          updatedAt: latestUsage.updatedAt,
+          turnId: usageTurnId || null,
+          turnStartedAt: usageTurn?.startedAt ?? null,
+          turnCompletedAt: usageTurn?.completedAt ?? null,
+          turnDurationMs: usageTurn?.durationMs ?? null,
+          turnStatus: usageTurn?.status ?? null,
+          activeTurn: activeTurn ? {
+            turnId: normalizeTurnId(activeTurn.turnId),
+            startedAt: activeTurn.startedAt ?? null,
+            status: activeTurn.status || 'inProgress',
+          } : null,
+          terminalTurn: latestTerminal ? {
+            turnId: normalizeTurnId(latestTerminal.turnId),
+            startedAt: latestTerminal.startedAt ?? null,
+            completedAt: latestTerminal.completedAt ?? null,
+            durationMs: latestTerminal.durationMs ?? null,
+            status: latestTerminal.status || 'completed',
+          } : null,
+        };
+        localUsageSnapshotCache.set(filePath, { size: stat.size, envelope });
+        return envelope;
       }
+
       return previous?.envelope || null;
     } catch {
       return null;
@@ -203,6 +309,13 @@ $MainProcessCollector = @'
       threadId: normalizeUsageThreadId(threadId),
       updatedAt: envelope.updatedAt,
       info: envelope.info,
+      turnId: envelope.turnId || null,
+      turnStartedAt: envelope.turnStartedAt ?? null,
+      turnCompletedAt: envelope.turnCompletedAt ?? null,
+      turnDurationMs: envelope.turnDurationMs ?? null,
+      turnStatus: envelope.turnStatus || null,
+      activeTurn: envelope.activeTurn || null,
+      terminalTurn: envelope.terminalTurn || null,
     };
     const expression =
       "globalThis.__casOutputTelemetryRuntime&&" +
@@ -293,6 +406,9 @@ try {
     $Combined = $PatchedLauncher + $PatchedR74
     foreach ($Marker in @(
         'CAS-R76-EXACT-TOKEN-TELEMETRY',
+        'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
+        'terminalTurn',
+        'activeTurn',
         'activeThreadExpression',
         'last_token_usage',
         'total_token_usage',

@@ -308,18 +308,21 @@ $MainProcessCollector = @'
 
   const pushLocalUsage = async (contents, threadId, envelope) => {
     if (!contents || !envelope || contents.isDestroyed?.()) return;
+    // Keep the historical r83 exact-replacement anchor intact. r83 inserts
+    // the safe model field into this object during the nested carry-forward.
+    // r94 turn metadata is appended afterwards so both generations compose.
     const safeEnvelope = {
       threadId: normalizeUsageThreadId(threadId),
       updatedAt: envelope.updatedAt,
       info: envelope.info,
-      turnId: envelope.turnId || null,
-      turnStartedAt: envelope.turnStartedAt ?? null,
-      turnCompletedAt: envelope.turnCompletedAt ?? null,
-      turnDurationMs: envelope.turnDurationMs ?? null,
-      turnStatus: envelope.turnStatus || null,
-      activeTurn: envelope.activeTurn || null,
-      terminalTurn: envelope.terminalTurn || null,
     };
+    safeEnvelope.turnId = envelope.turnId || null;
+    safeEnvelope.turnStartedAt = envelope.turnStartedAt ?? null;
+    safeEnvelope.turnCompletedAt = envelope.turnCompletedAt ?? null;
+    safeEnvelope.turnDurationMs = envelope.turnDurationMs ?? null;
+    safeEnvelope.turnStatus = envelope.turnStatus || null;
+    safeEnvelope.activeTurn = envelope.activeTurn || null;
+    safeEnvelope.terminalTurn = envelope.terminalTurn || null;
     const expression =
       "globalThis.__casOutputTelemetryRuntime&&" +
       "globalThis.__casOutputTelemetryRuntime.ingestExternalUsage&&" +

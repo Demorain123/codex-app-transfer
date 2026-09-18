@@ -203,7 +203,7 @@ foreach ($Marker in @(
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS',
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
-    "[data-testid*=\"composer\"]",
+    '[data-testid*="composer"]',
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
 )) {

@@ -9,6 +9,10 @@ if (-not (Get-Variable -Name Patched -Scope 0 -ErrorAction SilentlyContinue)) {
 
 $R94TurnHelpers = @'
   // R94_TURN_NOTIFICATION_BRIDGE_RUNTIME
+  function r94NormalizePaneId(value) {
+    return String(value || '').replace(/^local:/i, '').trim().toLowerCase();
+  }
+
   function r94Number(object, camel, snake) {
     const value = Number(object && (object[camel] ?? object[snake]));
     return Number.isFinite(value) ? value : null;
@@ -57,7 +61,7 @@ $R94TurnHelpers = @'
   }
 
   function r94OfferRolloutEnvelope(envelope, threadId, info) {
-    const normalizedThread = normalizePaneId(threadId);
+    const normalizedThread = r94NormalizePaneId(threadId);
     if (!normalizedThread || !envelope || typeof envelope !== 'object') return;
 
     const active = envelope.activeTurn && typeof envelope.activeTurn === 'object' ? envelope.activeTurn : null;
@@ -114,7 +118,7 @@ $R94TurnHelpers = @'
     try {
       const capability = window.__casR94TurnCapability;
       if (!capability || typeof capability.latestForThread !== 'function') return null;
-      return capability.latestForThread(normalizePaneId(threadId));
+      return capability.latestForThread(r94NormalizePaneId(threadId));
     } catch {
       return null;
     }
@@ -132,7 +136,7 @@ $R94TurnHelpers = @'
     const contextWindow = Number(usage.modelContextWindow ?? usage.model_context_window);
     const sessionTotalTokens = r94Number(total,'totalTokens','total_tokens');
     return {
-      threadId: normalizePaneId(record.threadId),
+      threadId: r94NormalizePaneId(record.threadId),
       turnId: String(record.turnId || ''),
       inputTokens,
       cachedInputTokens,
@@ -169,7 +173,7 @@ $R94ExternalIngest = @'
     const total = info.total_token_usage && typeof info.total_token_usage === 'object'
       ? info.total_token_usage
       : (info.totalTokenUsage && typeof info.totalTokenUsage === 'object' ? info.totalTokenUsage : null);
-    const threadId = normalizePaneId(typeof envelope.threadId === 'string' ? envelope.threadId : '');
+    const threadId = r94NormalizePaneId(typeof envelope.threadId === 'string' ? envelope.threadId : '');
     const turnId = String(envelope.turnId || '').trim().toLowerCase();
     const updatedAt = Number(envelope.updatedAt) || Date.now();
 
@@ -281,7 +285,61 @@ $R94StatusHtml = @'
       '</div>';
   }
 '@
-$Patched = Replace-BlockRequired $Patched '  function statusHtmlForPane(sessionId, threadId, agentId, bar) {' '  function bindIdentityCopy(bar) {' $R94StatusHtml 'r94 turn-scoped status presentation'
+$R94BaseStatusHtml = @'
+  // R94_TURN_STATUS_BASE_OWNER_RUNTIME
+  // Fallback for the single-status runtime shape. It still prefers the exact
+  // recent-turn capability and never borrows native/global Usage metrics.
+  function statusHtml() {
+    const m = state.metrics || {};
+    const threadId = r94NormalizePaneId(m.externalThreadId || '');
+    const turnRecord = r94LatestTurnCapability(threadId);
+    const turnExact = r94TurnUsageSnapshot(turnRecord);
+    const fallbackExact = m.externalExact && typeof m.externalExact === 'object' ? m.externalExact : null;
+    const exact = turnExact || fallbackExact;
+    const context = exact && Number.isFinite(exact.contextPercent) ? ('ctx ' + exact.contextPercent.toFixed(1) + '%') : 'ctx --';
+    const input = exact && Number.isFinite(exact.inputTokens) ? ('in ' + shortNumber(exact.inputTokens)) : 'in --';
+    const output = exact && Number.isFinite(exact.outputTokens) ? ('out ' + shortNumber(exact.outputTokens)) : 'out --';
+    const cache = exact && Number.isFinite(exact.cacheHitPercent) ? ('cache ' + exact.cacheHitPercent.toFixed(1) + '%') : 'cache --';
+    const total = exact && Number.isFinite(exact.sessionTotalTokens) ? ('total ' + shortNumber(exact.sessionTotalTokens)) : 'total --';
+    const model = String(m.model || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return [
+      '<span class="cas-status-item" data-cas-metric-source="' + (turnExact ? 'exact-turn-capability' : 'exact-jsonl-fallback') + '">' + context + '</span>',
+      '<span class="cas-status-item">' + input + '</span>',
+      '<span class="cas-status-item">' + output + '</span>',
+      '<span class="cas-status-item cas-status-secondary">' + cache + '</span>',
+      '<span class="cas-status-item">-- tok/s</span>',
+      '<span class="cas-status-item cas-status-tertiary">' + total + '</span>',
+      '<span class="cas-status-spacer"></span>',
+      '<span class="cas-status-item cas-status-muted cas-status-secondary">' + model + '</span>',
+    ].join('');
+  }
+'@
+
+$R94TurnStatusOwner = $null
+$R94PaneStatusStart = [regex]::Match(
+    $Patched,
+    '(?m)^[ \t]*function statusHtmlForPane\s*\([^)]*\)\s*\{'
+)
+if ($R94PaneStatusStart.Success) {
+    $R94PaneTail = $Patched.Substring($R94PaneStatusStart.Index + $R94PaneStatusStart.Length)
+    $R94PaneStatusEnd = [regex]::Match(
+        $R94PaneTail,
+        '(?m)^[ \t]*function bindIdentityCopy\s*\(bar\)\s*\{'
+    )
+    if (-not $R94PaneStatusEnd.Success) {
+        throw 'r94 pane status owner found but bindIdentityCopy boundary is missing'
+    }
+    $R94PaneEndMarker = $R94PaneStatusEnd.Value
+    $Patched = Replace-BlockRequired $Patched $R94PaneStatusStart.Value $R94PaneEndMarker $R94StatusHtml 'r94 turn-scoped pane status presentation'
+    $R94TurnStatusOwner = 'pane'
+    Write-Host 'R94_TURN_STATUS_PANE_OWNER_PASS' -ForegroundColor Green
+} elseif ($Patched.Contains('  function statusHtml() {')) {
+    $Patched = Replace-BlockRequired $Patched '  function statusHtml() {' '  function ensureMirror() {' $R94BaseStatusHtml 'r94 turn-scoped base status presentation'
+    $R94TurnStatusOwner = 'base'
+    Write-Host 'R94_TURN_STATUS_BASE_OWNER_PASS' -ForegroundColor Yellow
+} else {
+    throw 'r94 could not locate either pane statusHtmlForPane(...) or base statusHtml() runtime owner'
+}
 
 $R94ConsumeText = @'
   function consumeText(text) {
@@ -324,13 +382,33 @@ foreach ($Marker in @(
     "typeof capability.ingestNotification !== 'function'",
     'thread\/tokenUsage\/updated',
     'turn\/(?:started|completed)',
-    'task_(?:started|complete)',
-    "bar.setAttribute('data-cas-turn-id'",
-    'exact-turn-capability'
+    'task_(?:started|complete)'
 )) {
     if (-not $Patched.Contains($Marker)) {
         throw "r94 notification finalizer marker missing: $Marker"
     }
+}
+
+if ($R94TurnStatusOwner -eq 'pane') {
+    foreach ($Marker in @(
+        "bar.setAttribute('data-cas-turn-id'",
+        'exact-turn-capability'
+    )) {
+        if (-not $Patched.Contains($Marker)) {
+            throw "r94 pane turn-status marker missing: $Marker"
+        }
+    }
+} elseif ($R94TurnStatusOwner -eq 'base') {
+    foreach ($Marker in @(
+        'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
+        "data-cas-metric-source=\"' + (turnExact ? 'exact-turn-capability' : 'exact-jsonl-fallback')"
+    )) {
+        if (-not $Patched.Contains($Marker)) {
+            throw "r94 base turn-status marker missing: $Marker"
+        }
+    }
+} else {
+    throw 'r94 turn-status owner was not resolved'
 }
 
 Write-Host 'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS' -ForegroundColor Green

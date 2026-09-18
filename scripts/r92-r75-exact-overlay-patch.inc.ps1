@@ -118,6 +118,19 @@ if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($StampSource))) -ne $R92Dis
     throw 'r92 disabled stamp helper round-trip mismatch'
 }
 
+$R92ObserverTargetName = [System.IO.Path]::GetFileName([string]$ObserverSource)
+if ($R92ObserverTargetName -ne '.r92-timestamp-observer.generated.js') {
+    throw "r92 refuses non-isolated observer owner: $R92ObserverTargetName"
+}
+[System.IO.File]::WriteAllText(
+    $ObserverSource,
+    $R92OverlayBody,
+    [System.Text.UTF8Encoding]::new($false)
+)
+if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($ObserverSource))) -ne $R92OverlayBody) {
+    throw 'r92 exact overlay observer helper round-trip mismatch'
+}
+
 # The inherited r86 verifier predates the exact-overlay profile and checks four
 # strict-observer marker strings through $StampBody/$ObserverBody only. Those
 # variables are not used to materialize the r92 runtime after this owner patch;
@@ -303,7 +316,7 @@ $PatchedR77 = Replace-R92NormalizedRequired `
 foreach ($Marker in @(
     "if (`$OriginalR75.Contains('R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME')) {",
     "R92_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS",
-    '`$R77TimestampRootMarker'
+    '$R77TimestampRootMarker'
 )) {
     if (-not $PatchedR77.Contains($Marker)) {
         throw "r92 patched r77 compatibility source missing marker: $Marker"

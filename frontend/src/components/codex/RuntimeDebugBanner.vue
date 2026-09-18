@@ -10,9 +10,11 @@ import { useSettingsStore } from '@/stores/settings'
 // identity evidence: Transfer package revision + current Codex PID relationship +
 // the last No Lagging renderer runtime that was actually armed.
 const DEBUG_PROTOCOL = 'DBG94-1'
+const EXPECTED_TRANSFER_REVISION = 'r94'
+const EXPECTED_TRANSFER_VERSION = '2.4.5+94'
 
 const store = useSettingsStore()
-const appVersion = ref('')
+const backendVersion = ref('')
 const doctor = ref<NoMicroDoctor | null>(null)
 let pollTimer: number | undefined
 
@@ -27,10 +29,13 @@ function revisionNumber(value: unknown): number | null {
   return build ? Number(build[1]) : null
 }
 
-const transferRevisionNumber = computed(() => revisionNumber(appVersion.value))
-const transferRevision = computed(() =>
-  transferRevisionNumber.value == null ? 'r?' : `r${transferRevisionNumber.value}`,
-)
+const transferRevisionNumber = computed(() => revisionNumber(EXPECTED_TRANSFER_REVISION))
+const backendRevisionNumber = computed(() => revisionNumber(backendVersion.value))
+const backendVersionMatchesExpected = computed(() => {
+  const backend = backendRevisionNumber.value
+  const expected = transferRevisionNumber.value
+  return backend == null || expected == null ? null : backend === expected
+})
 const lastLaunch = computed(() => doctor.value?.lastLaunch ?? null)
 const lastRuntime = computed(() => lastLaunch.value?.outputTelemetry?.runtime || '')
 const lastRuntimeRevision = computed(() => revisionNumber(lastRuntime.value))
@@ -97,7 +102,7 @@ const runtimeEvidenceLabel = computed(() => {
 
 async function refresh() {
   const [versionResult, doctorResult] = await Promise.allSettled([getAppVersion(), getNoMicroDoctor()])
-  if (versionResult.status === 'fulfilled') appVersion.value = versionResult.value.version || ''
+  if (versionResult.status === 'fulfilled') backendVersion.value = versionResult.value.version || ''
   if (doctorResult.status === 'fulfilled') doctor.value = doctorResult.value
 }
 
@@ -139,7 +144,11 @@ onBeforeUnmount(stopPolling)
       <span class="runtime-debug-banner__protocol">{{ DEBUG_PROTOCOL }}</span>
     </div>
     <div class="runtime-debug-banner__facts">
-      <span>Transfer {{ transferRevision }} · v{{ appVersion || '?' }}</span>
+      <span>Transfer {{ EXPECTED_TRANSFER_REVISION }} · v{{ EXPECTED_TRANSFER_VERSION }}</span>
+      <span>
+        Backend/Cargo v{{ backendVersion || '?' }}
+        <template v-if="backendVersionMatchesExpected === false"> · ⚠ identity mismatch</template>
+      </span>
       <span>Codex {{ doctor?.processState || 'unknown' }}</span>
       <span>Last B {{ runtimeEvidenceLabel }}</span>
       <span v-if="lastLaunch?.processId">PID {{ lastLaunch.processId }}</span>

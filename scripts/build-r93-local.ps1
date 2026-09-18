@@ -49,7 +49,7 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     $TextN = Normalize-Eol $Text
     $OldN = Normalize-Eol $Old
     $NewN = Normalize-Eol $New
-    if (-not $TextN.Contains($OldN)) { throw "r92 expected text missing: $Label" }
+    if (-not $TextN.Contains($OldN)) { throw "r93 expected text missing: $Label" }
     return $TextN.Replace($OldN,$NewN)
 }
 
@@ -107,7 +107,7 @@ foreach ($Marker in @(
     'R92_R77_TIMESTAMP_ROOT_COMPAT_SUPERSEDED_PASS',
     'R92_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS',
     'R92_R77_TELEMETRY_PRESERVED_TIMESTAMP_SUPERSEDED_PASS',
-    "'.r92-timestamp-observer.generated.js'",
+    "'.r93-timestamp-observer.generated.js'",
     'R92_FINAL_TIMESTAMP_MATERIALIZATION_PREFLIGHT_PASS',
     'R92_NATIVE_REACT_DOM_READONLY_PASS'
 )) {
@@ -160,7 +160,7 @@ try {
     # generated replacement helpers so the exact owner patch is Windows-safe.
     $OldReplaceRequired = @'
 function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label) {
-    if (-not $Text.Contains($Old)) { throw "r92 expected text missing: $Label" }
+    if (-not $Text.Contains($Old)) { throw "r93 expected text missing: $Label" }
     return $Text.Replace($Old,$New)
 }
 '@
@@ -169,7 +169,7 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     $NormalizedText = $Text.Replace("`r`n","`n").Replace("`r","`n")
     $NormalizedOld = $Old.Replace("`r`n","`n").Replace("`r","`n")
     $NormalizedNew = $New.Replace("`r`n","`n").Replace("`r","`n")
-    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r92 expected text missing: $Label" }
+    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r93 expected text missing: $Label" }
     return $NormalizedText.Replace($NormalizedOld,$NormalizedNew)
 }
 '@
@@ -178,9 +178,9 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     $OldReplaceBlock = @'
 function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string]$Replacement,[string]$Label) {
     $StartIndex = $Text.IndexOf($Start)
-    if ($StartIndex -lt 0) { throw "r92 block start missing: $Label" }
+    if ($StartIndex -lt 0) { throw "r93 block start missing: $Label" }
     $EndIndex = $Text.IndexOf($End,$StartIndex + $Start.Length)
-    if ($EndIndex -le $StartIndex) { throw "r92 block end missing: $Label" }
+    if ($EndIndex -le $StartIndex) { throw "r93 block end missing: $Label" }
     return $Text.Substring(0,$StartIndex) + $Replacement + "`n`n" + $Text.Substring($EndIndex)
 }
 '@
@@ -191,9 +191,9 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
     $NormalizedEnd = $End.Replace("`r`n","`n").Replace("`r","`n")
     $NormalizedReplacement = $Replacement.Replace("`r`n","`n").Replace("`r","`n")
     $StartIndex = $NormalizedText.IndexOf($NormalizedStart)
-    if ($StartIndex -lt 0) { throw "r92 block start missing: $Label" }
+    if ($StartIndex -lt 0) { throw "r93 block start missing: $Label" }
     $EndIndex = $NormalizedText.IndexOf($NormalizedEnd,$StartIndex + $NormalizedStart.Length)
-    if ($EndIndex -le $StartIndex) { throw "r92 block end missing: $Label" }
+    if ($EndIndex -le $StartIndex) { throw "r93 block end missing: $Label" }
     return $NormalizedText.Substring(0,$StartIndex) + $NormalizedReplacement + "`n`n" + $NormalizedText.Substring($EndIndex)
 }
 '@

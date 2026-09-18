@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $R90Source = Join-Path $PSScriptRoot 'build-r90-local.ps1'
+$R76OutputOwner = Join-Path $PSScriptRoot 'build-r76-output-ui-local.ps1'
 $R89PanePatch = Join-Path $PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'
 $R94ExactTurnPatch = Join-Path $PSScriptRoot 'r94-r75-exact-turn-patch.inc.ps1'
 $R94FinalObserverPatch = Join-Path $PSScriptRoot 'r94-r78-exact-turn-patch.inc.ps1'
@@ -24,6 +25,7 @@ $TempStampCheck = Join-Path $PSScriptRoot '.r94-stamp-syntax.generated.mjs'
 
 foreach ($Path in @(
     $R90Source,
+    $R76OutputOwner,
     $R89PanePatch,
     $R94ExactTurnPatch,
     $R94FinalObserverPatch,
@@ -72,6 +74,7 @@ if ($LASTEXITCODE -ne 0) { throw 'r94 git status failed' }
 if ($Dirty.Count -gt 0) { throw "r94 requires a clean tracked worktree:`n$($Dirty -join "`n")" }
 
 $Builder = Normalize-Eol ([System.IO.File]::ReadAllText($R90Source))
+$R76OutputOwnerText = Normalize-Eol ([System.IO.File]::ReadAllText($R76OutputOwner))
 $PanePatch = Normalize-Eol ([System.IO.File]::ReadAllText($R89PanePatch))
 $ExactOverlayPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R94ExactTurnPatch))
 $FinalObserverPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R94FinalObserverPatch))
@@ -86,6 +89,9 @@ foreach ($Marker in @(
     'R94_EXACT_TURN_CAPABILITY_RUNTIME',
     'window.__casR94TurnCapability = capability;',
     'function r94CreateCapability() {',
+    'function latestForThread(threadId) {',
+    'usageFingerprint',
+    'lifecycleFingerprint',
     'function r94NativeExactForTurn(turn) {',
     'new IntersectionObserver(function(entries) {',
     'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
@@ -166,13 +172,38 @@ foreach ($Marker in @(
 }
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
-    'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS'
+    'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS',
+    'R94_LOCAL_ROLLOUT_TURN_BRIDGE_PASS',
+    'R94_TURN_SCOPED_STATUS_PASS',
+    'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
+    'exact-turn-capability'
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }
 }
 Assert-PowerShellParses $StatusOverlayFinalizer 'r94 status overlay finalizer'
 Assert-PowerShellParses $TurnNotificationFinalizer 'r94 turn notification finalizer'
 Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Green
+
+foreach ($Marker in @(
+    'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
+    'terminalTurn',
+    'activeTurn',
+    'turnCompletedAt',
+    'turnDurationMs'
+)) {
+    if (-not $R76OutputOwnerText.Contains($Marker)) {
+        throw "r94 r76 rollout bridge contract missing: $Marker"
+    }
+}
+foreach ($Forbidden in @(
+    'readFile(filePath',
+    'readFileSync(filePath'
+)) {
+    if ($R76OutputOwnerText.Contains($Forbidden)) {
+        throw "r94 rollout bridge regressed to whole-file parsing: $Forbidden"
+    }
+}
+Write-Host 'R94_R76_TURN_AWARE_ROLLOUT_BRIDGE_PREFLIGHT_PASS' -ForegroundColor Green
 
 
 try {
@@ -289,6 +320,9 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - status bar is Transfer-owned overlay positioned over the composer; native React children stay untouched'
         Write-Host '  - native/global Usage polling cannot overwrite pane/local status counters or tok/s'
         Write-Host '  - exact TurnCapability accepts turn lifecycle + turn-scoped usage notifications when passively observed'
+        Write-Host '  - r76 bounded rollout tail preserves task_started/turn_context/token_count/task_complete turn identity without whole-file parsing'
+        Write-Host '  - repeated token_count/lifecycle payloads are fingerprint-deduped before UI refresh'
+        Write-Host '  - composer status prefers exact threadId+turnId usage and only falls back to thread snapshot when no newer turn identity exists'
         Write-Host '  - duplicate fallback timestamp is suppressed whenever Codex already renders an exact native time'
     } else {
         Write-Host ''
@@ -297,6 +331,8 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - legacy r74-r90 stamp path is inert'
         Write-Host '  - composer status is a Transfer-owned overlay aligned inside the input surface; native/global speed is isolated'
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'
+        Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
+        Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'
         Write-Host '  - visible/package identity is r94 / 2.4.5+94'
     }
 }

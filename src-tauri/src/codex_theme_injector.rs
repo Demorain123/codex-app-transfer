@@ -1875,6 +1875,20 @@ mod tests {
     }
 
     #[test]
+    fn runtime_debug_script_embeds_build_identity_and_live_probes() {
+        let script = build_runtime_debug_script("no-lagging");
+        assert!(script.contains("DBG94-1"));
+        assert!(script.contains("r94"));
+        assert!(script.contains("2.4.5+94"));
+        assert!(script.contains("__casOutputTelemetryRuntime"));
+        assert!(script.contains("__casR94TurnCapability"));
+        assert!(script.contains("data-cas-status-inside-composer"));
+        assert!(script.contains("cas-r94-timestamp-overlay"));
+        assert!(script.contains("launchMode"));
+        assert!(!script.contains("__CAS_DEBUG_META__"));
+    }
+
+    #[test]
     fn build_inject_script_includes_mascot_only_for_carton() {
         // 验证 mascot CSS rule + mount block 只出现在 carton script,changli 等无 mascot
         // 主题没有。**不**直接 grep "cat-theme-mascot" 字符串 — 切换主题语义改造后

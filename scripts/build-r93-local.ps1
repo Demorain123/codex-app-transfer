@@ -119,10 +119,18 @@ if (-not $DisabledStampJs.Contains('R92_LEGACY_TIMESTAMP_STAMP_DISABLED')) {
 foreach ($Marker in @(
     'R92_R78_EXACT_OVERLAY_FINAL_OWNER',
     'R92_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
-    'r92 exact-only timestamp overlay final owner'
+    'r92 exact-only timestamp overlay final owner',
+    'r93 live-only timestamp observer'
 )) {
-    if (-not $FinalObserverPatch.Contains($Marker)) { throw "r92 final observer patch contract missing: $Marker" }
+    if (-not $FinalObserverPatch.Contains($Marker)) { throw "r93 final observer patch contract missing: $Marker" }
 }
+foreach ($Marker in @(
+    'r93 live-only timestamp observer',
+    'R93_TIMESTAMP_ACTIONROW_V4_PASS'
+)) {
+    if (-not $DisabledStampJs.Contains($Marker)) { throw "r93 disabled stamp compatibility sentinel missing: $Marker" }
+}
+Write-Host 'R93_RETARGETED_R86_VERIFIER_COMPAT_PREFLIGHT_PASS' -ForegroundColor Green
 Assert-PowerShellParses $FinalObserverPatch 'r92 final r78 observer patch include'
 Write-Host 'R92_FINAL_R78_OBSERVER_PATCH_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R92_EXACT_OVERLAY_PREFLIGHT_CONTRACT_PASS' -ForegroundColor Green

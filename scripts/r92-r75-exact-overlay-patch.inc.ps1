@@ -133,7 +133,8 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
         'function installOutputObserver() {',
         'new IntersectionObserver(function(entries) {',
         'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
-        'state.observer = { disconnect: r92Cleanup };'
+        'state.observer = { disconnect: r92Cleanup };',
+        'timestampMode: "exact-final-turn-overlay",'
     )) {
         if (-not $Text.Contains($Marker)) { throw "r92 generated exact-overlay profile missing: $Marker" }
     }
@@ -177,15 +178,12 @@ $R92PollApplyExact = @'
     $Patched = Replace-Required $Patched $OldPoll $NewPoll 'poll fallback timestamp sweep'
     $Patched = $Patched.Replace("    try { sweepOutputSegments(true); } catch {}`n",'')
     $Patched = $Patched.Replace("    try { sweepOutputSegments(false); } catch {}`n",'')
+    $Patched = $Patched.Replace(
+        'timestampMode: "live-output-segment + single-final-answer",',
+        'timestampMode: "exact-final-turn-overlay",'
+    )
 '@
 $PatchedR75 = Replace-R92NormalizedRequired     $PatchedR75     $R92PollApply     $R92PollApplyExact     'remove inherited periodic timestamp sweep'
-
-# Keep launcher diagnostics truthful when this text is present in the generated
-# r74/r75 source.
-$PatchedR75 = $PatchedR75.Replace(
-    'timestampMode: "live-output-segment + single-final-answer",',
-    'timestampMode: "exact-final-turn-overlay",'
-)
 
 foreach ($Marker in @(
     'R92_EXACT_OVERLAY_PROFILE_PASS',

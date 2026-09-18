@@ -620,6 +620,8 @@ export default {
   "settings.showGrayProviders": "Show gray-area providers",
   "settings.showGrayProvidersWarn": "⚠️ Account-ban risk: enabling and using these providers is entirely at your own risk.",
   "settings.showGrayProvidersHint": "Experimental providers such as Gemini CLI and Antigravity are hidden by default.",
+  "settings.runtimeDebugMode": "Runtime Debug mode",
+  "settings.runtimeDebugModeHint": "When enabled, Transfer shows a prominent build/runtime banner. The next Codex launch or restart through Transfer also opens local CDP and injects a DEBUG identity banner into Codex so screenshots reveal whether the renderer runtime is current or legacy. Off by default.",
   "settings.antigravitySuperpowers": "Antigravity constraints (superpowers)",
   "settings.antigravitySuperpowersHint": "Auto-mount the superpowers constraint plugin for Antigravity (relaunch Codex to take effect).",
   "settings.pluginUnlock": "Codex plugin unlock",

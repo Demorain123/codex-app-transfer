@@ -24,7 +24,6 @@ $R94StatusHelpers = @'
     if (root instanceof HTMLElement) return root;
     root = document.createElement('div');
     root.id = R94_STATUS_OVERLAY_ID;
-    root.setAttribute('aria-hidden','true');
     root.style.cssText = 'position:fixed;inset:0;z-index:2147481900;pointer-events:none;overflow:hidden;contain:layout style paint;';
     (document.body || document.documentElement).appendChild(root);
     return root;
@@ -160,6 +159,13 @@ $R94StatusHelpers = @'
 if (-not $Patched.Contains('R94_STATUS_OVERLAY_RUNTIME')) {
     $Patched = Replace-Required $Patched '  function statusBarInlineStyle() {' ($R94StatusHelpers + [char]10 + [char]10 + '  function statusBarInlineStyle() {') 'r94 status overlay helpers'
 }
+
+$R94RetiredNativeMount = @'
+  function r93MountStatusBar() {
+    return false;
+  }
+'@
+$Patched = Replace-BlockRequired $Patched '  function r93MountStatusBar(bar, composer) {' '  function r93IntegratedStatusStyle() {' $R94RetiredNativeMount 'r94 retire native composer child status mount'
 
 $R94StatusStyle = @'
   function statusBarInlineStyle() {

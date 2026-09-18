@@ -53,7 +53,7 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     $TextN = Normalize-Eol $Text
     $OldN = Normalize-Eol $Old
     $NewN = Normalize-Eol $New
-    if (-not $TextN.Contains($OldN)) { throw "r93 expected text missing: $Label" }
+    if (-not $TextN.Contains($OldN)) { throw "r94 expected text missing: $Label" }
     return $TextN.Replace($OldN,$NewN)
 }
 
@@ -184,7 +184,7 @@ try {
     Write-Host 'R94_EXACT_TURN_JS_SYNTAX_PASS' -ForegroundColor Green
 
     # Start from the frozen r90 generator so pane ownership/WAITING/truth-first
-    # telemetry stay inherited. r92 only replaces the final timestamp owner.
+    # telemetry stay inherited. r94 replaces the final timestamp owner and adds exact turn/status capability.
     $Builder = $Builder.Replace('R90','R94').Replace('r90','r94').Replace('+90','+94')
 
     $OldPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'"
@@ -195,7 +195,7 @@ try {
     # generated replacement helpers so the exact owner patch is Windows-safe.
     $OldReplaceRequired = @'
 function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label) {
-    if (-not $Text.Contains($Old)) { throw "r93 expected text missing: $Label" }
+    if (-not $Text.Contains($Old)) { throw "r94 expected text missing: $Label" }
     return $Text.Replace($Old,$New)
 }
 '@
@@ -204,7 +204,7 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     $NormalizedText = $Text.Replace("`r`n","`n").Replace("`r","`n")
     $NormalizedOld = $Old.Replace("`r`n","`n").Replace("`r","`n")
     $NormalizedNew = $New.Replace("`r`n","`n").Replace("`r","`n")
-    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r93 expected text missing: $Label" }
+    if (-not $NormalizedText.Contains($NormalizedOld)) { throw "r94 expected text missing: $Label" }
     return $NormalizedText.Replace($NormalizedOld,$NormalizedNew)
 }
 '@
@@ -213,9 +213,9 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Label
     $OldReplaceBlock = @'
 function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string]$Replacement,[string]$Label) {
     $StartIndex = $Text.IndexOf($Start)
-    if ($StartIndex -lt 0) { throw "r93 block start missing: $Label" }
+    if ($StartIndex -lt 0) { throw "r94 block start missing: $Label" }
     $EndIndex = $Text.IndexOf($End,$StartIndex + $Start.Length)
-    if ($EndIndex -le $StartIndex) { throw "r93 block end missing: $Label" }
+    if ($EndIndex -le $StartIndex) { throw "r94 block end missing: $Label" }
     return $Text.Substring(0,$StartIndex) + $Replacement + "`n`n" + $Text.Substring($EndIndex)
 }
 '@
@@ -226,9 +226,9 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
     $NormalizedEnd = $End.Replace("`r`n","`n").Replace("`r","`n")
     $NormalizedReplacement = $Replacement.Replace("`r`n","`n").Replace("`r","`n")
     $StartIndex = $NormalizedText.IndexOf($NormalizedStart)
-    if ($StartIndex -lt 0) { throw "r93 block start missing: $Label" }
+    if ($StartIndex -lt 0) { throw "r94 block start missing: $Label" }
     $EndIndex = $NormalizedText.IndexOf($NormalizedEnd,$StartIndex + $NormalizedStart.Length)
-    if ($EndIndex -le $StartIndex) { throw "r93 block end missing: $Label" }
+    if ($EndIndex -le $StartIndex) { throw "r94 block end missing: $Label" }
     return $NormalizedText.Substring(0,$StartIndex) + $NormalizedReplacement + "`n`n" + $NormalizedText.Substring($EndIndex)
 }
 '@
@@ -246,7 +246,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         'visible/package identity is r94 / 2.4.5+94',
         '.r94-r89-pane-runtime-patch.generated.inc.ps1'
     )) {
-        if (-not $Builder.Contains($Marker)) { throw "r92 retargeted builder invariant missing: $Marker" }
+        if (-not $Builder.Contains($Marker)) { throw "r94 retargeted builder invariant missing: $Marker" }
     }
 
     foreach ($Marker in @(
@@ -280,7 +280,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host 'R94_EXACT_TURN_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - r90 pane ownership / WAITING / truth-first telemetry remains inherited'
         Write-Host '  - legacy per-segment timestamp stamping is disabled at the final r86/r78 owner'
-        Write-Host '  - final timestamps are exact-only and sourced from Codex native sent-time metadata in this first r92 cut'
+        Write-Host '  - final timestamps are exact-only; native time wins, with passively observed turn/completed as exact fallback'
         Write-Host '  - native Codex turn/action-row DOM is read-only; labels live in a Transfer-owned overlay root'
         Write-Host '  - mutation observation is childList-only; visible-turn work is IntersectionObserver bounded'
         Write-Host '  - no Date.now historical estimate, characterData stream observer, or periodic timestamp sweep survives'

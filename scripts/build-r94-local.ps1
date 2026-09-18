@@ -234,25 +234,26 @@ Assert-PowerShellParses $ComposerStatusFinalizer 'r94 composer status finalizer'
 Assert-PowerShellParses $TurnNotificationFinalizer 'r94 turn notification finalizer'
 Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Green
 
-foreach ($Pair in @(
-    @($RuntimeDebugBannerText, 'CAS-R94-RUNTIME-DEBUG-BANNER-V1'),
-    @($RuntimeDebugBannerText, 'DBG94-1'),
-    @($RuntimeDebugBannerText, 'runtimeDebugMode'),
-    @($AppLayoutText, 'RuntimeDebugBanner'),
-    @($SettingsPageText, "toggle('runtimeDebugMode', false)"),
-    @($ProcessRsText, 'CAS-R94-RUNTIME-DEBUG-CDP-GATE'),
-    @($ProcessRsText, 'runtime_debug_enabled'),
-    @($DesktopHandlerRsText, 'CAS-R94-RUNTIME-DEBUG-REINJECT'),
-    @($DesktopHandlerRsText, 'reinject_after_codex_restart_with_mode'),
-    @($ThemeInjectorRsText, 'CAS-R94-RUNTIME-DEBUG-IDENTITY'),
-    @($ThemeInjectorRsText, 'RUNTIME_DEBUG_PROTOCOL'),
-    @($ThemeInjectorRsText, 'apply_runtime_debug_banner'),
-    @($ThemeInjectorRsText, 'cas-transfer-runtime-debug-banner'),
-    @($ThemeInjectorRsText, 'window.__casR94TurnCapability'),
-    @($ThemeInjectorRsText, "data-cas-status-inside-composer")
-)) {
-    if (-not $Pair[0].Contains($Pair[1])) {
-        throw "r94 runtime debug identity contract missing: $($Pair[1])"
+$RuntimeDebugContracts = @(
+    @{ Text = $RuntimeDebugBannerText; Marker = 'CAS-R94-RUNTIME-DEBUG-BANNER-V1' },
+    @{ Text = $RuntimeDebugBannerText; Marker = 'DBG94-1' },
+    @{ Text = $RuntimeDebugBannerText; Marker = 'runtimeDebugMode' },
+    @{ Text = $AppLayoutText; Marker = 'RuntimeDebugBanner' },
+    @{ Text = $SettingsPageText; Marker = "toggle('runtimeDebugMode', false)" },
+    @{ Text = $ProcessRsText; Marker = 'CAS-R94-RUNTIME-DEBUG-CDP-GATE' },
+    @{ Text = $ProcessRsText; Marker = 'runtime_debug_enabled' },
+    @{ Text = $DesktopHandlerRsText; Marker = 'CAS-R94-RUNTIME-DEBUG-REINJECT' },
+    @{ Text = $DesktopHandlerRsText; Marker = 'reinject_after_codex_restart_with_mode' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'CAS-R94-RUNTIME-DEBUG-IDENTITY' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'RUNTIME_DEBUG_PROTOCOL' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'apply_runtime_debug_banner' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'cas-transfer-runtime-debug-banner' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'window.__casR94TurnCapability' },
+    @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
+)
+foreach ($Contract in $RuntimeDebugContracts) {
+    if (-not $Contract.Text.Contains($Contract.Marker)) {
+        throw "r94 runtime debug identity contract missing: $($Contract.Marker)"
     }
 }
 Write-Host 'R94_RUNTIME_DEBUG_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green

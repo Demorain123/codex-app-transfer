@@ -123,6 +123,8 @@ foreach ($Marker in @(
     'R94_R77_TIMESTAMP_ROOT_COMPAT_SUPERSEDED_PASS',
     'R94_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS',
     'R94_R77_TELEMETRY_PRESERVED_TIMESTAMP_SUPERSEDED_PASS',
+    'R94_R77_MODEL_COLLECTOR_COMPAT_SOURCE_PASS',
+    'R94_R77_BOUNDED_MODEL_LOOKUP_SUPERSEDED_PASS',
     'R94_COMPOSER_STATUS_INSIDE_FINALIZER_BOUND_TO_R75_PASS',
     "'.r94-timestamp-observer.generated.js'",
     'R94_FINAL_TIMESTAMP_MATERIALIZATION_PREFLIGHT_PASS',
@@ -216,6 +218,8 @@ foreach ($Marker in @(
     'turnDurationMs',
     'safeEnvelope.turnId = envelope.turnId || null;',
     'safeEnvelope.terminalTurn = envelope.terminalTurn || null;',
+    "model: latestUsage.model || (usageTurn && usageTurn.model) || null,",
+    "const model = typeof payload?.model === 'string' ? payload.model.trim() : '';",
     'Keep the historical r83 exact-replacement anchor intact'
 )) {
     if (-not $R76OutputOwnerText.Contains($Marker)) {

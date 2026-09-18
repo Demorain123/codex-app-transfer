@@ -41,7 +41,7 @@ $R93Helpers = @'
   }
 
   function r93IntegratedStatusStyle() {
-    return 'box-sizing:border-box;width:calc(100% - 16px);margin:3px 8px 0;padding:2px 3px 3px;display:flex;align-items:center;gap:8px;min-height:16px;overflow:hidden;border:0;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent);border-radius:0;background:transparent;color:color-mix(in srgb,CanvasText 62%,transparent);box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;font:9px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;-webkit-app-region:no-drag;cursor:pointer;position:relative;z-index:1;container-type:inline-size;user-select:text;';
+    return 'box-sizing:border-box;width:calc(100% - 16px);margin:3px 8px 0;padding:2px 3px 3px;display:block;min-height:16px;overflow:hidden;border:0;border-bottom:1px solid color-mix(in srgb,CanvasText 9%,transparent);border-radius:0;background:transparent;color:color-mix(in srgb,CanvasText 62%,transparent);box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;font:9px/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;-webkit-app-region:no-drag;cursor:pointer;position:relative;z-index:1;container-type:inline-size;user-select:text;';
   }
 
   function r93RenderStatusHtml(bar, html) {

@@ -237,7 +237,34 @@
         key,
       };
       const current = ensureRecord(ids) || {};
+      const last = usage.last && typeof usage.last === 'object'
+        ? usage.last
+        : (usage.last_token_usage && typeof usage.last_token_usage === 'object' ? usage.last_token_usage : {});
+      const total = usage.total && typeof usage.total === 'object'
+        ? usage.total
+        : (usage.total_token_usage && typeof usage.total_token_usage === 'object' ? usage.total_token_usage : {});
+      const metric = function(object, camel, snake) {
+        const value = Number(object && (object[camel] ?? object[snake]));
+        return Number.isFinite(value) ? value : null;
+      };
+      const modelContextWindow = Number(usage.modelContextWindow ?? usage.model_context_window);
+      const fingerprint = [
+        metric(last,'inputTokens','input_tokens'),
+        metric(last,'cachedInputTokens','cached_input_tokens'),
+        metric(last,'outputTokens','output_tokens'),
+        metric(last,'reasoningOutputTokens','reasoning_output_tokens'),
+        metric(last,'totalTokens','total_tokens'),
+        metric(total,'totalTokens','total_tokens'),
+        Number.isFinite(modelContextWindow) ? modelContextWindow : null,
+      ].join('|');
+
+      // Codex rollout can emit token_count for non-turn changes while repeating
+      // the previous last_token_usage. Do not convert that into a fake new turn
+      // update or force an unnecessary renderer refresh.
+      if (current.usageFingerprint === fingerprint) return current;
+
       current.usage = usage;
+      current.usageFingerprint = fingerprint;
       exactByKey.delete(key);
       exactByKey.set(key, current);
       r94TrimCache(exactByKey);
@@ -311,6 +338,18 @@
       return key ? (exactByKey.get(key) || null) : null;
     }
 
+    function latestForThread(threadId) {
+      const normalized = String(threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      if (!normalized) return null;
+      const values = Array.from(exactByKey.values());
+      for (let index = values.length - 1; index >= 0; index -= 1) {
+        const record = values[index];
+        const candidate = String(record && record.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+        if (candidate === normalized) return record;
+      }
+      return null;
+    }
+
     function clear() {
       exactByKey.clear();
     }
@@ -318,6 +357,7 @@
     return Object.freeze({
       getForTurn,
       getRecord,
+      latestForThread,
       remember,
       rememberLifecycle,
       rememberUsage,

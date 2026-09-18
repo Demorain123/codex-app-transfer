@@ -95,7 +95,7 @@ foreach ($Marker in @(
         throw "r94 composer status finalizer source missing marker: $Marker"
     }
 }
-$R94StatusOverlayInjection = @'
+$R94ComposerStatusInjection = @'
     $R94ComposerStatusFinalizerPath = Join-Path $PSScriptRoot 'r94-composer-status-finalizer.ps1'
     if (-not (Test-Path -LiteralPath $R94ComposerStatusFinalizerPath)) { throw "r94 composer status finalizer missing at runtime build owner: $R94ComposerStatusFinalizerPath" }
     . $R94ComposerStatusFinalizerPath
@@ -118,7 +118,7 @@ $R94TurnNotificationInjection = @'
     if (-not (Test-Path -LiteralPath $R94TurnNotificationFinalizerPath)) { throw "r94 turn notification finalizer missing at runtime build owner: $R94TurnNotificationFinalizerPath" }
     . $R94TurnNotificationFinalizerPath
 '@
-$R93StatusReplacement = $R93StatusInjection + [char]10 + $R94StatusOverlayInjection + [char]10 + $R94TurnNotificationInjection + [char]10 + $R93AssertNeedle
+$R93StatusReplacement = $R93StatusInjection + [char]10 + $R94ComposerStatusInjection + [char]10 + $R94TurnNotificationInjection + [char]10 + $R93AssertNeedle
 if (-not $PatchedR75.Contains($R93AssertNeedle)) {
     throw 'r93 could not locate final r75 status injection point'
 }

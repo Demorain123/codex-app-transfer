@@ -442,10 +442,55 @@ pub(crate) async fn prepare_codex_restart_runtime(
     Ok(desktop_sync)
 }
 
+fn runtime_debug_enabled() -> bool {
+    crate::admin::registry_io::load()
+        .ok()
+        .as_ref()
+        .and_then(|cfg| cfg.get("settings"))
+        .and_then(|settings| settings.get("runtimeDebugMode"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+async fn inject_runtime_debug_after_restart(launch_mode: &str) {
+    if !runtime_debug_enabled() {
+        return;
+    }
+
+    // CAS-R94-RUNTIME-DEBUG-REINJECT
+    // Codex/MSIX cold-start timing varies. Debug mode is explicitly diagnostic,
+    // so use a short bounded retry window and log the final failure instead of
+    // blocking ordinary launch behavior.
+    let delays_ms = [250u64, 500, 900, 1500, 2500];
+    let mut last_error: Option<String> = None;
+    for delay in delays_ms {
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        match crate::codex_theme_injector::apply_runtime_debug_banner(launch_mode).await {
+            Ok(()) => {
+                tracing::info!(
+                    "[runtime-debug] Codex banner injected protocol=DBG94-1 launch_mode={}",
+                    launch_mode
+                );
+                return;
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    tracing::warn!(
+        "[runtime-debug] Codex banner injection did not succeed: {}",
+        last_error.unwrap_or_else(|| "unknown error".to_owned())
+    );
+}
+
 /// Mirror the legacy Restart button's post-launch CDP reinjection behavior.
-pub(crate) async fn reinject_after_codex_restart() {
+pub(crate) async fn reinject_after_codex_restart_with_mode(launch_mode: &str) {
     let service = super::plugin_unlock::get_service().await;
     service.reinject().await;
+    inject_runtime_debug_after_restart(launch_mode).await;
+}
+
+pub(crate) async fn reinject_after_codex_restart() {
+    reinject_after_codex_restart_with_mode("restart").await;
 }
 
 pub async fn restart_codex_app(State(state): State<crate::admin::AdminState>) -> impl IntoResponse {

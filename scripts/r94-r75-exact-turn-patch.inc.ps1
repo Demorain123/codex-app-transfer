@@ -38,6 +38,34 @@ function Replace-R94BlockRequired(
     return $TextN.Substring(0,$StartIndex) + $ReplacementN + "`n`n" + $TextN.Substring($EndIndex)
 }
 
+# The historical r77 builder adds model lookup by exact-replacing an older
+# token_count envelope shape. r94 owns a newer bounded turn-aware collector,
+# so patch ONLY the temporary r77 builder source to accept that newer owner
+# instead of mutating the tracked build-r77-local.ps1 baseline.
+if (-not (Get-Variable -Name PatchedR77 -Scope 0 -ErrorAction SilentlyContinue)) {
+    throw 'r94 exact owner requires generated $PatchedR77 compatibility source'
+}
+$R94R77OldModelApply = @'
+$R77OutputText = Replace-Required $R77OutputText $OldEnvelope $NewEnvelope 'bounded turn_context model lookup'
+'@
+$R94R77NewModelApply = @'
+if ($R77OutputText.Contains('CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE')) {
+    foreach ($Marker in @(
+        "model: latestUsage.model || (usageTurn && usageTurn.model) || null,",
+        "const model = typeof payload?.model === 'string' ? payload.model.trim() : '';"
+    )) {
+        if (-not $R77OutputText.Contains($Marker)) {
+            throw "r94 turn-aware collector missing bounded model marker: $Marker"
+        }
+    }
+    Write-Host 'R94_R77_BOUNDED_MODEL_LOOKUP_SUPERSEDED_PASS' -ForegroundColor Green
+} else {
+    $R77OutputText = Replace-Required $R77OutputText $OldEnvelope $NewEnvelope 'bounded turn_context model lookup'
+}
+'@
+$PatchedR77 = Replace-R94NormalizedRequired $PatchedR77 $R94R77OldModelApply $R94R77NewModelApply 'supersede r77 bounded model exact-replacement for r94 collector'
+Write-Host 'R94_R77_MODEL_COLLECTOR_COMPAT_SOURCE_PASS' -ForegroundColor Green
+
 $R94OverlaySourcePath = Join-Path $PSScriptRoot 'r94-exact-turn-overlay.js'
 $R94DisabledStampPath = Join-Path $PSScriptRoot 'r94-timestamp-stamp-disabled.js'
 $R94FinalObserverPatchPath = Join-Path $PSScriptRoot 'r94-r78-exact-turn-patch.inc.ps1'

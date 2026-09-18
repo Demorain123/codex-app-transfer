@@ -180,7 +180,9 @@ foreach ($Marker in @(
     'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
     'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
-    'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS'
+    'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS',
+    'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
+    'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
 )) {
     if (-not $ComposerStatusFinalizer.Contains($Marker)) { throw "r94 composer status finalizer contract missing: $Marker" }
 }

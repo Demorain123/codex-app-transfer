@@ -254,6 +254,7 @@ const chatCustomModelEnabled = toggle('chatCustomModelEnabled', true)
 const codexNetworkAccess = toggle('codexNetworkAccess', false)
 const exposeAllProviderModels = toggle('exposeAllProviderModels', false)
 const showGrayProviders = toggle('showGrayProviders', false)
+const runtimeDebugMode = toggle('runtimeDebugMode', false)
 const mcpCredentialsPortableStore = toggle('mcpCredentialsPortableStore', true)
 const hideDockIcon = toggle('hideDockIcon', false)
 // [MOC-277] superpowers 强约束插件开关:默认态由后端算(已自装 superpowers → 默认关,避免双装),
@@ -714,6 +715,9 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
       </SettingsRow>
       <SettingsRow :title="t('settings.showGrayProviders')" :description="t('settings.showGrayProvidersHint')">
         <AppSwitch v-model="showGrayProviders" />
+      </SettingsRow>
+      <SettingsRow :title="t('settings.runtimeDebugMode')" :description="t('settings.runtimeDebugModeHint')">
+        <AppSwitch v-model="runtimeDebugMode" />
       </SettingsRow>
       <SettingsRow
         v-if="showGrayProviders"

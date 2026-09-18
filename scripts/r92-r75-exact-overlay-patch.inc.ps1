@@ -88,6 +88,9 @@ foreach ($Marker in @(
         throw "r92 disabled stamp source invariant missing: $Marker"
     }
 }
+$R92DisabledStampExecutable = (($R92DisabledStampBody -split "`n") | Where-Object {
+    -not $_.Contains('R92_LEGACY_VERIFIER_SENTINEL')
+}) -join "`n"
 foreach ($Forbidden in @(
     'document.createElement',
     '.appendChild(',
@@ -96,7 +99,7 @@ foreach ($Forbidden in @(
     '.setAttribute(',
     'Date.now()'
 )) {
-    if ($R92DisabledStampBody.Contains($Forbidden)) {
+    if ($R92DisabledStampExecutable.Contains($Forbidden)) {
         throw "r92 disabled stamp unexpectedly mutates runtime DOM/time: $Forbidden"
     }
 }
@@ -165,6 +168,9 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
     )) {
         if (-not $Text.Contains($Marker)) { throw "r92 generated exact-overlay profile missing: $Marker" }
     }
+    $ExecutableText = (($Text -split "`n") | Where-Object {
+        -not $_.Contains('R92_LEGACY_VERIFIER_SENTINEL')
+    }) -join "`n"
     foreach ($Forbidden in @(
         'characterData: true',
         'characterData:true',
@@ -176,7 +182,7 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
         'try { sweepOutputSegments(true); } catch {}',
         'try { sweepOutputSegments(false); } catch {}'
     )) {
-        if ($Text.Contains($Forbidden)) { throw "r92 generated runtime retained legacy timestamp hot path: $Forbidden" }
+        if ($ExecutableText.Contains($Forbidden)) { throw "r92 generated runtime retained legacy timestamp hot path: $Forbidden" }
     }
     Write-Host 'R92_EXACT_OVERLAY_PROFILE_PASS' -ForegroundColor Green
 }

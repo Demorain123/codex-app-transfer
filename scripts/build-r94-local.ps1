@@ -135,7 +135,7 @@ if (-not $DisabledStampJs.Contains('R94_LEGACY_TIMESTAMP_STAMP_DISABLED')) {
 foreach ($Marker in @(
     'R94_R78_EXACT_OVERLAY_FINAL_OWNER',
     'R94_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
-    'R94_STATUS_OVERLAY_FINALIZER_BOUND_TO_R75_PASS',
+    'R94_COMPOSER_STATUS_INSIDE_FINALIZER_BOUND_TO_R75_PASS',
     'R94_TURN_NOTIFICATION_FINALIZER_BOUND_TO_R75_PASS',
     'r94 exact-only timestamp overlay final owner',
     'r94 live-only timestamp observer'
@@ -167,7 +167,6 @@ foreach ($Marker in @(
     'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
     'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
-    'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS'
 )) {
     if (-not $ComposerStatusFinalizer.Contains($Marker)) { throw "r94 composer status finalizer contract missing: $Marker" }

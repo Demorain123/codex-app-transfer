@@ -90,6 +90,8 @@ foreach ($Marker in @(
     'window.__casR94TurnCapability = capability;',
     'function r94CreateCapability() {',
     'function latestForThread(threadId) {',
+    'const latestKeyByThread = new Map();',
+    'capabilitySequence',
     'usageFingerprint',
     'lifecycleFingerprint',
     'function r94NativeExactForTurn(turn) {',

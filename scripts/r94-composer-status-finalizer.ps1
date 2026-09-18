@@ -35,6 +35,37 @@ foreach ($Forbidden in @(
     }
 }
 
+$R94ComposerSurfaceCompat = @'
+  function r93ComposerSurfaceFor(composer) {
+    // R94_COMPOSER_SURFACE_COMPAT_RUNTIME
+    // r89's canonical composer may be the <form> or a data-testid composer
+    // wrapper on newer Codex builds. Treat that canonical visible root as the
+    // rounded composer surface instead of requiring the older
+    // .composer-surface-chrome/data-codex-composer markers.
+    if (!(composer instanceof Element)) return null;
+    const selector = '[data-codex-composer-root],[data-thread-find-composer="true"],[data-codex-composer="true"],[data-testid*="composer"],.composer-surface-chrome,form';
+    if (composer.matches(selector) && isVisible(composer)) return composer;
+
+    const nested = composer.querySelector(selector);
+    if (nested instanceof Element && isVisible(nested)) return nested;
+
+    const editable = composer.matches('.ProseMirror,[role="textbox"],textarea')
+      ? composer
+      : composer.querySelector('.ProseMirror,[role="textbox"],textarea');
+    if (editable instanceof Element) {
+      const semantic = editable.closest(selector);
+      if (semantic instanceof Element && isVisible(semantic)) return semantic;
+      // The canonical composer supplied by r89 can intentionally fall back to
+      // editable.parentElement when Codex removes semantic wrapper attrs.
+      if (composer.contains(editable) && isVisible(composer)) return composer;
+      const parent = editable.parentElement;
+      if (parent instanceof Element && isVisible(parent)) return parent;
+    }
+    return isVisible(composer) ? composer : null;
+  }
+'@
+$Patched = Replace-BlockRequired $Patched '  function r93ComposerSurfaceFor(composer) {' '  function r93MountStatusBar(bar, composer) {' $R94ComposerSurfaceCompat 'r94 current Codex composer surface compatibility'
+
 $R94NoNativeUsage = @'
   function readNativeUsage() {
     // R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME
@@ -64,6 +95,8 @@ foreach ($Marker in @(
     'function r93MountStatusBar(bar, composer) {',
     'surface.insertBefore(bar, inputWrap);',
     "bar.setAttribute('data-cas-status-inside-composer','true');",
+    'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
+    "[data-testid*=\"composer\"]",
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
 )) {

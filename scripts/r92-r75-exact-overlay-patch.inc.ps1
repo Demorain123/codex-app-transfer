@@ -307,11 +307,22 @@ $PatchedR77 = Replace-R92NormalizedRequired `
     $R92R77ExactTimestampApply `
     'make r77 timestamp recovery yield to r92 exact overlay'
 
-$PatchedR77 = Replace-R92NormalizedRequired `
-    $PatchedR77 `
-    "    'assistantRootForAny(node)'," `
-    '    $R77TimestampRootMarker,' `
-    'make r77 verification accept exact-overlay timestamp owner'
+$R92R77LegacyVerifyMarker = "    'assistantRootForAny(node)',"
+$R92R77CommonVerifyMarker = "    'function assistantRootsNow() {',"
+if ($PatchedR77.Contains($R92R77LegacyVerifyMarker)) {
+    $PatchedR77 = $PatchedR77.Replace(
+        $R92R77LegacyVerifyMarker,
+        '    $R77TimestampRootMarker,'
+    )
+} elseif ($PatchedR77.Contains($R92R77CommonVerifyMarker)) {
+    # r87 already normalizes the old legacy-only marker to this common marker.
+    $PatchedR77 = $PatchedR77.Replace(
+        $R92R77CommonVerifyMarker,
+        '    $R77TimestampRootMarker,'
+    )
+} else {
+    throw 'r92 could not locate r77 timestamp verification marker'
+}
 
 foreach ($Marker in @(
     "if (`$OriginalR75.Contains('R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME')) {",

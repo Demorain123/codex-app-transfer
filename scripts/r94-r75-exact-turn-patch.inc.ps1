@@ -132,7 +132,7 @@ if ($R94ObserverPatchTargetName -ne '.r94-r78-observer-patch.generated.inc.ps1')
 foreach ($Marker in @(
     'R94_R78_EXACT_OVERLAY_FINAL_OWNER',
     'R94_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
-    'R94_STATUS_OVERLAY_FINALIZER_BOUND_TO_R75_PASS',
+    'R94_COMPOSER_STATUS_INSIDE_FINALIZER_BOUND_TO_R75_PASS',
     'r94 exact-only timestamp overlay final owner'
 )) {
     if (-not $R94FinalObserverPatchText.Contains($Marker)) {

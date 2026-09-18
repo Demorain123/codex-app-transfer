@@ -204,10 +204,21 @@
       const started = Number(turn.startedAt ?? turn.started_at);
       const completed = Number(turn.completedAt ?? turn.completed_at);
       const duration = Number(turn.durationMs ?? turn.duration_ms);
-      current.status = String(turn.status || current.status || '') || null;
-      current.startedAt = Number.isFinite(started) ? started : current.startedAt;
-      current.completedAt = Number.isFinite(completed) ? completed : current.completedAt;
-      current.durationMs = Number.isFinite(duration) ? duration : current.durationMs;
+      const nextStatus = String(turn.status || current.status || '') || null;
+      const nextStartedAt = Number.isFinite(started) ? started : current.startedAt;
+      const nextCompletedAt = Number.isFinite(completed) ? completed : current.completedAt;
+      const nextDurationMs = Number.isFinite(duration) ? duration : current.durationMs;
+      const lifecycleFingerprint = [
+        nextStatus, nextStartedAt, nextCompletedAt, nextDurationMs,
+      ].join('|');
+
+      if (current.lifecycleFingerprint === lifecycleFingerprint) return current;
+
+      current.status = nextStatus;
+      current.startedAt = nextStartedAt;
+      current.completedAt = nextCompletedAt;
+      current.durationMs = nextDurationMs;
+      current.lifecycleFingerprint = lifecycleFingerprint;
       if (Number.isFinite(completed) && completed > 0) {
         const epoch = completed > 10000000000 ? completed : completed * 1000;
         current.timestamp = {

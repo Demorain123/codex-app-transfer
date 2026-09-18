@@ -158,7 +158,9 @@ foreach ($Marker in @(
     'R94_STATUS_OVERLAY_FINALIZER',
     'R94_STATUS_OVERLAY_FINAL_OWNER_PASS',
     'R94_NATIVE_COMPOSER_DOM_READONLY_PASS',
-    'R94_STATUS_SHARED_RAF_PASS'
+    'R94_STATUS_SHARED_RAF_PASS',
+    'R94_NO_NATIVE_USAGE_FULL_DOM_SCAN_PASS',
+    'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS'
 )) {
     if (-not $StatusOverlayFinalizer.Contains($Marker)) { throw "r94 status overlay finalizer contract missing: $Marker" }
 }

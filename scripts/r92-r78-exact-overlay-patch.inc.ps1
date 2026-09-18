@@ -44,8 +44,9 @@ foreach ($Marker in @(
     }
 }
 
-# r92 live-only timestamp observer — compatibility phrase for the inherited r86
-# verifier. The actual observer above is exact-only and visible-turn bounded.
+# r92 live-only timestamp observer — compatibility phrase for the inherited r86 verifier.
+# r93 live-only timestamp observer — same compatibility phrase after r90->r93 retargeting.
+# The actual observer above is exact-only and visible-turn bounded.
 Write-Host 'R92_R78_EXACT_OVERLAY_FINAL_OWNER_PASS' -ForegroundColor Green
 
 # R93 composer/status correctness is finalized inside r75 after all r74/r75

@@ -40,12 +40,14 @@ function Replace-R92BlockRequired(
 
 $R92OverlaySourcePath = Join-Path $PSScriptRoot 'r92-exact-timestamp-overlay.js'
 $R92DisabledStampPath = Join-Path $PSScriptRoot 'r92-timestamp-stamp-disabled.js'
-foreach ($Path in @($R92OverlaySourcePath,$R92DisabledStampPath)) {
+$R92FinalObserverPatchPath = Join-Path $PSScriptRoot 'r92-r78-exact-overlay-patch.inc.ps1'
+foreach ($Path in @($R92OverlaySourcePath,$R92DisabledStampPath,$R92FinalObserverPatchPath)) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r92 exact timestamp source missing: $Path" }
 }
 
 $R92OverlayBody = Normalize-R92Eol ([System.IO.File]::ReadAllText($R92OverlaySourcePath))
 $R92DisabledStampBody = Normalize-R92Eol ([System.IO.File]::ReadAllText($R92DisabledStampPath))
+$R92FinalObserverPatchText = Normalize-R92Eol ([System.IO.File]::ReadAllText($R92FinalObserverPatchPath))
 
 foreach ($Marker in @(
     'R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
@@ -120,6 +122,30 @@ $StampBody = $R92DisabledStampBody
 if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($StampSource))) -ne $R92DisabledStampBody) {
     throw 'r92 disabled stamp helper round-trip mismatch'
 }
+
+$R92ObserverPatchTargetName = [System.IO.Path]::GetFileName([string]$ObserverPatchInclude)
+if ($R92ObserverPatchTargetName -ne '.r92-r78-observer-patch.generated.inc.ps1') {
+    throw "r92 refuses non-isolated observer-patch owner: $R92ObserverPatchTargetName"
+}
+foreach ($Marker in @(
+    'R92_R78_EXACT_OVERLAY_FINAL_OWNER',
+    'R92_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
+    'r92 exact-only timestamp overlay final owner'
+)) {
+    if (-not $R92FinalObserverPatchText.Contains($Marker)) {
+        throw "r92 final observer patch source invariant missing: $Marker"
+    }
+}
+[System.IO.File]::WriteAllText(
+    $ObserverPatchInclude,
+    $R92FinalObserverPatchText,
+    [System.Text.UTF8Encoding]::new($false)
+)
+$ObserverPatchText = $R92FinalObserverPatchText
+if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($ObserverPatchInclude))) -ne $R92FinalObserverPatchText) {
+    throw 'r92 final observer-patch helper round-trip mismatch'
+}
+Write-Host 'R92_FINAL_R78_OBSERVER_PATCH_INSTALLED_PASS' -ForegroundColor Green
 
 $R92ObserverTargetName = [System.IO.Path]::GetFileName([string]$ObserverSource)
 if ($R92ObserverTargetName -ne '.r92-timestamp-observer.generated.js') {

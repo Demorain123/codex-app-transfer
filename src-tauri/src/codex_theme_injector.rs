@@ -1171,7 +1171,15 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const runtimeRevisionNumber = revisionNumber(runtime);
     const exactTurn = !!window.__casR94TurnCapability;
     const statusInsideComposer = !!document.querySelector('[data-cas-status-inside-composer="true"]');
+    const statusBars = document.querySelectorAll('[data-cas-status-inside-composer="true"]').length;
+    const composerCandidates = document.querySelectorAll(
+      '[data-codex-composer-root],[data-thread-find-composer="true"],[data-codex-composer="true"],[data-testid*="composer"],.composer-surface-chrome,form'
+    ).length;
+    const editables = document.querySelectorAll('.ProseMirror[contenteditable="true"],[role="textbox"][contenteditable="true"],textarea').length;
     const timestampOverlay = !!document.getElementById('cas-r94-timestamp-overlay');
+    const ts = window.__casR94TimestampDiagnostics && typeof window.__casR94TimestampDiagnostics === 'object'
+      ? window.__casR94TimestampDiagnostics
+      : {};
     const noLagging = META.launchMode === 'no-lagging';
 
     let state = noLagging ? 'missing' : 'baseline';
@@ -1205,7 +1213,16 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       runtime,
       exactTurn,
       statusInsideComposer,
+      statusBars,
+      composerCandidates,
+      editables,
       timestampOverlay,
+      tsObserved: Number(ts.observedTurns) || 0,
+      tsVisible: Number(ts.visibleTurns) || 0,
+      tsBadges: Number(ts.badges) || 0,
+      tsCache: Number(ts.cacheSize) || 0,
+      tsSuppressed: Number(ts.nativeTimestampSuppressed) || 0,
+      tsSource: String(ts.lastSource || ''),
     };
   };
 
@@ -1235,6 +1252,12 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · ExactTurn=' + (s.exactTurn ? 'ON' : 'OFF') +
         ' · Status@Composer=' + (s.statusInsideComposer ? 'YES' : 'NO') +
         ' · TSOverlay=' + (s.timestampOverlay ? 'ON' : 'OFF') + '</div>',
+      '<div>Composer cand=' + s.composerCandidates +
+        ' · editables=' + s.editables +
+        ' · statusBars=' + s.statusBars +
+        ' · TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
+        ' · nativeSupp=' + s.tsSuppressed +
+        (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
       (s.state === 'legacy' || s.state === 'mismatch' || s.state === 'missing')
         ? '<div style="margin-top:4px;font-weight:800">EXPECTED ' +
           escapeHtml(META.transferRevision) + ' · OBSERVED ' + escapeHtml(s.runtime) + '</div>'
@@ -1884,6 +1907,8 @@ mod tests {
         assert!(script.contains("__casR94TurnCapability"));
         assert!(script.contains("data-cas-status-inside-composer"));
         assert!(script.contains("cas-r94-timestamp-overlay"));
+        assert!(script.contains("__casR94TimestampDiagnostics"));
+        assert!(script.contains("TS obs/vis/badge/cache"));
         assert!(script.contains("launchMode"));
         assert!(!script.contains("__CAS_DEBUG_META__"));
     }

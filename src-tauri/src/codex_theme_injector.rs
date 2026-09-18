@@ -1194,7 +1194,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         runtimeRevisionNumber != null &&
         expectedRevisionNumber != null &&
         runtimeRevisionNumber === expectedRevisionNumber &&
-        exactTurn
+        exactTurn &&
+        statusInsideComposer &&
+        timestampOverlay
       ) {
         state = 'match';
       } else if (

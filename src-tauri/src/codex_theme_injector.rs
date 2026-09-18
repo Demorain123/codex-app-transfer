@@ -29,6 +29,13 @@ use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
 use crate::codex_plugin_unlocker::current_cdp_url;
 
+// CAS-R94-RUNTIME-DEBUG-IDENTITY
+// Keep these explicit instead of deriving from the historical source baseline.
+// They are screenshot evidence for the r94 debug build, not protocol behavior.
+const RUNTIME_DEBUG_PROTOCOL: &str = "DBG94-1";
+const RUNTIME_DEBUG_TRANSFER_REVISION: &str = "r94";
+const RUNTIME_DEBUG_TRANSFER_VERSION: &str = "2.4.5+94";
+
 /// 主题列表 — 字符串 ID 跟 `src-tauri/resources/themes/<id>/` 目录名匹配。
 /// **不变量**:每条 ID 都对应一组 (bg, mascot?) 资源 + 中英显示名(`ThemeMeta.display_name_{zh,en}`,
 /// Rust hardcoded,**不**走 frontend `i18n.js` keys)。
@@ -1099,6 +1106,204 @@ async fn run_clear() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     write.send(WsMessage::Text(msg.into())).await?;
     drain_until_response(&mut read, 1).await?;
+
+    let _ = write.close().await;
+    Ok(())
+}
+
+
+const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
+(() => {
+  const META = __CAS_DEBUG_META__;
+  const ROOT_ID = 'cas-transfer-runtime-debug-banner';
+  const STATE_KEY = '__casTransferRuntimeDebug';
+
+  try {
+    const previous = window[STATE_KEY];
+    if (previous && previous.timer) clearInterval(previous.timer);
+  } catch {}
+
+  const revisionNumber = (value) => {
+    const text = String(value || '');
+    const match = text.match(/\br(\d+)\b/i) || text.match(/\+(\d+)(?:\D|$)/);
+    return match ? Number(match[1]) : null;
+  };
+
+  const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const ensureRoot = () => {
+    let root = document.getElementById(ROOT_ID);
+    if (root) return root;
+    root = document.createElement('aside');
+    root.id = ROOT_ID;
+    root.setAttribute('data-cas-runtime-debug', META.protocol);
+    root.style.cssText = [
+      'position:fixed',
+      'top:12px',
+      'right:12px',
+      'z-index:2147483647',
+      'min-width:350px',
+      'max-width:min(560px,calc(100vw - 24px))',
+      'box-sizing:border-box',
+      'padding:9px 11px',
+      'border:2px solid #d97706',
+      'border-radius:10px',
+      'background:rgba(17,24,39,.94)',
+      'color:#f9fafb',
+      'box-shadow:0 10px 30px rgba(0,0,0,.28)',
+      'font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'white-space:normal',
+      'pointer-events:none',
+      'user-select:text'
+    ].join(';');
+    (document.body || document.documentElement).appendChild(root);
+    return root;
+  };
+
+  const snapshot = () => {
+    const telemetry = window.__casOutputTelemetryRuntime;
+    const runtime = telemetry && telemetry.version ? String(telemetry.version) : 'missing';
+    const expectedRevisionNumber = revisionNumber(META.transferRevision);
+    const runtimeRevisionNumber = revisionNumber(runtime);
+    const exactTurn = !!window.__casR94TurnCapability;
+    const statusInsideComposer = !!document.querySelector('[data-cas-status-inside-composer="true"]');
+    const timestampOverlay = !!document.getElementById('cas-r94-timestamp-overlay');
+    const noLagging = META.launchMode === 'no-lagging';
+
+    let state = noLagging ? 'missing' : 'baseline';
+    if (noLagging && runtime !== 'missing') {
+      if (
+        runtimeRevisionNumber != null &&
+        expectedRevisionNumber != null &&
+        runtimeRevisionNumber < expectedRevisionNumber
+      ) {
+        state = 'legacy';
+      } else if (
+        runtimeRevisionNumber != null &&
+        expectedRevisionNumber != null &&
+        runtimeRevisionNumber === expectedRevisionNumber &&
+        exactTurn
+      ) {
+        state = 'match';
+      } else if (
+        runtimeRevisionNumber != null &&
+        expectedRevisionNumber != null &&
+        runtimeRevisionNumber === expectedRevisionNumber
+      ) {
+        state = 'partial';
+      } else {
+        state = 'mismatch';
+      }
+    }
+
+    return {
+      state,
+      runtime,
+      exactTurn,
+      statusInsideComposer,
+      timestampOverlay,
+    };
+  };
+
+  const palette = {
+    match: ['#16a34a', 'rgba(20,83,45,.96)'],
+    baseline: ['#2563eb', 'rgba(30,64,175,.95)'],
+    partial: ['#d97706', 'rgba(120,53,15,.96)'],
+    legacy: ['#dc2626', 'rgba(127,29,29,.96)'],
+    mismatch: ['#dc2626', 'rgba(127,29,29,.96)'],
+    missing: ['#dc2626', 'rgba(127,29,29,.96)'],
+  };
+
+  const render = () => {
+    const root = ensureRoot();
+    const s = snapshot();
+    const colors = palette[s.state] || palette.missing;
+    root.style.borderColor = colors[0];
+    root.style.background = colors[1];
+    root.setAttribute('data-cas-runtime-debug-state', s.state);
+    root.innerHTML = [
+      '<div style="font-size:12px;font-weight:800;letter-spacing:.03em">TRANSFER DEBUG · ' +
+        escapeHtml(s.state.toUpperCase()) + ' · ' + escapeHtml(META.protocol) + '</div>',
+      '<div style="margin-top:4px">Transfer ' + escapeHtml(META.transferRevision) +
+        ' · v' + escapeHtml(META.transferVersion) +
+        ' · launch=' + escapeHtml(META.launchMode) + '</div>',
+      '<div>Renderer runtime=' + escapeHtml(s.runtime) +
+        ' · ExactTurn=' + (s.exactTurn ? 'ON' : 'OFF') +
+        ' · Status@Composer=' + (s.statusInsideComposer ? 'YES' : 'NO') +
+        ' · TSOverlay=' + (s.timestampOverlay ? 'ON' : 'OFF') + '</div>',
+      (s.state === 'legacy' || s.state === 'mismatch' || s.state === 'missing')
+        ? '<div style="margin-top:4px;font-weight:800">EXPECTED ' +
+          escapeHtml(META.transferRevision) + ' · OBSERVED ' + escapeHtml(s.runtime) + '</div>'
+        : ''
+    ].join('');
+  };
+
+  render();
+  const timer = setInterval(render, 1000);
+  window[STATE_KEY] = {
+    protocol: META.protocol,
+    meta: META,
+    timer,
+    render,
+  };
+  return { ok: true, protocol: META.protocol };
+})()
+"#;
+
+fn build_runtime_debug_script(launch_mode: &str) -> String {
+    let meta = json!({
+        "protocol": RUNTIME_DEBUG_PROTOCOL,
+        "transferRevision": RUNTIME_DEBUG_TRANSFER_REVISION,
+        "transferVersion": RUNTIME_DEBUG_TRANSFER_VERSION,
+        "launchMode": launch_mode,
+    })
+    .to_string();
+    RUNTIME_DEBUG_SCRIPT_TEMPLATE.replace("__CAS_DEBUG_META__", &meta)
+}
+
+/// Debug-only visible identity layer for the Codex renderer.
+///
+/// This is intentionally separate from the r94 telemetry implementation:
+/// it observes the runtime markers that are actually present in the page and
+/// prints MATCH / LEGACY / MISSING evidence for screenshots. It never edits
+/// Codex history, prompts, model traffic or provider state.
+pub(crate) async fn apply_runtime_debug_banner(launch_mode: &str) -> Result<(), String> {
+    let script = build_runtime_debug_script(launch_mode);
+    run_runtime_debug_script(&script)
+        .await
+        .map_err(|e| format!("runtime debug banner injection failed: {e}"))
+}
+
+async fn run_runtime_debug_script(
+    script: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let ws_url = locate_main_window_ws().await?;
+    let (ws_stream, _) = connect_async(&ws_url).await?;
+    let (mut write, mut read) = ws_stream.split();
+
+    let (msg, _) = make_msg(1, "Page.enable", json!({}));
+    write.send(WsMessage::Text(msg.into())).await?;
+    drain_until_response(&mut read, 1).await?;
+
+    let (msg, _) = make_msg(
+        2,
+        "Page.addScriptToEvaluateOnNewDocument",
+        json!({ "source": script }),
+    );
+    write.send(WsMessage::Text(msg.into())).await?;
+    drain_until_response(&mut read, 2).await?;
+
+    let (msg, _) = make_msg(
+        3,
+        "Runtime.evaluate",
+        json!({ "expression": script, "returnByValue": true }),
+    );
+    write.send(WsMessage::Text(msg.into())).await?;
+    drain_until_response(&mut read, 3).await?;
 
     let _ = write.close().await;
     Ok(())

@@ -96,7 +96,7 @@ foreach ($Marker in @(
     'surface.insertBefore(bar, inputWrap);',
     "bar.setAttribute('data-cas-status-inside-composer','true');",
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
-    "[data-testid*=\"composer\"]",
+    '[data-testid*="composer"]',
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
 )) {

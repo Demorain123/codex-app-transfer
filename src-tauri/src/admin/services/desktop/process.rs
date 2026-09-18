@@ -776,6 +776,16 @@ fn should_attach_debug_port() -> Vec<String> {
         .and_then(|s| s.get("codexStashEnabled"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // CAS-R94-RUNTIME-DEBUG-CDP-GATE
+    // Explicit debug mode is another legitimate local CDP consumer. It is off by
+    // default and only exists to inject screenshot-grade runtime identity into the
+    // Codex renderer after a Transfer-managed launch/restart.
+    let runtime_debug_enabled = cfg
+        .as_ref()
+        .and_then(|c| c.get("settings"))
+        .and_then(|s| s.get("runtimeDebugMode"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     // [MOC-323 / code-review C1] Chat 模型 relabel daemon 也走 CDP。chatCustomModelEnabled
     // 默认开、其它 CDP 功能默认关 → 不含它则「只开 chat」时 CDP_PORT=0、daemon 静默跳过、
     // picker 永远 GPT 名。只在**确有 proxy 路由的活动 provider**(全新安装/无 provider → false,
@@ -796,6 +806,7 @@ fn should_attach_debug_port() -> Vec<String> {
         && !quota_enabled
         && !stash_enabled
         && !chat_needs_port
+        && !runtime_debug_enabled
     {
         return vec![];
     }

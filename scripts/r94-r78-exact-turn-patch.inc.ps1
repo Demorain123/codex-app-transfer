@@ -100,7 +100,25 @@ $R94StatusOverlayInjection = @'
     if (-not (Test-Path -LiteralPath $R94StatusOverlayFinalizerPath)) { throw "r94 status overlay finalizer missing at runtime build owner: $R94StatusOverlayFinalizerPath" }
     . $R94StatusOverlayFinalizerPath
 '@
-$R93StatusReplacement = $R93StatusInjection + [char]10 + $R94StatusOverlayInjection + [char]10 + $R93AssertNeedle
+$R94TurnNotificationFinalizerPath = Join-Path $PSScriptRoot 'r94-turn-notification-finalizer.ps1'
+if (-not (Test-Path -LiteralPath $R94TurnNotificationFinalizerPath)) {
+    throw "r94 turn notification finalizer missing: $R94TurnNotificationFinalizerPath"
+}
+$R94TurnNotificationFinalizerText = [System.IO.File]::ReadAllText($R94TurnNotificationFinalizerPath)
+foreach ($Marker in @(
+    'R94_TURN_NOTIFICATION_FINALIZER',
+    'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS'
+)) {
+    if (-not $R94TurnNotificationFinalizerText.Contains($Marker)) {
+        throw "r94 turn notification finalizer source missing marker: $Marker"
+    }
+}
+$R94TurnNotificationInjection = @'
+    $R94TurnNotificationFinalizerPath = Join-Path $PSScriptRoot 'r94-turn-notification-finalizer.ps1'
+    if (-not (Test-Path -LiteralPath $R94TurnNotificationFinalizerPath)) { throw "r94 turn notification finalizer missing at runtime build owner: $R94TurnNotificationFinalizerPath" }
+    . $R94TurnNotificationFinalizerPath
+'@
+$R93StatusReplacement = $R93StatusInjection + [char]10 + $R94StatusOverlayInjection + [char]10 + $R94TurnNotificationInjection + [char]10 + $R93AssertNeedle
 if (-not $PatchedR75.Contains($R93AssertNeedle)) {
     throw 'r93 could not locate final r75 status injection point'
 }
@@ -110,4 +128,5 @@ if (-not $PatchedR75.Contains('R93StatusFinalizerPath')) {
 }
 Write-Host 'R93_STATUS_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
 Write-Host 'R94_STATUS_OVERLAY_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
+Write-Host 'R94_TURN_NOTIFICATION_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
 

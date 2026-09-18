@@ -703,6 +703,9 @@ export default {
     "⚠️ 存在封号风险，开启并使用这些提供商的后果由你自行承担。",
   "settings.showGrayProvidersHint":
     "默认隐藏Gemini CLI、Antigravity 等实验性提供商。",
+  "settings.runtimeDebugMode": "Runtime Debug 模式",
+  "settings.runtimeDebugModeHint":
+    "开启后 Transfer 顶部会显示醒目的版本/运行时诊断条；下一次从 Transfer 启动或重启 Codex 时，还会打开本地 CDP 并在 Codex 界面注入 DEBUG 版本条，方便截图直接判断新旧 runtime。默认关闭。",
   "settings.antigravitySuperpowers": "Antigravity 强约束(superpowers)",
   "settings.antigravitySuperpowersHint":
     "为 Antigravity 自动挂载 superpowers 强约束插件,约束模型不超出指令范围(需 relaunch Codex 生效)。",

@@ -237,6 +237,8 @@ Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Gree
 $RuntimeDebugContracts = @(
     @{ Text = $RuntimeDebugBannerText; Marker = 'CAS-R94-RUNTIME-DEBUG-BANNER-V1' },
     @{ Text = $RuntimeDebugBannerText; Marker = 'DBG94-1' },
+    @{ Text = $RuntimeDebugBannerText; Marker = "EXPECTED_TRANSFER_REVISION = 'r94'" },
+    @{ Text = $RuntimeDebugBannerText; Marker = "EXPECTED_TRANSFER_VERSION = '2.4.5+94'" },
     @{ Text = $RuntimeDebugBannerText; Marker = 'runtimeDebugMode' },
     @{ Text = $AppLayoutText; Marker = 'RuntimeDebugBanner' },
     @{ Text = $SettingsPageText; Marker = "toggle('runtimeDebugMode', false)" },

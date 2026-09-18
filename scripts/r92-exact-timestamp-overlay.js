@@ -234,16 +234,21 @@
     return badge;
   }
 
+  function r92AnchorUsable(node) {
+    if (!(node instanceof Element) || !node.isConnected) return false;
+    try { return node.getClientRects().length > 0; } catch { return true; }
+  }
+
   function r92AnchorForTurn(turn, sourceElement) {
     if (!(turn instanceof Element)) return null;
     if (sourceElement instanceof Element && sourceElement.isConnected) {
       const row = sourceElement.parentElement;
-      if (row instanceof Element) return { node: row, mode: 'action-row' };
-      return { node: sourceElement, mode: 'action-row' };
+      if (r92AnchorUsable(row)) return { node: row, mode: 'action-row' };
+      if (r92AnchorUsable(sourceElement)) return { node: sourceElement, mode: 'action-row' };
     }
     const final = turn.querySelector(R92_FINAL_SELECTOR);
-    if (final instanceof Element) return { node: final, mode: 'final' };
-    return { node: turn, mode: 'final' };
+    if (r92AnchorUsable(final)) return { node: final, mode: 'final' };
+    return r92AnchorUsable(turn) ? { node: turn, mode: 'final' } : null;
   }
 
   function installOutputObserver() {
@@ -488,6 +493,13 @@
       let removed = false;
       for (const record of records) {
         if (record.type !== 'childList') continue;
+        const mutationTarget = record.target instanceof Element
+          ? record.target
+          : record.target && record.target.parentElement;
+        if (mutationTarget instanceof Element &&
+            (mutationTarget.id === R92_OVERLAY_ID || mutationTarget.closest('#' + R92_OVERLAY_ID))) {
+          continue;
+        }
         if (record.removedNodes && record.removedNodes.length) removed = true;
         for (const added of record.addedNodes || []) {
           const element = added instanceof Element ? added : added && added.parentElement;

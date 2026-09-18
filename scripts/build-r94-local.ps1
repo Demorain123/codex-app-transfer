@@ -15,7 +15,7 @@ $R94FinalObserverPatch = Join-Path $PSScriptRoot 'r94-r78-exact-turn-patch.inc.p
 $R94TurnOverlayJs = Join-Path $PSScriptRoot 'r94-exact-turn-overlay.js'
 $R94DisabledStampJs = Join-Path $PSScriptRoot 'r94-timestamp-stamp-disabled.js'
 $R93StatusFinalizer = Join-Path $PSScriptRoot 'r93-status-finalizer.ps1'
-$R94StatusOverlayFinalizer = Join-Path $PSScriptRoot 'r94-status-overlay-finalizer.ps1'
+$R94ComposerStatusFinalizer = Join-Path $PSScriptRoot 'r94-composer-status-finalizer.ps1'
 $R94TurnNotificationFinalizer = Join-Path $PSScriptRoot 'r94-turn-notification-finalizer.ps1'
 
 $TempBuilder = Join-Path $PSScriptRoot '.build-r94-from-r90.generated.ps1'
@@ -32,7 +32,7 @@ foreach ($Path in @(
     $R94TurnOverlayJs,
     $R94DisabledStampJs,
     $R93StatusFinalizer,
-    $R94StatusOverlayFinalizer,
+    $R94ComposerStatusFinalizer,
     $R94TurnNotificationFinalizer
 )) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r94 required source missing: $Path" }
@@ -81,7 +81,7 @@ $FinalObserverPatch = Normalize-Eol ([System.IO.File]::ReadAllText($R94FinalObse
 $OverlayJs = Normalize-Eol ([System.IO.File]::ReadAllText($R94TurnOverlayJs))
 $DisabledStampJs = Normalize-Eol ([System.IO.File]::ReadAllText($R94DisabledStampJs))
 $StatusFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R93StatusFinalizer))
-$StatusOverlayFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R94StatusOverlayFinalizer))
+$ComposerStatusFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R94ComposerStatusFinalizer))
 $TurnNotificationFinalizer = Normalize-Eol ([System.IO.File]::ReadAllText($R94TurnNotificationFinalizer))
 
 foreach ($Marker in @(
@@ -163,14 +163,14 @@ foreach ($Marker in @(
 Assert-PowerShellParses $StatusFinalizer 'r93 status finalizer'
 Write-Host 'R93_STATUS_FINALIZER_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
-    'R94_STATUS_OVERLAY_FINALIZER',
-    'R94_STATUS_OVERLAY_FINAL_OWNER_PASS',
-    'R94_NATIVE_COMPOSER_DOM_READONLY_PASS',
-    'R94_STATUS_SHARED_RAF_PASS',
-    'R94_NO_NATIVE_USAGE_FULL_DOM_SCAN_PASS',
+    'R94_COMPOSER_STATUS_INSIDE_FINALIZER',
+    'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
+    'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
+    'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
+    'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS'
 )) {
-    if (-not $StatusOverlayFinalizer.Contains($Marker)) { throw "r94 status overlay finalizer contract missing: $Marker" }
+    if (-not $ComposerStatusFinalizer.Contains($Marker)) { throw "r94 composer status finalizer contract missing: $Marker" }
 }
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
@@ -182,7 +182,7 @@ foreach ($Marker in @(
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }
 }
-Assert-PowerShellParses $StatusOverlayFinalizer 'r94 status overlay finalizer'
+Assert-PowerShellParses $ComposerStatusFinalizer 'r94 composer status finalizer'
 Assert-PowerShellParses $TurnNotificationFinalizer 'r94 turn notification finalizer'
 Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Green
 
@@ -319,7 +319,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - native Codex turn/action-row DOM is read-only; labels live in a Transfer-owned overlay root'
         Write-Host '  - mutation observation is childList-only; visible-turn work is IntersectionObserver bounded'
         Write-Host '  - no Date.now historical estimate, characterData stream observer, or periodic timestamp sweep survives'
-        Write-Host '  - status bar is Transfer-owned overlay positioned over the composer; native React children stay untouched'
+        Write-Host '  - status bar is one Transfer-owned child inside .composer-surface-chrome before the input wrapper; no detached viewport status overlay is used'
         Write-Host '  - native/global Usage polling cannot overwrite pane/local status counters or tok/s'
         Write-Host '  - exact TurnCapability accepts turn lifecycle + turn-scoped usage notifications when passively observed'
         Write-Host '  - r76 bounded rollout tail preserves task_started/turn_context/token_count/task_complete turn identity without whole-file parsing'
@@ -331,7 +331,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host 'R94_EXACT_TURN_RUNTIME_PASS' -ForegroundColor Green
         Write-Host '  - exact one-per-turn timestamp overlay is installed without native turn child mutation'
         Write-Host '  - legacy r74-r90 stamp path is inert'
-        Write-Host '  - composer status is a Transfer-owned overlay aligned inside the input surface; native/global speed is isolated'
+        Write-Host '  - composer status is mounted inside the rounded input surface as a single Transfer-owned row; native/global speed remains isolated'
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'
         Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
         Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'

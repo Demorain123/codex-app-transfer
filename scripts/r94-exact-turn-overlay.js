@@ -220,6 +220,11 @@
       exactByKey.delete(ids.key);
       exactByKey.set(ids.key, current);
       r94TrimCache(exactByKey);
+      try {
+        window.dispatchEvent(new CustomEvent('cas-r94-turn-capability-update', {
+          detail: { threadId: ids.threadId, turnId: ids.turnId, kind: 'lifecycle' },
+        }));
+      } catch {}
       return current;
     }
 
@@ -236,6 +241,11 @@
       exactByKey.delete(key);
       exactByKey.set(key, current);
       r94TrimCache(exactByKey);
+      try {
+        window.dispatchEvent(new CustomEvent('cas-r94-turn-capability-update', {
+          detail: { threadId: ids.threadId, turnId: ids.turnId, kind: 'usage' },
+        }));
+      } catch {}
       return current;
     }
 
@@ -678,6 +688,20 @@
       r94SyncDiagnostics();
     }
 
+    function r94HandleCapabilityUpdate(event) {
+      const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : null;
+      const turnId = r94NormalizeTurnId(detail && detail.turnId);
+      if (!turnId) return;
+      const threadId = String(detail && detail.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      for (const turn of Array.from(visibleTurns)) {
+        const ids = r94IdsForTurn(turn);
+        if (!ids || ids.turnId !== turnId) continue;
+        const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+        if (threadId && idsThread && threadId !== idsThread) continue;
+        r94RefreshTurn(turn);
+      }
+    }
+
     function r94HandleVisibility() {
       if (document.visibilityState === 'hidden') {
         overlayRoot.hidden = true;
@@ -713,6 +737,7 @@
       window.removeEventListener('resize', r94SchedulePosition);
       window.removeEventListener('scroll', r94SchedulePosition, true);
       document.removeEventListener('visibilitychange', r94HandleVisibility);
+      window.removeEventListener('cas-r94-turn-capability-update', r94HandleCapabilityUpdate);
       pendingRoots.clear();
       observedTurns.clear();
       visibleTurns.clear();
@@ -731,6 +756,7 @@
     window.addEventListener('resize', r94SchedulePosition, { passive: true });
     window.addEventListener('scroll', r94SchedulePosition, { passive: true, capture: true });
     document.addEventListener('visibilitychange', r94HandleVisibility);
+    window.addEventListener('cas-r94-turn-capability-update', r94HandleCapabilityUpdate);
 
     r94StartMutationObservation();
     r94ScanRoot(document.documentElement);

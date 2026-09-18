@@ -123,11 +123,15 @@ foreach ($Marker in @(
     'R94_R77_TIMESTAMP_ROOT_COMPAT_SUPERSEDED_PASS',
     'R94_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS',
     'R94_R77_TELEMETRY_PRESERVED_TIMESTAMP_SUPERSEDED_PASS',
+    'R94_COMPOSER_STATUS_INSIDE_FINALIZER_BOUND_TO_R75_PASS',
     "'.r94-timestamp-observer.generated.js'",
     'R94_FINAL_TIMESTAMP_MATERIALIZATION_PREFLIGHT_PASS',
     'R94_NATIVE_REACT_DOM_READONLY_PASS'
 )) {
     if (-not $ExactOverlayPatch.Contains($Marker)) { throw "r94 owner patch contract missing: $Marker" }
+}
+if ($ExactOverlayPatch.Contains('R94_STATUS_OVERLAY_FINALIZER_BOUND_TO_R75_PASS')) {
+    throw 'r94 exact owner patch retained stale detached-status binding marker'
 }
 if (-not $DisabledStampJs.Contains('R94_LEGACY_TIMESTAMP_STAMP_DISABLED')) {
     throw 'r94 disabled stamp marker missing'

@@ -115,7 +115,7 @@ async fn launch_normal(state: &AdminState, run_id: &str) -> Response {
     );
     match process::launch_codex_app_restart(std::env::consts::OS) {
         Ok(()) => {
-            desktop_handler::reinject_after_codex_restart().await;
+            desktop_handler::reinject_after_codex_restart_with_mode("normal").await;
             ab_log(
                 "INFO",
                 run_id,
@@ -218,7 +218,7 @@ pub async fn launch(State(state): State<AdminState>, Query(query): Query<LaunchQ
         no_micro::launch_with_args(&extra_args)
     }) {
         Ok(mut result) => {
-            desktop_handler::reinject_after_codex_restart().await;
+            desktop_handler::reinject_after_codex_restart_with_mode("no-lagging").await;
             let pid = result
                 .pointer("/launch/processId")
                 .and_then(Value::as_u64)

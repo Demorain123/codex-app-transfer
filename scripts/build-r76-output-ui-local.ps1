@@ -268,6 +268,9 @@ $MainProcessCollector = @'
         }
 
         const usageTurnId = normalizeTurnId(latestUsage.turnId);
+        // If the 2 MiB window began after turn_context/task_started, expand to
+        // the bounded 8 MiB window before giving up on exact turn identity.
+        if (!usageTurnId && length < stat.size) continue;
         const usageTurn = usageTurnId ? (turnMeta.get(usageTurnId) || null) : null;
         const activeTurn = activeTurnId ? (turnMeta.get(activeTurnId) || { turnId: activeTurnId }) : null;
         const envelope = {

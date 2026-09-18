@@ -161,6 +161,13 @@ foreach ($Marker in @(
     if (-not $StatusFinalizer.Contains($Marker)) { throw "r93 status finalizer contract missing: $Marker" }
 }
 Assert-PowerShellParses $StatusFinalizer 'r93 status finalizer'
+foreach ($Marker in @(
+    'function r93MountStatusBar(bar, composer) {',
+    'surface.insertBefore(bar, inputWrap);',
+    "bar.setAttribute('data-cas-status-inside-composer','true');"
+)) {
+    if (-not $StatusFinalizer.Contains($Marker)) { throw "r94 inherited inside-composer mount missing: $Marker" }
+}
 Write-Host 'R93_STATUS_FINALIZER_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'R94_COMPOSER_STATUS_INSIDE_FINALIZER',
@@ -171,6 +178,15 @@ foreach ($Marker in @(
 )) {
     if (-not $ComposerStatusFinalizer.Contains($Marker)) { throw "r94 composer status finalizer contract missing: $Marker" }
 }
+foreach ($Forbidden in @(
+    'R94_STATUS_OVERLAY_RUNTIME',
+    "const R94_STATUS_OVERLAY_ID = 'cas-r94-status-overlay';",
+    'getBoundingClientRect()',
+    'requestAnimationFrame('
+)) {
+    if ($ComposerStatusFinalizer.Contains($Forbidden)) { throw "r94 composer status finalizer retained detached viewport tracking: $Forbidden" }
+}
+Write-Host 'R94_COMPOSER_STATUS_INSIDE_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
     'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS',

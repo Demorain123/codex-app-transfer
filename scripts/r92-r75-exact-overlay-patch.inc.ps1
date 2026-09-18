@@ -163,7 +163,11 @@ $R92NewStampAssignment = '$NewStamp = @''' + "`n" + $R92DisabledStampBody + "`n'
 $PatchedR75 = Replace-R92BlockRequired     $PatchedR75     '$NewStamp = @'''     '$NewObserver = @'''     $R92NewStampAssignment     'replace r75 fallback stamp source'
 
 $R92NewObserverAssignment = '$NewObserver = @''' + "`n" + $R92OverlayBody + "`n'@"
-$PatchedR75 = Replace-R92BlockRequired     $PatchedR75     '$NewObserver = @'''     'try {'     $R92NewObserverAssignment     'replace r75 fallback observer source'
+$R92ObserverEndMarker = @'
+try {
+    # Build r75 from the already-reviewed r74 local builder without copying its
+'@
+$PatchedR75 = Replace-R92BlockRequired     $PatchedR75     '$NewObserver = @'''     $R92ObserverEndMarker     $R92NewObserverAssignment     'replace r75 fallback observer source'
 
 # r75 strict simulation must consume the same final exact overlay instead of
 # rereading the intermediate r90 observer helper.

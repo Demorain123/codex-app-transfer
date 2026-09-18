@@ -113,6 +113,9 @@ foreach ($Marker in @(
     'usageFingerprint',
     'lifecycleFingerprint',
     'function r94NativeExactForTurn(turn) {',
+    '[data-content-search-assistant-turn-key]',
+    '[data-chatgpt-conversation-turn="true"]',
+    'function r94NativeTimestampVisible(node) {',
     'new IntersectionObserver(function(entries) {',
     'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
     'state.observer = { disconnect: r94Cleanup };'
@@ -199,6 +202,8 @@ foreach ($Marker in @(
     'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS',
+    'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
+    "[data-testid*=\"composer\"]",
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
 )) {
@@ -251,6 +256,8 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'apply_runtime_debug_banner' },
     @{ Text = $ThemeInjectorRsText; Marker = 'cas-transfer-runtime-debug-banner' },
     @{ Text = $ThemeInjectorRsText; Marker = 'window.__casR94TurnCapability' },
+    @{ Text = $ThemeInjectorRsText; Marker = '__casR94TimestampDiagnostics' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
 )
 foreach ($Contract in $RuntimeDebugContracts) {

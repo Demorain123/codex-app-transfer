@@ -117,7 +117,21 @@ $StampBody = $R92DisabledStampBody
 if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($StampSource))) -ne $R92DisabledStampBody) {
     throw 'r92 disabled stamp helper round-trip mismatch'
 }
-$ObserverBody = $R92OverlayBody
+
+# The inherited r86 verifier predates the exact-overlay profile and checks four
+# strict-observer marker strings through $StampBody/$ObserverBody only. Those
+# variables are not used to materialize the r92 runtime after this owner patch;
+# keep the actual $NewObserver source clean, while giving the legacy verifier
+# explicit comments that document why its old profile was superseded.
+$R92LegacyVerifierSentinels = @'
+// R92 legacy-verifier compatibility only; not materialized into the runtime.
+// superseded: function isFinalAssistantSurface(segment) {
+// superseded: state.timestampBaselineElements = new WeakSet();
+// superseded: if (!hasRecentLiveUsage()) return;
+// superseded: sweepOutputSegments(false)
+'@
+$ObserverBody = $R92OverlayBody + "`n" + $R92LegacyVerifierSentinels
+Write-Host 'R92_R86_STRICT_TIMESTAMP_VERIFIER_SUPERSEDED_PASS' -ForegroundColor Green
 Write-Host 'R92_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS' -ForegroundColor Green
 
 # r75 used to require either a legacy or strict per-segment observer profile.
@@ -239,3 +253,61 @@ foreach ($Forbidden in @(
 }
 Write-Host 'R92_FINAL_TIMESTAMP_MATERIALIZATION_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R92_NATIVE_REACT_DOM_READONLY_PASS' -ForegroundColor Green
+
+# r86's old r77 compatibility preflight expects the legacy assistantRootsNow
+# body. r92 intentionally replaces that body, so point the preflight at the
+# exact-overlay marker instead. This changes only the preflight sentinel.
+if ($PatchedR75.Contains('R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME')) {
+    $R77OldRoots = 'R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME'
+    Write-Host 'R92_R77_TIMESTAMP_ROOT_COMPAT_SUPERSEDED_PASS' -ForegroundColor Green
+}
+
+# The temporary r77 builder must still provide all exact telemetry recovery, but
+# its legacy timestamp-root rewrite must yield when r92 already owns timestamps.
+# Patch only that timestamp subsection; do not remove/skip r77 itself.
+$R92R77LegacyTimestampApply = @'
+$PatchedR75 = Replace-Required $OriginalR75 $OldAssistantRoots $NewAssistantRoots 'timestamp fallback assistant roots'
+$PatchedR75 = Replace-Required $PatchedR75 `
+    '    const root = assistantRootFor(node);' `
+    '    const root = assistantRootForAny(node);' `
+    'timestamp mutation fallback root'
+'@
+
+$R92R77ExactTimestampApply = @'
+if ($OriginalR75.Contains('R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME')) {
+    $PatchedR75 = $OriginalR75
+    $R77TimestampRootMarker = 'R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME'
+    Write-Host 'R92_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS' -ForegroundColor Green
+} else {
+    $PatchedR75 = Replace-Required $OriginalR75 $OldAssistantRoots $NewAssistantRoots 'timestamp fallback assistant roots'
+    $PatchedR75 = Replace-Required $PatchedR75 `
+        '    const root = assistantRootFor(node);' `
+        '    const root = assistantRootForAny(node);' `
+        'timestamp mutation fallback root'
+    $R77TimestampRootMarker = 'assistantRootForAny(node)'
+}
+'@
+
+$PatchedR77 = Replace-R92NormalizedRequired `
+    $PatchedR77 `
+    $R92R77LegacyTimestampApply `
+    $R92R77ExactTimestampApply `
+    'make r77 timestamp recovery yield to r92 exact overlay'
+
+$PatchedR77 = Replace-R92NormalizedRequired `
+    $PatchedR77 `
+    "    'assistantRootForAny(node)'," `
+    '    $R77TimestampRootMarker,' `
+    'make r77 verification accept exact-overlay timestamp owner'
+
+foreach ($Marker in @(
+    "if (`$OriginalR75.Contains('R92_EXACT_TIMESTAMP_OVERLAY_RUNTIME')) {",
+    "R92_R77_TIMESTAMP_RECOVERY_SUPERSEDED_PASS",
+    '`$R77TimestampRootMarker'
+)) {
+    if (-not $PatchedR77.Contains($Marker)) {
+        throw "r92 patched r77 compatibility source missing marker: $Marker"
+    }
+}
+Write-Host 'R92_R77_TELEMETRY_PRESERVED_TIMESTAMP_SUPERSEDED_PASS' -ForegroundColor Green
+

@@ -226,7 +226,10 @@ $R94EnsureBars = @'
       bar.setAttribute(PANE_SESSION_ATTR, sessionId || '');
       bar.setAttribute(PANE_THREAD_ATTR, threadId || '');
       bar.setAttribute(PANE_AGENT_ATTR, agentId || '');
-      bar.style.cssText = statusBarInlineStyle();
+      if (bar.getAttribute('data-cas-r94-style') !== '1') {
+        bar.style.cssText = statusBarInlineStyle();
+        bar.setAttribute('data-cas-r94-style','1');
+      }
       if (!r94AttachStatusBar(bar, composer)) return;
       active.add(bar);
       bars.push(bar);

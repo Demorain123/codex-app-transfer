@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import TopTabBar from './TopTabBar.vue'
 import ToastHost from '@/components/ui/ToastHost.vue'
+import RuntimeDebugBanner from '@/components/codex/RuntimeDebugBanner.vue'
 
 // macOS 用 titleBarStyle=Overlay 无原生标题栏,靠这条自绘标题栏提供窗口顶部应用名 + 红绿灯区 + 拖拽,
 // 必须保留;Windows 有原生标题栏(左上已显示应用名),这条居中标题就冗余 → 仅 Windows 隐藏。
@@ -14,6 +15,7 @@ const isWindows = navigator.userAgent.includes('Windows')
       <span class="titlebar__title">Codex App Transfer — Sub2API Grok Compat r73 — v2.4.5+73</span>
     </div>
     <TopTabBar />
+    <RuntimeDebugBanner />
     <main class="app-shell__content">
       <div class="app-shell__inner">
         <RouterView />

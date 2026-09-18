@@ -188,7 +188,7 @@ $MainProcessCollector = @'
           if (!id) return null;
           let meta = turnMeta.get(id);
           if (!meta) {
-            meta = { turnId: id, startedAt: null, completedAt: null, durationMs: null, status: null };
+            meta = { turnId: id, startedAt: null, completedAt: null, durationMs: null, status: null, model: null };
             turnMeta.set(id, meta);
           }
           return meta;
@@ -219,9 +219,11 @@ $MainProcessCollector = @'
 
           if (type === 'turn_context') {
             const id = normalizeTurnId(payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId);
+            const model = typeof payload?.model === 'string' ? payload.model.trim() : '';
             if (id) {
               activeTurnId = id;
-              ensureTurn(id);
+              const meta = ensureTurn(id);
+              if (meta && model) meta.model = model;
             }
             continue;
           }
@@ -229,10 +231,12 @@ $MainProcessCollector = @'
           if (type === 'token_count') {
             const info = payload?.info && typeof payload.info === 'object' ? payload.info : null;
             if (!info || !info.last_token_usage || !info.total_token_usage) continue;
+            const activeMeta = activeTurnId ? turnMeta.get(activeTurnId) : null;
             latestUsage = {
               info,
               updatedAt: rowEpoch(row, Date.now()),
               turnId: activeTurnId || null,
+              model: activeMeta && typeof activeMeta.model === 'string' && activeMeta.model ? activeMeta.model : null,
               lineIndex: index,
             };
             continue;
@@ -276,6 +280,7 @@ $MainProcessCollector = @'
         const envelope = {
           info: latestUsage.info,
           updatedAt: latestUsage.updatedAt,
+          model: latestUsage.model || (usageTurn && usageTurn.model) || null,
           turnId: usageTurnId || null,
           turnStartedAt: usageTurn?.startedAt ?? null,
           turnCompletedAt: usageTurn?.completedAt ?? null,

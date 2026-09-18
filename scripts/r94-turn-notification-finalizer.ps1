@@ -401,7 +401,8 @@ if ($R94TurnStatusOwner -eq 'pane') {
 } elseif ($R94TurnStatusOwner -eq 'base') {
     foreach ($Marker in @(
         'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
-        "data-cas-metric-source=\"' + (turnExact ? 'exact-turn-capability' : 'exact-jsonl-fallback')"
+        'exact-turn-capability',
+        'exact-jsonl-fallback'
     )) {
         if (-not $Patched.Contains($Marker)) {
             throw "r94 base turn-status marker missing: $Marker"

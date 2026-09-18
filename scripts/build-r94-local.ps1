@@ -23,6 +23,8 @@ $R94SettingsPage = Join-Path $RepoRoot 'frontend\src\pages\SettingsPage.vue'
 $R94ProcessRs = Join-Path $RepoRoot 'src-tauri\src\admin\services\desktop\process.rs'
 $R94DesktopHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\desktop.rs'
 $R94ThemeInjectorRs = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
+$R94CargoToml = Join-Path $RepoRoot 'src-tauri\Cargo.toml'
+$R94CargoLock = Join-Path $RepoRoot 'Cargo.lock'
 
 $TempBuilder = Join-Path $PSScriptRoot '.build-r94-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'
@@ -45,7 +47,9 @@ foreach ($Path in @(
     $R94SettingsPage,
     $R94ProcessRs,
     $R94DesktopHandlerRs,
-    $R94ThemeInjectorRs
+    $R94ThemeInjectorRs,
+    $R94CargoToml,
+    $R94CargoLock
 )) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r94 required source missing: $Path" }
 }
@@ -101,6 +105,8 @@ $SettingsPageText = Normalize-Eol ([System.IO.File]::ReadAllText($R94SettingsPag
 $ProcessRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ProcessRs))
 $DesktopHandlerRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94DesktopHandlerRs))
 $ThemeInjectorRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ThemeInjectorRs))
+$CargoTomlText = Normalize-Eol ([System.IO.File]::ReadAllText($R94CargoToml))
+$CargoLockText = Normalize-Eol ([System.IO.File]::ReadAllText($R94CargoLock))
 
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
@@ -266,6 +272,14 @@ foreach ($Contract in $RuntimeDebugContracts) {
     }
 }
 Write-Host 'R94_RUNTIME_DEBUG_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
+if (-not $CargoTomlText.Contains('version = "2.4.5+94"')) {
+    throw 'r94 backend Cargo package version is not 2.4.5+94'
+}
+if (-not $CargoLockText.Contains('name = "codex-app-transfer"') -or
+    -not $CargoLockText.Contains('version = "2.4.5+94"')) {
+    throw 'r94 Cargo.lock app package identity is not 2.4.5+94'
+}
+Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',

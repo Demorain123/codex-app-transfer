@@ -13,6 +13,12 @@ export interface NoMicroLaunchState {
   verifiedAliveAt?: string
   cleanup?: string
   processId?: number | null
+  outputTelemetry?: {
+    status?: string
+    runtime?: string
+    timestampMode?: string
+    metricMode?: string
+  }
 }
 
 export interface NoMicroDoctor {

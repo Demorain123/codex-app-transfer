@@ -213,12 +213,26 @@ foreach ($Marker in @(
     'terminalTurn',
     'activeTurn',
     'turnCompletedAt',
-    'turnDurationMs'
+    'turnDurationMs',
+    'safeEnvelope.turnId = envelope.turnId || null;',
+    'safeEnvelope.terminalTurn = envelope.terminalTurn || null;',
+    'Keep the historical r83 exact-replacement anchor intact'
 )) {
     if (-not $R76OutputOwnerText.Contains($Marker)) {
         throw "r94 r76 rollout bridge contract missing: $Marker"
     }
 }
+$R83SafeEnvelopeAnchor = @'
+    const safeEnvelope = {
+      threadId: normalizeUsageThreadId(threadId),
+      updatedAt: envelope.updatedAt,
+      info: envelope.info,
+    };
+'@
+if (-not $R76OutputOwnerText.Contains((Normalize-Eol $R83SafeEnvelopeAnchor))) {
+    throw 'r94 r76 collector no longer preserves the r83 safe-envelope exact replacement anchor'
+}
+Write-Host 'R94_R83_COLLECTOR_COMPAT_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Forbidden in @(
     'readFile(filePath',
     'readFileSync(filePath'

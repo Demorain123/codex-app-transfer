@@ -6,7 +6,7 @@
 
   const R94_OVERLAY_ID = 'cas-r94-timestamp-overlay';
   const R94_BADGE_CLASS = 'cas-r94-turn-time';
-  const R94_TURN_SELECTOR = '[data-turn-key],[data-content-search-turn-key]';
+  const R94_TURN_SELECTOR = '[data-turn-key],[data-content-search-turn-key],[data-content-search-assistant-turn-key],[data-chatgpt-conversation-turn="true"]';
   const R94_FINAL_SELECTOR = '[data-local-conversation-final-assistant],[data-content-search-assistant-turn-key],[data-message-author-role="assistant"]';
   const R94_NATIVE_TIME_SELECTOR = '[data-assistant-message-sent-time],time[datetime]';
   const R94_HISTORY_TURN_PREFIX = 'history-content:turn:';
@@ -51,17 +51,19 @@
   function r94CanonicalTurn(node) {
     const element = node instanceof Element ? node : node && node.parentElement;
     if (!(element instanceof Element)) return null;
-    const keyed = element.closest('[data-turn-key]');
-    if (keyed instanceof Element) return keyed;
-    const searched = element.closest('[data-content-search-turn-key]');
-    return searched instanceof Element ? searched : null;
+    const turn = element.closest(R94_TURN_SELECTOR);
+    return turn instanceof Element ? turn : null;
   }
 
   function r94IdsForTurn(turn) {
     if (!(turn instanceof Element)) return null;
+    const identityNode =
+      (turn.matches('[data-turn-key],[data-content-search-turn-key],[data-content-search-assistant-turn-key]') ? turn : null) ||
+      turn.querySelector('[data-turn-key],[data-content-search-turn-key],[data-content-search-assistant-turn-key]');
     const rawTurn =
-      turn.getAttribute('data-turn-key') ||
-      turn.getAttribute('data-content-search-turn-key') ||
+      (identityNode && identityNode.getAttribute('data-turn-key')) ||
+      (identityNode && identityNode.getAttribute('data-content-search-turn-key')) ||
+      (identityNode && identityNode.getAttribute('data-content-search-assistant-turn-key')) ||
       '';
     const turnId = r94NormalizeTurnId(rawTurn);
     if (!turnId) return null;
@@ -449,6 +451,19 @@
     try { return node.getClientRects().length > 0; } catch { return true; }
   }
 
+  function r94NativeTimestampVisible(node) {
+    if (!r94AnchorUsable(node)) return false;
+    try {
+      const style = getComputedStyle(node);
+      if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+      const opacity = Number(style.opacity);
+      if (Number.isFinite(opacity) && opacity <= 0.05) return false;
+      return !!r94CleanTimeText(node.textContent || node.getAttribute('aria-label') || node.getAttribute('title'));
+    } catch {
+      return true;
+    }
+  }
+
   function r94AnchorForTurn(turn, sourceElement) {
     if (!(turn instanceof Element)) return null;
     if (sourceElement instanceof Element && sourceElement.isConnected) {
@@ -542,7 +557,7 @@
         return;
       }
 
-      if (exact.sourceElement instanceof Element && r94AnchorUsable(exact.sourceElement)) {
+      if (exact.sourceElement instanceof Element && r94NativeTimestampVisible(exact.sourceElement)) {
         // Codex already renders this exact timestamp. Keep native UI as the
         // single source of truth and suppress our fallback overlay duplicate.
         r94RemoveTurnBadge(turn);

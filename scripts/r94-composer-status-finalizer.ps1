@@ -37,7 +37,8 @@ foreach ($Forbidden in @(
 
 $R94NoNativeUsage = @'
   function readNativeUsage() {
-    // R94: the Codex Usage panel is global/background-aware and is not a safe
+    // R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME
+    // The Codex Usage panel is global/background-aware and is not a safe
     // pane-local source. Do not rescan renderer text or borrow its values.
     state.nativePanelVisible = false;
     state.metrics.nativeSpeed = null;
@@ -49,6 +50,7 @@ $Patched = Replace-BlockRequired $Patched '  function readNativeUsage() {' '  fu
 
 $R94MirrorDisabled = @'
   function renderMirror() {
+    // R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME
     // r94 keeps one compact status row inside the composer. The older duplicate
     // Usage mirror stays hidden so telemetry has one visible owner.
     const mirror = document.getElementById(MIRROR_ID);
@@ -62,8 +64,8 @@ foreach ($Marker in @(
     'function r93MountStatusBar(bar, composer) {',
     'surface.insertBefore(bar, inputWrap);',
     "bar.setAttribute('data-cas-status-inside-composer','true');",
-    'do not rescan renderer text or borrow its values',
-    'one compact status row inside the composer'
+    'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
+    'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
 )) {
     if (-not $Patched.Contains($Marker)) {
         throw "r94 inside-composer runtime marker missing: $Marker"

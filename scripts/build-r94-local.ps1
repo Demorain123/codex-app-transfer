@@ -178,14 +178,17 @@ foreach ($Marker in @(
 )) {
     if (-not $ComposerStatusFinalizer.Contains($Marker)) { throw "r94 composer status finalizer contract missing: $Marker" }
 }
-foreach ($Forbidden in @(
-    'R94_STATUS_OVERLAY_RUNTIME',
-    "const R94_STATUS_OVERLAY_ID = 'cas-r94-status-overlay';",
-    'getBoundingClientRect()',
-    'requestAnimationFrame('
+foreach ($Marker in @(
+    'r94 refuses detached status overlay runtime:',
+    'r94 detached status overlay survived final materialization:'
 )) {
-    if ($ComposerStatusFinalizer.Contains($Forbidden)) { throw "r94 composer status finalizer retained detached viewport tracking: $Forbidden" }
+    if (-not $ComposerStatusFinalizer.Contains($Marker)) {
+        throw "r94 composer status finalizer runtime rejection guard missing: $Marker"
+    }
 }
+# Do not scan the finalizer SOURCE for the forbidden overlay strings here:
+# they intentionally appear as literals inside its runtime fail-closed guard.
+# The finalizer applies those checks to generated $Patched JavaScript instead.
 Write-Host 'R94_COMPOSER_STATUS_INSIDE_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',

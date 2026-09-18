@@ -243,8 +243,8 @@ $R94PaneActivity = @'
     if (!(bar instanceof Element)) return 'unknown';
     const composer = r94ComposerForStatusBar(bar);
     if (!(composer instanceof Element)) return 'unknown';
-    const pane = paneForNode(composer);
-    const scope = pane instanceof Element ? pane : (composer.parentElement || composer);
+    const surface = r94StatusSurfaceForComposer(composer);
+    const scope = surface instanceof Element ? surface : composer;
     if (!(scope instanceof Element)) return 'unknown';
 
     const controls = scope.querySelectorAll('button,[role="button"]');
@@ -269,6 +269,24 @@ $R94PaneActivity = @'
 '@
 $Patched = Replace-BlockRequired $Patched '  function paneActivityState(bar) {' '  function paneIsLiveForStatus(bar) {' $R94PaneActivity 'r94 pane activity through native composer anchor'
 
+$R94NoNativeUsage = @'
+  function readNativeUsage() {
+    // R94: do not rescan the full renderer DOM for global/native Usage every
+    // poll. Pane status is exact/local-only; the native Usage UI remains owned
+    // and rendered by Codex itself.
+    state.nativePanelVisible = false;
+  }
+'@
+$Patched = Replace-BlockRequired $Patched '  function readNativeUsage() {' '  function readModelLabel() {' $R94NoNativeUsage 'r94 remove full-DOM native Usage scan'
+
+$R94MirrorDisabled = @'
+  function renderMirror() {
+    const mirror = document.getElementById(MIRROR_ID);
+    if (mirror) mirror.hidden = true;
+  }
+'@
+$Patched = Replace-BlockRequired $Patched '  function renderMirror() {' '  function loadHistory() {' $R94MirrorDisabled 'r94 disable duplicate compact Usage mirror'
+
 $R94RefreshOld = '    renderMirror();' + [char]10 + '    sampleHistory(false);'
 $R94RefreshNew = '    r94ScheduleStatusPosition();' + [char]10 + '    renderMirror();' + [char]10 + '    sampleHistory(false);'
 $Patched = Replace-Required $Patched $R94RefreshOld $R94RefreshNew 'r94 schedule status overlay after refresh'
@@ -282,7 +300,9 @@ foreach ($Marker in @(
     'function r94AttachStatusBar(bar, composer) {',
     'function r94ComposerForStatusBar(bar) {',
     'function r94CleanupStatusOverlay() {',
-    "bar.setAttribute('data-cas-status-overlay','true');"
+    "bar.setAttribute('data-cas-status-overlay','true');",
+    'do not rescan the full renderer DOM for global/native Usage',
+    'function renderMirror() {'
 )) {
     if (-not $Patched.Contains($Marker)) {
         throw "r94 status overlay runtime marker missing: $Marker"
@@ -300,3 +320,5 @@ foreach ($Forbidden in @(
 Write-Host 'R94_STATUS_OVERLAY_FINAL_OWNER_PASS' -ForegroundColor Green
 Write-Host 'R94_NATIVE_COMPOSER_DOM_READONLY_PASS' -ForegroundColor Green
 Write-Host 'R94_STATUS_SHARED_RAF_PASS' -ForegroundColor Green
+Write-Host 'R94_NO_NATIVE_USAGE_FULL_DOM_SCAN_PASS' -ForegroundColor Green
+Write-Host 'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS' -ForegroundColor Green

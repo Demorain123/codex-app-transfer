@@ -110,7 +110,7 @@ Write-Host 'R92_EXACT_OVERLAY_SOURCE_CONTRACT_PASS' -ForegroundColor Green
 # Replace the final r86/r78 stamp helper, but only when the target is the
 # generated r92 helper. Never overwrite a tracked historical stamp source.
 $R92StampTargetName = [System.IO.Path]::GetFileName([string]$StampSource)
-if ($R92StampTargetName -ne '.r92-timestamp-stamp.generated.js') {
+if ($R92StampTargetName -ne '.r93-timestamp-stamp.generated.js') {
     throw "r92 refuses non-isolated stamp owner: $R92StampTargetName"
 }
 [System.IO.File]::WriteAllText(
@@ -124,7 +124,7 @@ if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($StampSource))) -ne $R92Dis
 }
 
 $R92ObserverPatchTargetName = [System.IO.Path]::GetFileName([string]$ObserverPatchInclude)
-if ($R92ObserverPatchTargetName -ne '.r92-r78-observer-patch.generated.inc.ps1') {
+if ($R92ObserverPatchTargetName -ne '.r93-r78-observer-patch.generated.inc.ps1') {
     throw "r92 refuses non-isolated observer-patch owner: $R92ObserverPatchTargetName"
 }
 foreach ($Marker in @(
@@ -148,7 +148,7 @@ if ((Normalize-R92Eol ([System.IO.File]::ReadAllText($ObserverPatchInclude))) -n
 Write-Host 'R92_FINAL_R78_OBSERVER_PATCH_INSTALLED_PASS' -ForegroundColor Green
 
 $R92ObserverTargetName = [System.IO.Path]::GetFileName([string]$ObserverSource)
-if ($R92ObserverTargetName -ne '.r92-timestamp-observer.generated.js') {
+if ($R92ObserverTargetName -ne '.r93-timestamp-observer.generated.js') {
     throw "r92 refuses non-isolated observer owner: $R92ObserverTargetName"
 }
 [System.IO.File]::WriteAllText(

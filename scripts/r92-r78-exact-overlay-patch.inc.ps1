@@ -47,3 +47,38 @@ foreach ($Marker in @(
 # r92 live-only timestamp observer — compatibility phrase for the inherited r86
 # verifier. The actual observer above is exact-only and visible-turn bounded.
 Write-Host 'R92_R78_EXACT_OVERLAY_FINAL_OWNER_PASS' -ForegroundColor Green
+
+# R93 composer/status correctness is finalized inside r75 after all r74/r75
+# telemetry transforms have materialized. Inject the finalizer immediately
+# before the generated timestamp-profile assertion.
+$R93StatusFinalizerPath = Join-Path $PSScriptRoot 'r93-status-finalizer.ps1'
+if (-not (Test-Path -LiteralPath $R93StatusFinalizerPath)) {
+    throw "r93 status finalizer missing: $R93StatusFinalizerPath"
+}
+$R93StatusFinalizerText = [System.IO.File]::ReadAllText($R93StatusFinalizerPath)
+foreach ($Marker in @(
+    'R93_COMPOSER_STATUS_STABILITY_FINALIZER',
+    'R93_COMPOSER_STATUS_FINAL_OWNER_PASS',
+    'R93_NATIVE_USAGE_ISOLATION_PASS',
+    'R93_STATUS_RENDER_FINGERPRINT_PASS'
+)) {
+    if (-not $R93StatusFinalizerText.Contains($Marker)) {
+        throw "r93 status finalizer source missing marker: $Marker"
+    }
+}
+$R93AssertNeedle = '    Assert-GeneratedTimestampProfile $Patched'
+$R93StatusInjection = @'
+    $R93StatusFinalizerPath = Join-Path $PSScriptRoot 'r93-status-finalizer.ps1'
+    if (-not (Test-Path -LiteralPath $R93StatusFinalizerPath)) { throw "r93 status finalizer missing at runtime build owner: $R93StatusFinalizerPath" }
+    . $R93StatusFinalizerPath
+'@
+$R93StatusReplacement = $R93StatusInjection + [char]10 + $R93AssertNeedle
+if (-not $PatchedR75.Contains($R93AssertNeedle)) {
+    throw 'r93 could not locate final r75 status injection point'
+}
+$PatchedR75 = $PatchedR75.Replace($R93AssertNeedle,$R93StatusReplacement)
+if (-not $PatchedR75.Contains('R93StatusFinalizerPath')) {
+    throw 'r93 final r75 source missing status finalizer binding'
+}
+Write-Host 'R93_STATUS_FINALIZER_BOUND_TO_R75_PASS' -ForegroundColor Green
+

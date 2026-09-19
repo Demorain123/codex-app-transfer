@@ -544,7 +544,10 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = '__casR94LocalUsageCollectorDiagnostics' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TL meta=' },
-    @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
+    @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" },
+    @{ Text = $ThemeInjectorRsText; Marker = 'CAS-R94-1-RUNTIME-DEBUG-DRAG' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'data-cas-runtime-debug-draggable' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'setPointerCapture' }
 )
 foreach ($Contract in $RuntimeDebugContracts) {
     if (-not $Contract.Text.Contains($Contract.Marker)) {
@@ -571,9 +574,6 @@ foreach ($Marker in @(
     'provider-id-requires-quoted-toml-key',
     'nested-provider-policy-not-portable',
     'CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY',
-    'CAS-R94-1-RUNTIME-DEBUG-DRAG',
-    'data-cas-runtime-debug-draggable',
-    'setPointerCapture',
     'wire-api-not-responses',
     'relay-auth-path-not-openai-auth',
     'endpoint-coupled-provider-policy',

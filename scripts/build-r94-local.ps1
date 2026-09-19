@@ -144,6 +144,7 @@ foreach ($Forbidden in @(
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_GENERATION_PATCH',
     'R94_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS',
+    'R94_PANE_RUNTIME_PRESERVED_ACROSS_EXACT_OWNER_PASS',
     'R94_R86_STRICT_TIMESTAMP_VERIFIER_SUPERSEDED_PASS',
     'R94_FINAL_R78_OBSERVER_PATCH_INSTALLED_PASS',
     'R94_R78_EXACT_OVERLAY_FINAL_OWNER_PASS',
@@ -239,8 +240,8 @@ foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
     'r94NormalizePaneId',
     'R94_TURN_STATUS_PANE_OWNER_PASS',
-    'R94_TURN_STATUS_BASE_OWNER_PASS',
-    'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
+    'R94_PANE_STATUS_OWNER_REQUIRED',
+    'refusing base-only status downgrade',
     'exact-turn-capability'
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }

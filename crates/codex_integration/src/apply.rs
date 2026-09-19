@@ -3245,7 +3245,7 @@ supports_websockets = true
     }
 
     #[test]
-    fn r94_1_dotted_endpoint_coupled_policy_fails_closed() {
+    fn r94_1_dotted_unknown_provider_policy_fails_closed() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         let original = "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\nauth.command = \"helper\"\n";
@@ -3270,9 +3270,9 @@ supports_websockets = true
         };
 
         let err = apply_provider(&paths, &cfg)
-            .expect_err("dotted auth policy must not be treated as portable");
+            .expect_err("unknown/dotted provider behavior must not be silently dropped");
         assert!(
-            err.to_string().contains("endpoint-coupled-provider-policy"),
+            err.to_string().contains("unsupported-openai-overlay-field"),
             "{err}"
         );
         assert_eq!(read_toml(&paths), original);
@@ -3326,7 +3326,7 @@ supports_websockets = true
     }
 
     #[test]
-    fn r94_1_live_provider_removal_in_policy_session_fails_before_mutation() {
+    fn r94_1_expected_root_provider_absence_reuses_snapshot_source() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
@@ -3337,8 +3337,13 @@ supports_websockets = true
         crate::snapshot::snapshot_codex_state(&paths, "r94.1-test", "Mock", &[18080])
             .unwrap();
 
-        let edited = "[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n";
-        std::fs::write(&paths.config_toml, edited).unwrap();
+        // This is the expected live shape after Transfer normalizes the root
+        // provider identity to built-in openai.
+        std::fs::write(
+            &paths.config_toml,
+            "[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+        )
+        .unwrap();
 
         let cfg = ApplyConfig {
             base_url: "http://127.0.0.1:18080",
@@ -3358,14 +3363,19 @@ supports_websockets = true
             preserve_external_model_catalog: false,
         };
 
-        let err = apply_provider(&paths, &cfg)
-            .expect_err("removing an active policy provider requires a fresh snapshot baseline");
-        assert!(
-            err.to_string()
-                .contains("model_provider change during the current Transfer session"),
-            "{err}"
+        apply_provider(&paths, &cfg).unwrap();
+        let toml = read_toml(&paths);
+        assert!(!toml.contains("model_provider ="), "{toml}");
+        assert_eq!(
+            snapshot_table_field_literal(
+                &toml,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
         );
-        assert_eq!(read_toml(&paths), edited);
+        assert!(paths.openai_policy_overlay_json.exists());
     }
 
     #[test]
@@ -3453,7 +3463,7 @@ supports_websockets = true
     }
 
     #[test]
-    fn r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table() {
+    fn r94_1_dotted_root_provider_policy_overlays_builtin_openai() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
@@ -3482,32 +3492,29 @@ supports_websockets = true
 
         apply_provider(&paths, &cfg).unwrap();
         let toml = read_toml(&paths);
-        assert!(toml.contains("model_provider = \"OpenAi\""), "{toml}");
-        assert!(
-            toml.contains(
-                "model_providers.OpenAi.base_url = \"http://127.0.0.1:18080\""
-            ),
-            "{toml}"
-        );
+        assert!(!toml.contains("model_provider = \"OpenAi\""), "{toml}");
         assert!(
             toml.contains("model_providers.OpenAi.stream_max_retries = 15"),
-            "{toml}"
+            "source dotted provider must stay untouched: {toml}"
         );
-        assert!(
-            !toml.contains("[model_providers.OpenAi]"),
-            "dotted-root provider form must not be mixed with a section table: {toml}"
+        assert_eq!(
+            snapshot_table_field_literal(
+                &toml,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
         );
+        assert!(paths.openai_policy_overlay_json.exists());
     }
 
     #[test]
-    fn r94_1_provider_policy_carry_forward_keeps_user_fields_effective() {
+    fn r94_1_provider_policy_overlays_builtin_openai_and_keeps_source_untouched() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
-        std::fs::write(
-            &paths.config_toml,
-            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nsupports_websockets = false\nstream_max_retries = 15\nrequest_max_retries = 7\nstream_idle_timeout_ms = 90000\nquery_params = { user_policy = \"keep\" }\nhttp_headers = { x_user_policy = \"keep-header\" }\n",
-        )
-        .unwrap();
+        let original = "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nsupports_websockets = true\nstream_max_retries = 15\nrequest_max_retries = 7\nstream_idle_timeout_ms = 90000\nquery_params = { user_policy = \"keep\" }\nhttp_headers = { x_user_policy = \"keep-header\" }\n";
+        std::fs::write(&paths.config_toml, original).unwrap();
 
         let cfg = ApplyConfig {
             base_url: "http://127.0.0.1:18080",
@@ -3529,53 +3536,76 @@ supports_websockets = true
 
         apply_provider(&paths, &cfg).unwrap();
         let toml = read_toml(&paths);
-        assert!(toml.contains("model_provider = \"OpenAi\""), "{toml}");
-        assert!(toml.contains("stream_max_retries = 15"), "{toml}");
-        assert!(toml.contains("request_max_retries = 7"), "{toml}");
-        assert!(toml.contains("stream_idle_timeout_ms = 90000"), "{toml}");
         assert!(
-            toml.contains("query_params = { user_policy = \"keep\" }"),
-            "{toml}"
+            !toml.lines().any(|line| line.trim_start().starts_with("model_provider =")),
+            "effective provider must normalize to built-in openai: {toml}"
         );
         assert!(
-            toml.contains("http_headers = { x_user_policy = \"keep-header\" }"),
-            "{toml}"
+            toml.contains("base_url = \"https://old.example/v1\""),
+            "source provider endpoint must remain untouched: {toml}"
         );
-        assert!(toml.contains("supports_websockets = false"), "{toml}");
-        assert!(
-            toml.contains("base_url = \"http://127.0.0.1:18080\""),
-            "only the provider endpoint should be redirected to Transfer: {toml}"
+        assert_eq!(
+            snapshot_table_field_literal(&toml, "model_providers.OpenAi", "stream_max_retries").as_deref(),
+            Some("15")
         );
-        assert!(!toml.contains("https://old.example/v1"), "{toml}");
+        assert_eq!(
+            snapshot_table_field_literal(&toml, "model_providers.openai", "stream_max_retries").as_deref(),
+            Some("15")
+        );
+        assert_eq!(
+            snapshot_table_field_literal(&toml, "model_providers.openai", "request_max_retries").as_deref(),
+            Some("7")
+        );
+        assert_eq!(
+            snapshot_table_field_literal(&toml, "model_providers.openai", "stream_idle_timeout_ms").as_deref(),
+            Some("90000")
+        );
+        assert_eq!(
+            snapshot_table_field_literal(&toml, "model_providers.openai", "query_params").as_deref(),
+            Some("{ user_policy = \"keep\" }")
+        );
+        assert_eq!(
+            snapshot_table_field_literal(&toml, "model_providers.openai", "http_headers").as_deref(),
+            Some("{ x_user_policy = \"keep-header\" }")
+        );
+
+        let manifest: OpenAiPolicyOverlayManifest = serde_json::from_slice(
+            &std::fs::read(&paths.openai_policy_overlay_json).unwrap()
+        )
+        .unwrap();
+        assert_eq!(manifest.effective_provider, "openai");
+        assert_eq!(manifest.source_provider, "OpenAi");
+        assert_eq!(
+            manifest.fields.get("stream_max_retries").map(String::as_str),
+            Some("15")
+        );
 
         assert!(restore_codex_state(&paths).unwrap());
         let restored = read_toml(&paths);
         assert!(restored.contains("model_provider = \"OpenAi\""), "{restored}");
         assert!(
             restored.contains("base_url = \"https://old.example/v1\""),
-            "provider endpoint must be restored after Transfer releases the config: {restored}"
-        );
-        assert!(restored.contains("stream_max_retries = 15"), "{restored}");
-        assert!(restored.contains("request_max_retries = 7"), "{restored}");
-        assert!(
-            restored.contains("query_params = { user_policy = \"keep\" }"),
             "{restored}"
         );
         assert!(
-            restored.contains("http_headers = { x_user_policy = \"keep-header\" }"),
-            "{restored}"
+            snapshot_table_field_literal(
+                &restored,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .is_none(),
+            "Transfer-only overlay must be removed: {restored}"
         );
-        assert!(restored.contains("supports_websockets = false"), "{restored}");
-        assert!(!restored.contains("openai_base_url ="), "{restored}");
+        assert!(!paths.openai_policy_overlay_json.exists());
     }
 
     #[test]
-    fn r94_1_restore_preserves_post_apply_user_endpoint_edit() {
+    fn r94_1_restore_preserves_source_provider_endpoint_edit() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n",
         )
         .unwrap();
 
@@ -3610,17 +3640,17 @@ supports_websockets = true
         let restored = read_toml(&paths);
         assert!(
             restored.contains("base_url = \"https://user-edited.example/v1\""),
-            "post-apply user endpoint edit must win over snapshot restoration: {restored}"
+            "source provider is user-owned and must never be restored over: {restored}"
         );
     }
 
     #[test]
-    fn r94_1_restore_repairs_old_provider_endpoint_after_active_provider_switch() {
+    fn r94_1_restore_preserves_live_provider_identity_edit_and_restores_overlay() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n",
         )
         .unwrap();
 
@@ -3643,27 +3673,31 @@ supports_websockets = true
         };
 
         apply_provider(&paths, &cfg).unwrap();
-        sync_root_value(
-            &paths.config_toml,
-            "model_provider",
-            Some("\"Other\""),
-        )
-        .unwrap();
+        sync_root_value(&paths.config_toml, "model_provider", Some("\"Other\"")).unwrap();
 
         assert!(restore_codex_state(&paths).unwrap());
         let restored = read_toml(&paths);
         assert!(
             restored.contains("model_provider = \"Other\""),
-            "auto restore must preserve the user's live provider identity edit: {restored}"
+            "auto restore must preserve a live provider identity edit: {restored}"
         );
         assert!(
             restored.contains("base_url = \"https://old.example/v1\""),
-            "changing active provider must not strand the old provider on Transfer relay: {restored}"
+            "source endpoint was never Transfer-owned: {restored}"
+        );
+        assert!(
+            snapshot_table_field_literal(
+                &restored,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .is_none(),
+            "built-in overlay must still be restored: {restored}"
         );
     }
 
     #[test]
-    fn r94_1_policy_with_non_openai_auth_fails_before_routing_mutation() {
+    fn r94_1_portable_retry_policy_reuses_values_without_source_auth() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         let original = "model_provider = \"EnvProvider\"\n\n[model_providers.EnvProvider]\nname = \"EnvProvider\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nenv_key = \"UPSTREAM_KEY\"\nstream_max_retries = 15\n";
@@ -3687,13 +3721,25 @@ supports_websockets = true
             preserve_external_model_catalog: false,
         };
 
-        let err = apply_provider(&paths, &cfg)
-            .expect_err("endpoint-coupled auth must fail closed instead of silently changing credentials");
+        apply_provider(&paths, &cfg).unwrap();
+        let toml = read_toml(&paths);
         assert!(
-            err.to_string().contains("relay-auth-path-not-openai-auth"),
-            "{err}"
+            !toml.lines().any(|line| line.trim_start().starts_with("model_provider =")),
+            "{toml}"
         );
-        assert_eq!(read_toml(&paths), original);
+        assert!(
+            toml.contains("env_key = \"UPSTREAM_KEY\""),
+            "source auth metadata must stay on the untouched source table: {toml}"
+        );
+        assert_eq!(
+            snapshot_table_field_literal(
+                &toml,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
+        );
     }
 
     #[test]
@@ -3738,11 +3784,14 @@ supports_websockets = true
     }
 
     #[test]
-    fn r94_1_builtin_openai_policy_collision_fails_before_routing_mutation() {
+    fn r94_1_builtin_openai_policy_is_journalled_for_native_overlay() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
-        let original = "model_provider = \"openai\"\n\n[model_providers.openai]\nname = \"OpenAI\"\nbase_url = \"https://api.openai.com/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n";
-        std::fs::write(&paths.config_toml, original).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"openai\"\n\n[model_providers.openai]\nname = \"OpenAI\"\nbase_url = \"https://api.openai.com/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n",
+        )
+        .unwrap();
 
         let cfg = ApplyConfig {
             base_url: "http://127.0.0.1:18080",
@@ -3762,15 +3811,42 @@ supports_websockets = true
             preserve_external_model_catalog: false,
         };
 
-        let err = apply_provider(&paths, &cfg).expect_err("same-id built-in override must fail closed");
+        apply_provider(&paths, &cfg).unwrap();
+        let toml = read_toml(&paths);
         assert!(
-            err.to_string().contains("built-in-openai-id-collision"),
-            "{err}"
+            !toml.lines().any(|line| line.trim_start().starts_with("model_provider =")),
+            "{toml}"
         );
         assert_eq!(
-            read_toml(&paths),
-            original,
-            "unsupported carry-forward must fail before routing keys are mutated"
+            snapshot_table_field_literal(
+                &toml,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
+        );
+        let manifest: OpenAiPolicyOverlayManifest = serde_json::from_slice(
+            &std::fs::read(&paths.openai_policy_overlay_json).unwrap()
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.previous_fields.get("stream_max_retries"),
+            Some(&Some("15".to_string())),
+            "pre-existing openai policy must be journalled rather than destroyed"
+        );
+
+        assert!(restore_codex_state(&paths).unwrap());
+        let restored = read_toml(&paths);
+        assert!(restored.contains("model_provider = \"openai\""), "{restored}");
+        assert_eq!(
+            snapshot_table_field_literal(
+                &restored,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
         );
     }
 
@@ -3780,7 +3856,7 @@ supports_websockets = true
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\nopenai_base_url = \"http://127.0.0.1:18080\"\nmodel_context_window = 1000000\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\nopenai_base_url = \"http://127.0.0.1:18080\"\nmodel_context_window = 1000000\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nwire_api = \"responses\"\nstream_max_retries = 15\n",
         )
         .unwrap();
 
@@ -3808,9 +3884,28 @@ supports_websockets = true
         let toml = read_toml(&paths);
         assert!(toml.contains("model_catalog_json = \"V:/user/catalog.json\""));
         assert!(toml.contains("[model_providers.OpenAi]"));
-        assert!(toml.contains("stream_max_retries = 15"));
-        assert!(toml.contains("model_provider = \"OpenAi\""));
-        assert!(toml.contains("base_url = \"http://127.0.0.1:18080\""));
+        assert_eq!(
+            snapshot_table_field_literal(
+                &toml,
+                "model_providers.OpenAi",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
+        );
+        assert_eq!(
+            snapshot_table_field_literal(
+                &toml,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
+        );
+        assert!(
+            !toml.lines().any(|line| line.trim_start().starts_with("model_provider =")),
+            "effective provider remains built-in openai: {toml}"
+        );
         assert!(
             !toml.contains("model_context_window ="),
             "external catalog must not inherit a Transfer-only global 1M override: {toml}"

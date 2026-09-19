@@ -1106,6 +1106,7 @@
       observedTurns: 0,
       visibleTurns: 0,
       badges: 0,
+      userBadges: 0,
       cacheSize: 0,
       liveSegmentsStamped: 0,
       liveSegmentBadges: 0,
@@ -1128,6 +1129,7 @@
     const visibleTurns = new Set();
     const pendingRoots = new Set();
     const entryByTurn = new WeakMap();
+    const userEntryByTurn = new WeakMap();
     const visibleEntries = new Set();
 
     // Live per-output timestamp state. Existing DOM is baselined at install so
@@ -1181,6 +1183,11 @@
       diagnostics.observedTurns = observedTurns.size;
       diagnostics.visibleTurns = visibleTurns.size;
       diagnostics.badges = visibleEntries.size;
+      let userBadgeCount = 0;
+      for (const entry of visibleEntries) {
+        if (entry && entry.mode === 'user') userBadgeCount += 1;
+      }
+      diagnostics.userBadges = userBadgeCount;
       diagnostics.cacheSize = capability.size();
       diagnostics.liveSegmentBadges = visibleSegmentEntries.size;
       diagnostics.liveSegmentCache = segmentTimeByKey.size;
@@ -1348,6 +1355,67 @@
       entry.badge = null;
     }
 
+    function r94RemoveUserBadge(turn) {
+      const entry = userEntryByTurn.get(turn);
+      if (!entry) return;
+      visibleEntries.delete(entry);
+      if (entry.badge && entry.badge.isConnected) entry.badge.remove();
+      entry.badge = null;
+    }
+
+    function r94EnsureUserBadge(turn, ids) {
+      if (!(turn instanceof Element) || !ids) return;
+      const user = r94UserSurfaceForTurn(turn);
+      if (!(user instanceof Element) || !user.isConnected) {
+        r94RemoveUserBadge(turn);
+        return;
+      }
+
+      let record = null;
+      const nativeUser = r94NativeUserExactForTurn(turn);
+      if (nativeUser && nativeUser.record && Number.isFinite(nativeUser.record.epoch)) {
+        record = nativeUser.record;
+      }
+
+      if (!record) {
+        const turnRecord = capability.getRecord(ids.threadId, ids.turnId);
+        const startedEpoch = r94EpochMillis(turnRecord && turnRecord.startedAt);
+        if (Number.isFinite(startedEpoch)) {
+          record = {
+            epoch: startedEpoch,
+            label: r94LocalDateTimeStamp(startedEpoch),
+            title: r94FullTimestampTitle(startedEpoch, 'exact: Codex turn/started for user prompt'),
+            source: 'turn/started-user-prompt',
+          };
+        }
+      }
+
+      if (!record || !record.label) {
+        r94RemoveUserBadge(turn);
+        return;
+      }
+
+      let entry = userEntryByTurn.get(turn);
+      if (!entry) {
+        entry = { turn, ids, record, anchor: user, mode: 'user', badge: null };
+        userEntryByTurn.set(turn, entry);
+      } else {
+        entry.ids = ids;
+        entry.record = record;
+        entry.anchor = user;
+        entry.mode = 'user';
+      }
+
+      if (!entry.badge || !entry.badge.isConnected) {
+        entry.badge = r94CreateBadge(overlayRoot, record);
+      } else {
+        if (entry.badge.textContent !== record.label) entry.badge.textContent = record.label;
+        entry.badge.title = record.title || record.label;
+      }
+      visibleEntries.add(entry);
+      r94SyncDiagnostics();
+    }
+
     function r94TimelineKindForSegment(segment) {
       return r94SemanticKind(segment);
     }
@@ -1393,6 +1461,7 @@
       if (!(turn instanceof Element) || !turn.isConnected) return;
       const ids = r94IdsForTurn(turn);
       if (!ids) return;
+      r94EnsureUserBadge(turn, ids);
       const exact = capability.getForTurn(turn, ids);
       r94RegisterTurnTimeline(turn, ids, exact);
       if (!exact || !exact.record || !exact.record.label) {
@@ -1785,6 +1854,7 @@
         if (intersectionObserver) intersectionObserver.unobserve(turn);
         if (resizeObserver) resizeObserver.unobserve(turn);
         r94RemoveTurnBadge(turn);
+        r94RemoveUserBadge(turn);
       }
       r94SyncDiagnostics();
     }

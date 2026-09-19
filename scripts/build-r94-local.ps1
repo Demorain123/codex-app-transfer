@@ -209,6 +209,10 @@ foreach ($Marker in @(
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS',
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
+    'R94_CURRENT_COMPOSER_ROOT_RUNTIME',
+    'R94_COMPOSER_INLINE_MOUNT_RUNTIME',
+    'R94_COMPOSER_MOUNT_V2',
+    "bar.setAttribute('data-cas-status-owner','r94-inline');",
     '[data-testid*="composer"]',
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
@@ -263,6 +267,8 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'cas-transfer-runtime-debug-banner' },
     @{ Text = $ThemeInjectorRsText; Marker = 'window.__casR94TurnCapability' },
     @{ Text = $ThemeInjectorRsText; Marker = '__casR94TimestampDiagnostics' },
+    @{ Text = $ThemeInjectorRsText; Marker = '__casR94ComposerStatusDiagnostics' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'mount=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
 )

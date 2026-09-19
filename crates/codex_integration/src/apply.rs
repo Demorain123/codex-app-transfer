@@ -453,21 +453,24 @@ fn write_openai_policy_overlay(
     // Re-apply is transactional with respect to the previous overlay. If the
     // user edited an overlay target field while Transfer was active, do not
     // overwrite that edit on the next apply.
-    if let Ok(bytes) = std::fs::read(&paths.openai_policy_overlay_json)
-        && let Ok(previous_manifest) =
-            serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes)
-    {
-        let live = std::fs::read_to_string(&paths.config_toml).unwrap_or_default();
-        for (field, expected_literal) in &previous_manifest.fields {
-            let live_literal =
-                snapshot_table_field_literal(&live, "model_providers.openai", field);
-            if live_literal.as_deref().map(str::trim) != Some(expected_literal.trim()) {
-                return Err(CodexError::Other(format!(
-                    "r94.1 detected a user edit to model_providers.openai.{field} while the provider-policy overlay was active; restart/re-apply Transfer to establish a fresh baseline"
-                )));
+    match std::fs::read(&paths.openai_policy_overlay_json) {
+        Ok(bytes) => {
+            let previous_manifest =
+                serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes)?;
+            let live = std::fs::read_to_string(&paths.config_toml).unwrap_or_default();
+            for (field, expected_literal) in &previous_manifest.fields {
+                let live_literal =
+                    snapshot_table_field_literal(&live, "model_providers.openai", field);
+                if live_literal.as_deref().map(str::trim) != Some(expected_literal.trim()) {
+                    return Err(CodexError::Other(format!(
+                        "r94.1 detected a user edit to model_providers.openai.{field} while the provider-policy overlay was active; restart/re-apply Transfer to establish a fresh baseline"
+                    )));
+                }
             }
+            restore_openai_policy_overlay(paths)?;
         }
-        restore_openai_policy_overlay(paths)?;
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
 
     let source_section = format!("model_providers.{}", policy.source_provider);
@@ -528,12 +531,9 @@ fn write_openai_policy_overlay(
 
 fn restore_openai_policy_overlay(paths: &CodexPaths) -> Result<(), CodexError> {
     let manifest = match std::fs::read(&paths.openai_policy_overlay_json) {
-        Ok(bytes) => serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes).ok(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Ok(bytes) => serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e.into()),
-    };
-    let Some(manifest) = manifest else {
-        return Ok(());
     };
 
     let live = match std::fs::read_to_string(&paths.config_toml) {
@@ -1228,6 +1228,9 @@ pub fn restore_codex_snapshot(
 }
 
 fn clear_managed_codex_state(paths: &CodexPaths) -> Result<(), CodexError> {
+    // The overlay sidecar journals original target literals, so even the
+    // no-snapshot fallback can undo only Transfer-owned provider-policy writes.
+    restore_openai_policy_overlay(paths)?;
     for key in MANAGED_TOML_KEYS {
         sync_root_value(&paths.config_toml, key, None)?;
     }
@@ -1285,18 +1288,11 @@ fn restore_from_snapshot_values(
         .into_iter()
         .collect();
 
-    // CAS-R94-1-PROVIDER-ENDPOINT-RESTORE-SYMMETRY
-    //
-    // Semantic carry-forward temporarily redirects the snapshot source
-    // provider's base_url to the same relay URL written as openai_base_url.
-    // Before restoring root keys, capture a high-precision ownership
-    // fingerprint: live provider base_url == live openai_base_url.
-    //
-    // Do NOT also require live model_provider == snapshot model_provider. The
-    // user may legitimately switch the active provider while Transfer is
-    // running; that should not leave the previously redirected provider endpoint
-    // permanently pointing at the local relay. If the user edited that endpoint
-    // itself, the values differ and the live edit still wins.
+    // CAS-R94-1-BUILTIN-OPENAI-OVERLAY-RESTORE
+    // During Transfer ownership the expected root model_provider is absent.
+    // If a user explicitly writes a different provider while Transfer is
+    // active, automatic restore preserves that live edit; otherwise the
+    // snapshot provider identity is restored normally.
     let live_config_before_restore = match std::fs::read_to_string(&paths.config_toml) {
         Ok(content) => content,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -1305,46 +1301,11 @@ fn restore_from_snapshot_values(
     let snapshot_source_provider = root_string_value(snapshot_config, "model_provider");
     let live_source_provider =
         root_string_value(&live_config_before_restore, "model_provider");
-    let snapshot_provider_has_policy = snapshot_source_provider
-        .as_deref()
-        .and_then(|source_provider| {
-            provider_policy_truth_for_source(snapshot_config, source_provider)
-        })
-        .is_some_and(|policy| policy.has_provider_policy());
     let preserve_live_model_provider_on_auto_restore =
         mode == RestoreMode::Auto
-            && match (
-                snapshot_source_provider.as_deref(),
-                live_source_provider.as_deref(),
-            ) {
-                (None, Some(_)) => true,
-                (Some(snapshot_id), Some(live_id)) if snapshot_id != live_id => true,
-                (Some(_), None) if snapshot_provider_has_policy => true,
-                _ => false,
-            };
-    let live_openai_base =
-        snapshot_toml_value_literal(&live_config_before_restore, "openai_base_url");
-    let provider_endpoint_owned_by_transfer = snapshot_source_provider
-        .as_deref()
-        .and_then(|source_provider| {
-            if !source_provider
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                return None;
-            }
-            let section = format!("model_providers.{source_provider}");
-            let live_provider_base =
-                snapshot_table_field_literal(&live_config_before_restore, &section, "base_url");
-            match (live_provider_base.as_deref(), live_openai_base.as_deref()) {
-                (Some(provider_base), Some(openai_base))
-                    if provider_base.trim() == openai_base.trim() =>
-                {
-                    Some((source_provider.to_string(), section))
-                }
-                _ => None,
-            }
-        });
+            && live_source_provider.as_ref().is_some_and(|live_id| {
+                snapshot_source_provider.as_ref() != Some(live_id)
+            });
 
     for key in MANAGED_TOML_KEYS {
         let literal_from_snapshot = snapshot_toml_value_literal(snapshot_config, key);
@@ -1372,23 +1333,10 @@ fn restore_from_snapshot_values(
         sync_table_field(&paths.config_toml, section, key, literal.as_deref())?;
     }
 
-    if let Some((source_provider, section)) = provider_endpoint_owned_by_transfer {
-        let original_base_url =
-            snapshot_table_field_literal(snapshot_config, &section, "base_url");
-        sync_table_field(
-            &paths.config_toml,
-            &section,
-            "base_url",
-            original_base_url.as_deref(),
-        )?;
-        tracing::info!(
-            target: "codex_integration::apply",
-            marker = "CAS-R94-1-PROVIDER-ENDPOINT-RESTORE-SYMMETRY",
-            source_provider = %source_provider,
-            restored_base_url = original_base_url.as_deref().unwrap_or("<unset>"),
-            "restored only the provider endpoint proven to have been redirected by Transfer"
-        );
-    }
+    // Restore only the [model_providers.openai] fields still proven to match
+    // Transfer's overlay. User edits to those fields survive.
+    restore_openai_policy_overlay(paths)?;
+
 
     // 2. auth.json
     let mut current = read_auth(&paths.auth_json)?;

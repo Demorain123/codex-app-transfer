@@ -480,6 +480,9 @@ foreach ($Marker in @(
     'R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME',
     'R94_STATUS_TRUTH_SEMANTICS_RUNTIME',
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
+    'R94_MULTI_PANE_LAST_THREAD_SNAPSHOT_FALLBACK_RUNTIME',
+    'thread-snapshot-before-turn-usage',
+    'exact-thread-snapshot-before-turn-usage',
     'R94_TELEMETRY_TRUTH_SEMANTICS_PASS',
     'state.ingestExternalUsage = ingestExternalUsage',
     'contextTokens',
@@ -622,6 +625,7 @@ Write-Host 'R94_EXACT_USAGE_INGEST_EXPORT_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_STATUS_TRUTH_SEMANTICS_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - ctx uses Codex last_token_usage.total_tokens / model_context_window on exact JSONL'
 Write-Host '  - in/out mean latest model request, session means cumulative total_token_usage'
+Write-Host '  - parent/sub-agent panes retain their last exact same-thread snapshot while a newer turn waits for its first token update'
 Write-Host '  - native/global tok/s is never relabeled as pane-local speed'
 Write-Host 'R94_LOCAL_USAGE_COLLECTOR_DIAGNOSTICS_PREFLIGHT_PASS' -ForegroundColor Green
 

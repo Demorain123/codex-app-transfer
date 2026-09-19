@@ -331,6 +331,7 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'mount=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'unsafe=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'editorLeak=' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'Status src=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEGMode=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'Timeline=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },

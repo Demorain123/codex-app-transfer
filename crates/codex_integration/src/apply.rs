@@ -176,6 +176,7 @@ struct ProviderPolicyTruth {
     supports_standalone_web_search: Option<String>,
     behavior_fields: Vec<String>,
     section_requires_quoted_key: bool,
+    has_nested_provider_table: bool,
 }
 
 impl ProviderPolicyTruth {
@@ -201,13 +202,14 @@ fn root_string_value(content: &str, key: &str) -> Option<String> {
 fn provider_section_fields(
     content: &str,
     source_provider: &str,
-) -> Option<(Vec<String>, bool)> {
+) -> Option<(Vec<String>, bool, bool)> {
     let plain_header = format!("[model_providers.{source_provider}]");
     let quoted_provider = source_provider.replace('"', "\\\"");
     let quoted_header = format!("[model_providers.\"{quoted_provider}\"]");
     let mut in_section = false;
     let mut found_section = false;
     let mut section_requires_quoted_key = false;
+    let mut has_nested_provider_table = false;
     let mut fields = Vec::new();
 
     let matches_header = |candidate: &str, header: &str| {
@@ -223,6 +225,10 @@ fn provider_section_fields(
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
             if in_section {
+                let nested_plain_prefix = format!("[model_providers.{source_provider}.");
+                let nested_quoted_prefix = format!("[model_providers.\"{quoted_provider}\".");
+                has_nested_provider_table = trimmed.starts_with(&nested_plain_prefix)
+                    || trimmed.starts_with(&nested_quoted_prefix);
                 break;
             }
             let plain = matches_header(trimmed, &plain_header);
@@ -249,14 +255,18 @@ fn provider_section_fields(
         }
     }
 
-    found_section.then_some((fields, section_requires_quoted_key))
+    found_section.then_some((
+        fields,
+        section_requires_quoted_key,
+        has_nested_provider_table,
+    ))
 }
 
 fn provider_policy_truth_for_source(
     content: &str,
     source_provider: &str,
 ) -> Option<ProviderPolicyTruth> {
-    let (fields, section_requires_quoted_key) =
+    let (fields, section_requires_quoted_key, has_nested_provider_table) =
         provider_section_fields(content, source_provider)?;
     let section = format!("model_providers.{source_provider}");
     let behavior_fields = fields
@@ -304,6 +314,7 @@ fn provider_policy_truth_for_source(
         ),
         behavior_fields,
         section_requires_quoted_key,
+        has_nested_provider_table,
     })
 }
 
@@ -343,6 +354,12 @@ fn provider_policy_carry_forward_block_reason(
         // sync_table_field currently targets standard bare TOML table keys.
         // Do not guess how to rewrite quoted/dotted provider ids.
         return Some("provider-id-requires-quoted-toml-key");
+    }
+    if policy.has_nested_provider_table {
+        // Nested provider-owned tables (auth/gateway_oauth/aws or future
+        // provider subtables) can carry endpoint/auth semantics that cannot be
+        // preserved by redirecting only the parent table's base_url.
+        return Some("nested-provider-policy-not-portable");
     }
     if policy
         .wire_api
@@ -490,6 +507,15 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     let carry_forward_provider_policy = provider_policy
         .as_ref()
         .is_some_and(|policy| policy.has_provider_policy());
+
+    if carry_forward_provider_policy && cfg.preserve_chatgpt_auth {
+        tracing::warn!(
+            target: "codex_integration::apply",
+            marker = "CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY",
+            expected_relay = %cfg.base_url,
+            "custom provider policy is active while ChatGPT control-plane auth is preserved; the first runtime turn must be observed at the Transfer relay before this preview is considered validated"
+        );
+    }
 
     // 2. config.toml: openai_base_url
     if cfg.base_url.is_empty() {
@@ -2942,6 +2968,40 @@ supports_websockets = true
             .expect_err("quoted provider table must fail closed until sync helper supports exact quoted headers");
         assert!(
             err.to_string().contains("provider-id-requires-quoted-toml-key"),
+            "{err}"
+        );
+        assert_eq!(read_toml(&paths), original);
+    }
+
+    #[test]
+    fn r94_1_nested_provider_policy_fails_closed_before_mutation() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        let original = "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n\n[model_providers.OpenAi.auth]\ncommand = \"helper\"\n";
+        std::fs::write(&paths.config_toml, original).unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        let err = apply_provider(&paths, &cfg)
+            .expect_err("nested provider policy must not be partially carried forward");
+        assert!(
+            err.to_string().contains("nested-provider-policy-not-portable"),
             "{err}"
         );
         assert_eq!(read_toml(&paths), original);

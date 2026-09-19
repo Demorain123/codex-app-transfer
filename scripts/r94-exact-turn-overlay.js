@@ -938,6 +938,7 @@
     }
 
     const overlayRoot = r94EnsureOverlayRoot();
+    const timelineRail = r94EnsureTimelineRailRoot();
     const capability = r94CreateCapability();
     state.r94TimestampCapability = capability;
     window.__casR94TurnCapability = capability;
@@ -955,6 +956,11 @@
       lastSource: '',
       lastLiveSegmentSource: '',
       nativeTimestampSuppressed: 0,
+      timelineRailMode: true,
+      timelineEntries: 0,
+      timelineMarkers: 0,
+      timelineActiveKey: '',
+      timelineLastKind: '',
     };
     window.__casR94TimestampDiagnostics = diagnostics;
 
@@ -972,6 +978,11 @@
     const segmentEntryByNode = new WeakMap();
     const visibleSegmentEntries = new Set();
     const pendingSegmentTurns = new Set();
+
+    const timelineEntries = new Map();
+    const timelineMarkers = new Map();
+    let timelineScroller = null;
+    let timelineActiveKey = '';
 
     let disposed = false;
     let mutationObserver = null;
@@ -1010,6 +1021,9 @@
       diagnostics.cacheSize = capability.size();
       diagnostics.liveSegmentBadges = visibleSegmentEntries.size;
       diagnostics.liveSegmentCache = segmentTimeByKey.size;
+      diagnostics.timelineEntries = timelineEntries.size;
+      diagnostics.timelineMarkers = timelineMarkers.size;
+      diagnostics.timelineActiveKey = timelineActiveKey;
     }
 
     function r94RemoveTurnBadge(turn) {

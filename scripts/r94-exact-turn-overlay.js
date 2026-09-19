@@ -1734,14 +1734,16 @@
     function r94HandleVisibility() {
       if (document.visibilityState === 'hidden') {
         overlayRoot.hidden = true;
-        timelineRail.hidden = true;
+        if (timelineRail instanceof HTMLElement) timelineRail.hidden = true;
         r94StopMutationObservation();
         if (intersectionObserver) intersectionObserver.disconnect();
         if (resizeObserver) resizeObserver.disconnect();
         if (scanFrameId) cancelAnimationFrame(scanFrameId);
         if (segmentFrameId) cancelAnimationFrame(segmentFrameId);
+        if (segmentTimerId) clearTimeout(segmentTimerId);
         scanFrameId = 0;
         segmentFrameId = 0;
+        segmentTimerId = 0;
         pendingRoots.clear();
         pendingSegmentTurns.clear();
         r94ClearVisibleBadges();
@@ -1749,7 +1751,7 @@
       }
 
       overlayRoot.hidden = false;
-      timelineRail.hidden = false;
+      if (timelineRail instanceof HTMLElement) timelineRail.hidden = false;
       r94StartMutationObservation();
       if (intersectionObserver) {
         for (const turn of Array.from(observedTurns)) {
@@ -1772,6 +1774,7 @@
       if (frameId) cancelAnimationFrame(frameId);
       if (scanFrameId) cancelAnimationFrame(scanFrameId);
       if (segmentFrameId) cancelAnimationFrame(segmentFrameId);
+      if (segmentTimerId) clearTimeout(segmentTimerId);
       window.removeEventListener('resize', r94SchedulePosition);
       window.removeEventListener('scroll', r94SchedulePosition, true);
       document.removeEventListener('visibilitychange', r94HandleVisibility);
@@ -1789,7 +1792,7 @@
       timelineActiveKey = '';
       capability.clear();
       if (overlayRoot.isConnected) overlayRoot.remove();
-      if (timelineRail.isConnected) timelineRail.remove();
+      if (timelineRail instanceof HTMLElement && timelineRail.isConnected) timelineRail.remove();
       if (window.__casR94TimestampDiagnostics === diagnostics) delete window.__casR94TimestampDiagnostics;
       if (window.__casR94TurnCapability === capability) delete window.__casR94TurnCapability;
     }

@@ -365,6 +365,11 @@ Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
+    'CAS-R94-ACTIVE-THREAD-FALLBACK',
+    'R94_USAGE_LOOKUP_MISS_TTL_MS = 30000',
+    "document.querySelector('[data-cas-pane-statusbar=\\\"true\\\"][data-cas-pane-thread-id]')",
+    'localUsageMissCache.set(normalized, Date.now());',
+    'localUsageSnapshotCache.set(filePath, { size: stat.size, envelope: fallbackEnvelope });',
     'terminalTurn',
     'activeTurn',
     'turnCompletedAt',
@@ -399,6 +404,7 @@ foreach ($Forbidden in @(
     }
 }
 Write-Host 'R94_R76_TURN_AWARE_ROLLOUT_BRIDGE_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_R76_ACTIVE_THREAD_FALLBACK_AND_MISS_CACHE_PASS' -ForegroundColor Green
 
 
 try {

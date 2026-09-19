@@ -587,8 +587,14 @@ foreach ($Marker in @(
     'r94_1_provider_policy_reader_accepts_plain_header_comment',
     'r94_1_quoted_provider_table_fails_closed_before_mutation',
     'r94_1_nested_provider_policy_fails_closed_before_mutation',
+    'r94_1_nested_provider_table_is_detected_even_after_unrelated_table',
+    'r94_1_dotted_endpoint_coupled_policy_fails_closed',
+    'r94_1_live_provider_switch_after_snapshot_wins',
+    'r94_1_live_provider_removal_after_snapshot_is_not_resurrected',
+    'r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table',
     'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
     'r94_1_restore_preserves_post_apply_user_endpoint_edit',
+    'r94_1_restore_repairs_old_provider_endpoint_after_active_provider_switch',
     'r94_1_policy_with_non_openai_auth_fails_before_routing_mutation',
     'r94_1_identity_only_provider_still_normalizes_to_builtin_openai',
     'r94_1_builtin_openai_policy_collision_fails_before_routing_mutation',
@@ -639,6 +645,9 @@ Write-Host '  - identity-only providers still normalize to built-in openai, pres
 Write-Host '  - provider id matching is case-sensitive: custom OpenAi is preserved, exact built-in openai collision fails closed'
 Write-Host '  - quoted/nested provider tables and endpoint-coupled auth policies fail before routing mutation instead of claiming partial semantic preservation'
 Write-Host '  - ChatGPT-auth + custom-provider preview emits an explicit first-turn relay canary requirement; config success alone is not treated as transport proof'
+Write-Host '  - live model_provider edits in the current session win over the original snapshot; a live removal is never resurrected on later apply'
+Write-Host '  - nested provider subtables are detected across the full document, and dotted auth/AWS policy fails closed'
+Write-Host '  - root-level dotted provider policy is carried forward without mixing it with a duplicate section table'
 Write-Host '  - provider endpoint restore is symmetric and only reverts an endpoint still proven to be Transfer-owned'
 Write-Host '  - post-apply user endpoint edits win over snapshot restoration'
 Write-Host '  - provider policy is never faked by moving values to unsupported TOML root keys'

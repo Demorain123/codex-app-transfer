@@ -188,6 +188,8 @@ foreach ($Marker in @(
     'mcp-exit-guard-r32.ps1',
     '$targetPid={guard_pid}',
     'concat!(',
+    'dead_binder_pid = dead_binder_pid',
+    'guard_pid = guard_pid',
     '保持原端口不变'
 )) {
     if (-not $R94StaleExitGuardRecoveryText.Contains($Marker)) {
@@ -255,6 +257,7 @@ Write-Host '  - current r28 bind/recovery anchors required by the selective r39 
 Write-Host 'R94_WINDOWS_LISTENER_NOINHERIT_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_STALE_EXIT_GUARD_TRY_REPAIR_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - repair leaf targets the r39 binder-terminology owner via semantic branch boundaries'
+Write-Host '  - Rust format!(concat!(...)) placeholders use explicit named arguments'
 Write-Host '  - dead binder is verified twice before any process action'
 Write-Host '  - only one exact direct-child r32 Exit Guard may be stopped after identity re-check'
 Write-Host '  - configured fixed port is preserved; live owners and ambiguous candidates fail closed'

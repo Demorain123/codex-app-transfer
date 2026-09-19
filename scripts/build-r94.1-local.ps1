@@ -87,6 +87,24 @@ if ($CodexRuntimeBuilderText.Contains('built_in_provider.base_url') -or
 }
 Write-Host 'R94_1_BUILTIN_OPENAI_RUNTIME_CHAIN_PREFLIGHT_PASS' -ForegroundColor Green
 
+$PsTokens = $null
+$PsErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $CodexRuntimeBuilder,
+    [ref]$PsTokens,
+    [ref]$PsErrors
+) | Out-Null
+if ($PsErrors.Count -ne 0) {
+    throw ("r94.1 Codex runtime builder PowerShell parse failed: " + (($PsErrors | ForEach-Object Message) -join '; '))
+}
+Write-Host 'R94_1_CODEX_RUNTIME_PS_PARSE_PASS' -ForegroundColor Green
+
+& node --check $NoMicroLauncher
+if ($LASTEXITCODE -ne 0) {
+    throw "r94.1 No Lagging launcher JavaScript syntax check failed with exit code $LASTEXITCODE"
+}
+Write-Host 'R94_1_CODEX_RUNTIME_JS_SYNTAX_PASS' -ForegroundColor Green
+
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $CodexRuntimeBuilder -PreflightOnly
 if ($LASTEXITCODE -ne 0) {
     throw "r94.1 Codex runtime patch preflight failed with exit code $LASTEXITCODE"

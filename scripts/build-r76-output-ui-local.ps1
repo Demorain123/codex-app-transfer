@@ -202,8 +202,10 @@ $MainProcessCollector = @'
 
         let activeTurnId = '';
         const turnMeta = new Map();
+        const itemMeta = new Map();
         let latestUsage = null;
         let latestTerminal = null;
+        let latestItemEventAt = 0;
 
         const ensureTurn = (turnId) => {
           const id = normalizeTurnId(turnId);
@@ -218,7 +220,7 @@ $MainProcessCollector = @'
 
         for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index];
-          if (!line || !/(token_count|task_started|task_complete|turn_started|turn_complete|turn_context)/.test(line)) continue;
+          if (!line || !/(token_count|task_started|task_complete|turn_started|turn_complete|turn_context|item_started|item_completed)/.test(line)) continue;
 
           let row;
           try { row = JSON.parse(line); } catch { continue; }
@@ -226,6 +228,35 @@ $MainProcessCollector = @'
             ? row.payload
             : row;
           const type = String(payload?.type || row?.type || '').toLowerCase();
+
+          if (type === 'item_started' || type === 'item_completed') {
+            const turnId = normalizeTurnId(payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId);
+            const item = payload?.item && typeof payload.item === 'object' ? payload.item : null;
+            const itemId = String(item?.id || payload?.item_id || payload?.itemId || '').trim();
+            const itemType = String(item?.type || '').trim();
+            if (turnId && itemId) {
+              const key = turnId + '\u0000' + itemId;
+              let meta = itemMeta.get(key);
+              if (!meta) {
+                meta = {
+                  turnId,
+                  itemId,
+                  itemType: itemType || null,
+                  startedAtMs: null,
+                  completedAtMs: null,
+                };
+              }
+              const startedAtMs = Number(payload?.started_at_ms ?? payload?.startedAtMs);
+              const completedAtMs = Number(payload?.completed_at_ms ?? payload?.completedAtMs);
+              if (Number.isFinite(startedAtMs) && startedAtMs > 0) meta.startedAtMs = startedAtMs;
+              if (Number.isFinite(completedAtMs) && completedAtMs > 0) meta.completedAtMs = completedAtMs;
+              if (itemType) meta.itemType = itemType;
+              itemMeta.delete(key);
+              itemMeta.set(key, meta);
+              latestItemEventAt = rowEpoch(row, Date.now());
+            }
+            continue;
+          }
 
           if (type === 'task_started' || type === 'turn_started') {
             const id = normalizeTurnId(payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId);
@@ -289,6 +320,38 @@ $MainProcessCollector = @'
         }
 
         if (!latestUsage) {
+          const recentItems = Array.from(itemMeta.values()).slice(-96);
+          const previousEnvelope = previous && previous.envelope && typeof previous.envelope === 'object'
+            ? previous.envelope
+            : null;
+          if (recentItems.length || activeTurnId || latestTerminal) {
+            const activeTurn = activeTurnId ? (turnMeta.get(activeTurnId) || { turnId: activeTurnId }) : null;
+            const envelope = {
+              info: previousEnvelope?.info || null,
+              updatedAt: latestItemEventAt || rowEpoch(lines.length ? { timestamp: '' } : null, Date.now()),
+              model: previousEnvelope?.model || null,
+              turnId: previousEnvelope?.turnId || null,
+              turnStartedAt: previousEnvelope?.turnStartedAt ?? null,
+              turnCompletedAt: previousEnvelope?.turnCompletedAt ?? null,
+              turnDurationMs: previousEnvelope?.turnDurationMs ?? null,
+              turnStatus: previousEnvelope?.turnStatus ?? null,
+              activeTurn: activeTurn ? {
+                turnId: normalizeTurnId(activeTurn.turnId),
+                startedAt: activeTurn.startedAt ?? null,
+                status: activeTurn.status || 'inProgress',
+              } : null,
+              terminalTurn: latestTerminal ? {
+                turnId: normalizeTurnId(latestTerminal.turnId),
+                startedAt: latestTerminal.startedAt ?? null,
+                completedAt: latestTerminal.completedAt ?? null,
+                durationMs: latestTerminal.durationMs ?? null,
+                status: latestTerminal.status || 'completed',
+              } : null,
+              recentItems,
+            };
+            localUsageSnapshotCache.set(filePath, { size: stat.size, envelope });
+            return envelope;
+          }
           if (length === stat.size) break;
           continue;
         }
@@ -320,6 +383,7 @@ $MainProcessCollector = @'
             durationMs: latestTerminal.durationMs ?? null,
             status: latestTerminal.status || 'completed',
           } : null,
+          recentItems: Array.from(itemMeta.values()).slice(-96),
         };
         localUsageSnapshotCache.set(filePath, { size: stat.size, envelope });
         return envelope;
@@ -352,6 +416,15 @@ $MainProcessCollector = @'
     safeEnvelope.turnStatus = envelope.turnStatus || null;
     safeEnvelope.activeTurn = envelope.activeTurn || null;
     safeEnvelope.terminalTurn = envelope.terminalTurn || null;
+    safeEnvelope.recentItems = Array.isArray(envelope.recentItems)
+      ? envelope.recentItems.slice(-96).map((item) => ({
+          turnId: String(item?.turnId || ''),
+          itemId: String(item?.itemId || ''),
+          itemType: String(item?.itemType || ''),
+          startedAtMs: Number(item?.startedAtMs) || null,
+          completedAtMs: Number(item?.completedAtMs) || null,
+        })).filter((item) => item.turnId && item.itemId)
+      : [];
     const expression =
       "globalThis.__casOutputTelemetryRuntime&&" +
       "globalThis.__casOutputTelemetryRuntime.ingestExternalUsage&&" +

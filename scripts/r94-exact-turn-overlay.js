@@ -194,6 +194,7 @@
 
   function r94CreateCapability() {
     const exactByKey = new Map();
+    const itemByKey = new Map();
     const latestKeyByThread = new Map();
     let capabilitySequence = 0;
 
@@ -201,6 +202,13 @@
       const t = String(threadId || '').replace(/^local:/i, '').trim().toLowerCase();
       const u = r94NormalizeTurnId(turnId);
       return u ? ((t || '__unknown_thread__') + '\\u0000' + u) : '';
+    }
+
+    function itemKeyFor(threadId, turnId, itemId) {
+      const t = String(threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      const u = r94NormalizeTurnId(turnId);
+      const i = String(itemId || '').trim().toLowerCase();
+      return u && i ? ((t || '__unknown_thread__') + '\\u0000' + u + '\\u0000' + i) : '';
     }
 
     function ensureRecord(ids) {
@@ -287,6 +295,46 @@
       return current;
     }
 
+    function rememberItemLifecycle(threadId, turnId, item, eventAt, phase) {
+      if (!item || typeof item !== 'object') return null;
+      const normalizedTurn = r94NormalizeTurnId(turnId);
+      const itemId = String(item.id || item.itemId || item.item_id || '').trim();
+      const key = itemKeyFor(threadId, normalizedTurn, itemId);
+      if (!key) return null;
+
+      const current = itemByKey.get(key) || {
+        threadId: String(threadId || '').replace(/^local:/i, '').trim().toLowerCase() || null,
+        turnId: normalizedTurn,
+        itemId,
+        itemType: String(item.type || '').trim(),
+        startedAtMs: null,
+        completedAtMs: null,
+      };
+
+      const numericAt = Number(eventAt);
+      if (String(phase || '').toLowerCase() === 'started' && Number.isFinite(numericAt) && numericAt > 0) {
+        current.startedAtMs = numericAt > 10000000000 ? numericAt : numericAt * 1000;
+      }
+      if (String(phase || '').toLowerCase() === 'completed' && Number.isFinite(numericAt) && numericAt > 0) {
+        current.completedAtMs = numericAt > 10000000000 ? numericAt : numericAt * 1000;
+      }
+      current.itemType = String(item.type || current.itemType || '').trim();
+      itemByKey.delete(key);
+      itemByKey.set(key, current);
+      r94TrimCache(itemByKey);
+      try {
+        window.dispatchEvent(new CustomEvent('cas-r94-item-capability-update', {
+          detail: { threadId: current.threadId, turnId: current.turnId, itemId: current.itemId, phase: String(phase || '') },
+        }));
+      } catch {}
+      return current;
+    }
+
+    function getItemRecord(threadId, turnId, itemId) {
+      const key = itemKeyFor(threadId, turnId, itemId);
+      return key ? (itemByKey.get(key) || null) : null;
+    }
+
     function rememberUsage(threadId, turnId, usage) {
       const key = keyFor(threadId, turnId);
       if (!key || !usage || typeof usage !== 'object') return null;
@@ -371,6 +419,24 @@
             };
         return !!rememberLifecycle(threadId, turn);
       }
+      if (method === 'item/started' || method === 'item_started') {
+        return !!rememberItemLifecycle(
+          params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
+          params.turnId || params.turn_id,
+          params.item && typeof params.item === 'object' ? params.item : (value.item && typeof value.item === 'object' ? value.item : null),
+          params.startedAtMs ?? params.started_at_ms ?? value.startedAtMs ?? value.started_at_ms,
+          'started'
+        );
+      }
+      if (method === 'item/completed' || method === 'item_completed') {
+        return !!rememberItemLifecycle(
+          params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
+          params.turnId || params.turn_id,
+          params.item && typeof params.item === 'object' ? params.item : (value.item && typeof value.item === 'object' ? value.item : null),
+          params.completedAtMs ?? params.completed_at_ms ?? value.completedAtMs ?? value.completed_at_ms,
+          'completed'
+        );
+      }
       if (method === 'thread/tokenUsage/updated' || method === 'thread_token_usage_updated') {
         return !!rememberUsage(
           params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
@@ -424,6 +490,7 @@
 
     function clear() {
       exactByKey.clear();
+      itemByKey.clear();
       latestKeyByThread.clear();
       capabilitySequence = 0;
     }
@@ -431,6 +498,7 @@
     return Object.freeze({
       getForTurn,
       getRecord,
+      getItemRecord,
       latestForThread,
       remember,
       rememberLifecycle,
@@ -438,6 +506,7 @@
       ingestNotification,
       clear,
       size: function() { return exactByKey.size; },
+      itemSize: function() { return itemByKey.size; },
     });
   }
 

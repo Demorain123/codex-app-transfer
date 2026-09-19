@@ -748,6 +748,18 @@ $R94Builder = $OriginalBuilder.Replace('R89','R94').Replace('r89','r94').Replace
 $R94Builder = $R94Builder.Replace('2.4.5+94','2.4.5+94.1')
 $R94Builder = $R94Builder.Replace('Sub2API Grok Compat r94','Sub2API Grok Compat r94.1')
 $R94Builder = $R94Builder.Replace('visible/package identity is r94 / 2.4.5+94.1','visible/package identity is r94.1 / 2.4.5+94.1')
+
+# r89 itself materializes an r88-derived wrapper. Promote that generated text
+# before its r94.1 invariant runs, otherwise the child still reports +94.
+$R941R88Retarget = "    `$R94 = `$OriginalR88.Replace('r88','r94').Replace('R88','R94').Replace('+88','+94')"
+if (-not $R94Builder.Contains($R941R88Retarget)) {
+    throw 'r94.1 could not locate nested r88 identity retarget'
+}
+$R941R88Replacement = $R941R88Retarget +
+    "`n    `$R94 = `$R94.Replace('2.4.5+94','2.4.5+94.1')" +
+    "`n    `$R94 = `$R94.Replace('Sub2API Grok Compat r94','Sub2API Grok Compat r94.1')" +
+    "`n    `$R94 = `$R94.Replace('visible/package identity is r94 / 2.4.5+94.1','visible/package identity is r94.1 / 2.4.5+94.1')"
+$R94Builder = $R94Builder.Replace($R941R88Retarget,$R941R88Replacement)
 '@
     $Builder = Replace-Required $Builder $OldNestedIdentityRetarget $NewNestedIdentityRetarget 'r94.1 nested generated builder identity propagation'
 
@@ -809,6 +821,8 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         'R94_SEMANTIC_RUNTIME_CORRECTNESS_PASS',
         'visible/package identity is r94.1 / 2.4.5+94.1',
         "`$R94Builder = `$R94Builder.Replace('2.4.5+94','2.4.5+94.1')",
+        'r94.1 could not locate nested r88 identity retarget',
+        "`$R94 = `$R94.Replace('2.4.5+94','2.4.5+94.1')",
         '.r94-r89-pane-runtime-patch.generated.inc.ps1'
     )) {
         if (-not $Builder.Contains($Marker)) { throw "r94 retargeted builder invariant missing: $Marker" }

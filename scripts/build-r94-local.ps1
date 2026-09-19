@@ -29,6 +29,8 @@ $R94ModernSelective = Join-Path $PSScriptRoot 'apply_r43_r65_selective_modern.py
 $R94R39LifecycleSelective = Join-Path $PSScriptRoot 'apply_r39_lifecycle_selective_modern.py'
 $R94R39WindowsOwnerSelective = Join-Path $PSScriptRoot 'apply_r39_windows_owner_selective_modern.py'
 $R94WindowsListenerNoInherit = Join-Path $PSScriptRoot 'apply_r94_windows_listener_noinherit.py'
+$R94StaleExitGuardRecovery = Join-Path $PSScriptRoot 'apply_r94_stale_exit_guard_recovery.py'
+$R94RecoveryExplainabilityUi = Join-Path $PSScriptRoot 'apply_r46_recovery_explainability_ui.py'
 $R94ProxyHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\proxy.rs'
 $R94ChainHealthRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\chain_health.rs'
 
@@ -60,6 +62,8 @@ foreach ($Path in @(
     $R94R39LifecycleSelective,
     $R94R39WindowsOwnerSelective,
     $R94WindowsListenerNoInherit,
+    $R94StaleExitGuardRecovery,
+    $R94RecoveryExplainabilityUi,
     $R94ProxyHandlerRs,
     $R94ChainHealthRs
 )) {
@@ -123,6 +127,8 @@ $ModernSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ModernSe
 $R39LifecycleSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94R39LifecycleSelective))
 $R39WindowsOwnerSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94R39WindowsOwnerSelective))
 $R94WindowsListenerNoInheritText = Normalize-Eol ([System.IO.File]::ReadAllText($R94WindowsListenerNoInherit))
+$R94StaleExitGuardRecoveryText = Normalize-Eol ([System.IO.File]::ReadAllText($R94StaleExitGuardRecovery))
+$R94RecoveryExplainabilityUiText = Normalize-Eol ([System.IO.File]::ReadAllText($R94RecoveryExplainabilityUi))
 $ProxyHandlerText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ProxyHandlerRs))
 $ChainHealthText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ChainHealthRs))
 
@@ -163,6 +169,44 @@ if ($R39LifecycleSelectiveText.Contains('run_leaf("scripts/apply_r38_windows_por
     throw 'r94 r39 lifecycle selective source regressed to the historical r38 proxy-runner-coupled owner leaf'
 }
 foreach ($Marker in @(
+    'CAS-R94-STALE-EXIT-GUARD-RECOVERY',
+    'recover_stale_exit_guard_listener_r94',
+    'r94_find_stale_exit_guard_child',
+    'r94_stop_exact_stale_exit_guard',
+    'preserve_running_codex_exit_guard',
+    'stale_listener_identity_changed',
+    'fixed_port_released',
+    'mcp-exit-guard-r32.ps1',
+    '保持原端口不变'
+)) {
+    if (-not $R94StaleExitGuardRecoveryText.Contains($Marker)) {
+        throw "r94 stale Exit Guard repair source missing: $Marker"
+    }
+}
+foreach ($Forbidden in @(
+    'taskkill /T',
+    'taskkill /IM',
+    'Stop-Process -Name',
+    'Get-Process | Stop-Process'
+)) {
+    if ($R94StaleExitGuardRecoveryText.Contains($Forbidden)) {
+        throw "r94 stale Exit Guard repair source contains forbidden broad cleanup: $Forbidden"
+    }
+}
+foreach ($Marker in @(
+    "h.transfer.code === 'transfer_port_stale_owner'",
+    "title: '适用：旧 Transfer 的 Exit Guard 残留占用固定端口'",
+    "不会换端口",
+    "h.transfer.code === 'transfer_port_occupied_live'"
+)) {
+    if (-not $R94RecoveryExplainabilityUiText.Contains($Marker)) {
+        throw "r94 stale-listener repair UI source missing: $Marker"
+    }
+}
+if (-not $ModernSelectiveText.Contains('scripts/apply_r94_stale_exit_guard_recovery.py')) {
+    throw 'r94 modern selective materializer does not include stale Exit Guard repair leaf'
+}
+foreach ($Marker in @(
     'MODERN-R39-WINDOWS-OWNER-SELECTIVE',
     'MODERN_R39_WINDOWS_OWNER_SELECTIVE_PASS',
     'GetExtendedTcpTable',
@@ -197,6 +241,10 @@ Write-Host '  - Windows owner substrate is decoupled from historical r38 proxy_r
 Write-Host '  - fixed-port listener handle inheritance is explicitly blocked and read-back verified'
 Write-Host '  - current r28 bind/recovery anchors required by the selective r39 upgrade are present'
 Write-Host 'R94_WINDOWS_LISTENER_NOINHERIT_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_STALE_EXIT_GUARD_TRY_REPAIR_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - dead binder is verified twice before any process action'
+Write-Host '  - only one exact direct-child r32 Exit Guard may be stopped after identity re-check'
+Write-Host '  - configured fixed port is preserved; live owners and ambiguous candidates fail closed'
 
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',

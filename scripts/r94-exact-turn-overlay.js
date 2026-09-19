@@ -14,6 +14,9 @@
   const R94_LOCAL_THREAD_PREFIX = 'local:';
   const R94_CACHE_LIMIT = 512;
   const R94_MAX_PENDING_SCAN_ROOTS = 64;
+  const R94_TIMELINE_RAIL_ID = 'cas-r94-timeline-rail';
+  const R94_TIMELINE_MARKER_CLASS = 'cas-r94-timeline-marker';
+  const R94_TIMELINE_LIMIT = 256;
 
   function r94Decode(value) {
     const text = String(value || '').trim();
@@ -80,6 +83,44 @@
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
+  // R94_FULL_DATE_TIMESTAMP_RUNTIME
+  // Every Transfer-owned timestamp includes the local calendar date. We format
+  // with local Date fields instead of UTC so the label follows the host system
+  // clock/timezone exactly, while the title also exposes the short zone name.
+  function r94LocalDateTimeStamp(epoch) {
+    const d = new Date(epoch);
+    if (!Number.isFinite(d.getTime())) return '';
+    return String(d.getFullYear()).padStart(4,'0') + '-' +
+      pad2(d.getMonth() + 1) + '-' +
+      pad2(d.getDate()) + ' ' +
+      pad2(d.getHours()) + ':' +
+      pad2(d.getMinutes()) + ':' +
+      pad2(d.getSeconds());
+  }
+
+  function r94LocalZoneName(epoch) {
+    try {
+      const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date(epoch));
+      const zone = parts.find(function(part) { return part && part.type === 'timeZoneName'; });
+      return zone && zone.value ? String(zone.value) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function r94FullTimestampTitle(epoch, suffix) {
+    const stamp = r94LocalDateTimeStamp(epoch);
+    const zone = r94LocalZoneName(epoch);
+    return stamp + (zone ? (' ' + zone) : '') + (suffix ? (' · ' + suffix) : '');
+  }
+
+  function r94TimelineCompactStamp(epoch) {
+    const d = new Date(epoch);
+    if (!Number.isFinite(d.getTime())) return '';
+    return pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' +
+      pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+
   function r94TimeRecordFromElement(node) {
     if (!(node instanceof Element)) return null;
     if (node.closest('[data-message-author-role="user"],[data-message-author="user"]')) return null;
@@ -98,8 +139,8 @@
         const epoch = numeric > 10000000000 ? numeric : numeric * 1000;
         return {
           epoch,
-          label: clock(epoch),
-          title: fullTime(epoch) + ' · exact: Codex native sent time',
+          label: r94LocalDateTimeStamp(epoch),
+          title: r94FullTimestampTitle(epoch, 'exact: Codex native sent time'),
           source: 'codex-native-sent-time',
         };
       }
@@ -109,8 +150,8 @@
       if (Number.isFinite(parsed) && containsDate) {
         return {
           epoch: parsed,
-          label: clock(parsed),
-          title: fullTime(parsed) + ' · exact: Codex native sent time',
+          label: r94LocalDateTimeStamp(parsed),
+          title: r94FullTimestampTitle(parsed, 'exact: Codex native sent time'),
           source: 'codex-native-sent-time',
         };
       }
@@ -230,8 +271,8 @@
         const epoch = completed > 10000000000 ? completed : completed * 1000;
         current.timestamp = {
           epoch,
-          label: clock(epoch),
-          title: fullTime(epoch) + ' · exact: Codex turn/completed',
+          label: r94LocalDateTimeStamp(epoch),
+          title: r94FullTimestampTitle(epoch, 'exact: Codex turn/completed'),
           source: 'turn/completed',
         };
       }
@@ -429,7 +470,7 @@
       'left:0',
       'top:0',
       'display:block',
-      'max-width:180px',
+      'max-width:240px',
       'padding:0 2px',
       'border:0',
       'background:transparent',
@@ -676,8 +717,8 @@
     const badge = document.createElement('div');
     badge.className = R94_SEGMENT_BADGE_CLASS;
     badge.setAttribute('aria-hidden','true');
-    badge.textContent = '≈' + clock(epoch);
-    badge.title = fullTime(epoch) + ' · approximate: first observed locally while this output block was live';
+    badge.textContent = '≈' + r94LocalDateTimeStamp(epoch);
+    badge.title = r94FullTimestampTitle(epoch, 'approximate: first observed locally while this output block was live');
     badge.style.cssText = [
       'position:absolute',
       'left:0',

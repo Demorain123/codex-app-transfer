@@ -225,7 +225,13 @@ require(
     "/api/thread-recovery/preview",
     "/api/thread-recovery/action",
 )
-require("frontend/src/pages/ProxyPage.vue", "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI")
+require(
+    "frontend/src/pages/ProxyPage.vue",
+    "CAS-R46-MODEL-SWITCH-OLD-THREAD-RECOVERY-UI",
+    "transfer_port_stale_owner",
+    "适用：旧 Transfer 的 Exit Guard 残留占用固定端口",
+    "不会换端口",
+)
 require(
     "frontend/src/api/threadRecovery.ts",
     "/api/thread-recovery/preview",

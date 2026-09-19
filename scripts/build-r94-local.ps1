@@ -573,10 +573,14 @@ foreach ($Marker in @(
     'relay-auth-path-not-openai-auth',
     'endpoint-coupled-provider-policy',
     'provider_section_fields',
+    'section_requires_quoted_key',
     'behavior_fields',
+    'policy.source_provider == "openai"',
     'sync_table_field(',
     '"base_url"',
     'r94_1_provider_policy_truth_reads_custom_provider_fields',
+    'r94_1_provider_policy_reader_accepts_plain_header_comment',
+    'r94_1_quoted_provider_table_fails_closed_before_mutation',
     'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
     'r94_1_restore_preserves_post_apply_user_endpoint_edit',
     'r94_1_policy_with_non_openai_auth_fails_before_routing_mutation',
@@ -599,6 +603,7 @@ foreach ($Marker in @(
 foreach ($Forbidden in @(
     'source provider policy is preserved in user config but is not effective after built-in openai normalization',
     'carried_forward = false,',
+    'policy.source_provider.eq_ignore_ascii_case("openai")',
     'sync_root_value(&paths.config_toml, "stream_max_retries"',
     'sync_root_value(&paths.config_toml, "request_max_retries"',
     'sync_root_value(&paths.config_toml, "stream_idle_timeout_ms"',
@@ -625,7 +630,8 @@ Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - provider behavior fields remain on the active source provider; Transfer rewrites only the provider endpoint needed for relay routing'
 Write-Host '  - identity-only providers still normalize to built-in openai, preserving the common r94 Desktop/history path'
-Write-Host '  - unsupported provider ids, wire protocols, and endpoint-coupled auth policies fail before routing mutation'
+Write-Host '  - provider id matching is case-sensitive: custom OpenAi is preserved, exact built-in openai collision fails closed'
+Write-Host '  - quoted provider table rewrites and endpoint-coupled auth policies fail before routing mutation instead of generating duplicate TOML'
 Write-Host '  - provider endpoint restore is symmetric and only reverts an endpoint still proven to be Transfer-owned'
 Write-Host '  - post-apply user endpoint edits win over snapshot restoration'
 Write-Host '  - provider policy is never faked by moving values to unsupported TOML root keys'

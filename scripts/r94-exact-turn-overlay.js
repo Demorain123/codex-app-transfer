@@ -1734,7 +1734,7 @@
 
     function r94ScheduleSegmentTurn(turn) {
       // R94_STREAMING_SEGMENT_THROTTLE_RUNTIME
-      // One full visual-segment scan per ~220ms is plenty for human-visible
+      // One semantic-output scan per ~220ms is plenty for human-visible
       // timestamps and avoids rescanning a long response every animation frame.
       if (disposed || document.visibilityState === 'hidden' || !(turn instanceof Element)) return;
       pendingSegmentTurns.add(turn);
@@ -1763,16 +1763,24 @@
           : entry.turn;
         let rect;
         try { rect = anchor.getBoundingClientRect(); } catch { rect = null; }
-        if (!rect || rect.width <= 0 || rect.height <= 0 || rect.bottom < -120 || rect.top > innerHeight + 120) {
+        if (!rect || rect.width <= 0 || rect.height <= 0 ||
+            rect.right <= 0 || rect.left >= innerWidth ||
+            rect.bottom <= 0 || rect.top >= innerHeight) {
           entry.badge.style.display = 'none';
           continue;
         }
 
         const x = Math.max(12, Math.min(innerWidth - 6, rect.right - 3));
-        const y = entry.mode === 'action-row'
-          ? Math.max(12, Math.min(innerHeight - 6, rect.top - 2))
-          : Math.max(12, Math.min(innerHeight - 6, rect.bottom - 2));
-        writes.push({ entry, x, y });
+        const rawY = entry.mode === 'action-row' ? (rect.top - 2) : (rect.bottom - 2);
+        // R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME
+        // Never clamp an offscreen anchor onto the viewport edge. That behavior
+        // caused dozens of unrelated timestamps to pile up at the top/bottom
+        // while one very tall turn remained intersecting.
+        if (rawY < 8 || rawY > innerHeight - 8) {
+          entry.badge.style.display = 'none';
+          continue;
+        }
+        writes.push({ entry, x, y: rawY });
       }
 
       for (const entry of Array.from(visibleSegmentEntries)) {
@@ -1782,13 +1790,21 @@
         }
         let rect;
         try { rect = entry.segment.getBoundingClientRect(); } catch { rect = null; }
-        if (!rect || rect.width <= 0 || rect.height <= 0 || rect.bottom < -120 || rect.top > innerHeight + 120) {
+        if (!rect || rect.width <= 0 || rect.height <= 0 ||
+            rect.right <= 0 || rect.left >= innerWidth) {
           entry.badge.style.display = 'none';
           continue;
         }
         const x = Math.max(12, Math.min(innerWidth - 10, rect.right - 3));
-        const y = Math.max(12, Math.min(innerHeight - 12, rect.bottom + 2));
-        writes.push({ entry, x, y, segment: true });
+        const rawY = rect.bottom + 2;
+        // Do not pin semantic-item timestamps to viewport edges. If the actual
+        // item boundary is not visible, its timestamp is hidden until that
+        // boundary scrolls into view.
+        if (rawY < 8 || rawY > innerHeight - 8) {
+          entry.badge.style.display = 'none';
+          continue;
+        }
+        writes.push({ entry, x, y: rawY, segment: true });
       }
 
       for (const item of writes) {

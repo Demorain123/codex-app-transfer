@@ -133,6 +133,9 @@ if (-not (Test-Path -LiteralPath $R94TurnNotificationFinalizerPath)) {
 $R94TurnNotificationFinalizerText = [System.IO.File]::ReadAllText($R94TurnNotificationFinalizerPath)
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
+    'R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME',
+    'R94_LOCAL_ITEM_LIFECYCLE_BRIDGE_RUNTIME',
+    'R94_LOCAL_ITEM_LIFECYCLE_BRIDGE_PASS',
     'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS',
     'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS'
 )) {

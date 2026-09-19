@@ -585,6 +585,11 @@ foreach ($Forbidden in @(
         throw "r94.1 must not fake provider policy by moving it to unsupported root keys: $Forbidden"
     }
 }
+if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocation.MyCommand.Path)).Contains('94.1.1')) {
+    throw 'r94.1 build source contains a double-suffixed preview identity (94.1.1)'
+}
+Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
+
 Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - custom-provider retry/timeout policy is diagnosed, never silently claimed as built-in openai policy'
 Write-Host '  - inactive custom provider tables remain preserved for old-thread compatibility'
@@ -680,7 +685,7 @@ try {
     # the already-validated exact-turn/timestamp pipeline is not renamed.
     $Builder = $Builder.Replace('2.4.5+94','2.4.5+94.1')
     $Builder = $Builder.Replace('Sub2API Grok Compat r94','Sub2API Grok Compat r94.1')
-    $Builder = $Builder.Replace('visible/package identity is r94.1 / 2.4.5+94.1.1','visible/package identity is r94.1 / 2.4.5+94.1')
+    $Builder = $Builder.Replace('visible/package identity is r94 / 2.4.5+94.1','visible/package identity is r94.1 / 2.4.5+94.1')
 
     $OldPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'"
     $NewPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'"

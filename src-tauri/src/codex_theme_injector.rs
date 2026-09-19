@@ -1189,6 +1189,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const ts = window.__casR94TimestampDiagnostics && typeof window.__casR94TimestampDiagnostics === 'object'
       ? window.__casR94TimestampDiagnostics
       : {};
+    const hybridSegmentMode = ts.hybridSegmentMode === true;
     const composerDiag = window.__casR94ComposerStatusDiagnostics && typeof window.__casR94ComposerStatusDiagnostics === 'object'
       ? window.__casR94ComposerStatusDiagnostics
       : {};
@@ -1208,7 +1209,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         runtimeRevisionNumber === expectedRevisionNumber &&
         exactTurn &&
         statusInsideComposer &&
-        timestampOverlay
+        timestampOverlay &&
+        hybridSegmentMode
       ) {
         state = 'match';
       } else if (
@@ -1232,6 +1234,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       composerCandidates,
       editables,
       timestampOverlay,
+      hybridSegmentMode,
       tsObserved: Number(ts.observedTurns) || 0,
       tsVisible: Number(ts.visibleTurns) || 0,
       tsBadges: Number(ts.badges) || 0,
@@ -1276,7 +1279,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Renderer runtime=' + escapeHtml(s.runtime) +
         ' · ExactTurn=' + (s.exactTurn ? 'ON' : 'OFF') +
         ' · Status@Composer=' + (s.statusInsideComposer ? 'YES' : 'NO') +
-        ' · TSOverlay=' + (s.timestampOverlay ? 'ON' : 'OFF') + '</div>',
+        ' · TSOverlay=' + (s.timestampOverlay ? 'ON' : 'OFF') +
+        ' · SEGMode=' + (s.hybridSegmentMode ? 'ON' : 'OFF') + '</div>',
       '<div>Composer cand=' + s.composerCandidates +
         ' · editables=' + s.editables +
         ' · statusBars=' + s.statusBars +
@@ -1945,6 +1949,7 @@ mod tests {
         assert!(script.contains("mount="));
         assert!(script.contains("unsafe="));
         assert!(script.contains("editorLeak="));
+        assert!(script.contains("SEGMode="));
         assert!(script.contains("TS obs/vis/badge/cache"));
         assert!(script.contains("SEG stamp/badge/cache"));
         assert!(script.contains("launchMode"));

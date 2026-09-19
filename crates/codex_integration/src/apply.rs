@@ -3206,27 +3206,19 @@ supports_websockets = true
     }
 
     #[test]
-    fn r94_1_live_provider_switch_after_snapshot_wins() {
+    fn r94_1_live_provider_switch_in_same_session_fails_before_mutation() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old-a.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old-a.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n\n[model_providers.Other]\nname = \"Other\"\nbase_url = \"https://old-b.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 21\n",
         )
         .unwrap();
-        crate::snapshot::snapshot_codex_state(
-            &paths,
-            "r94.1-test",
-            "Mock",
-            &[18080],
-        )
-        .unwrap();
+        crate::snapshot::snapshot_codex_state(&paths, "r94.1-test", "Mock", &[18080])
+            .unwrap();
 
-        std::fs::write(
-            &paths.config_toml,
-            "model_provider = \"Other\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old-a.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n\n[model_providers.Other]\nname = \"Other\"\nbase_url = \"https://old-b.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 21\n",
-        )
-        .unwrap();
+        let edited = "model_provider = \"Other\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old-a.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n\n[model_providers.Other]\nname = \"Other\"\nbase_url = \"https://old-b.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 21\n";
+        std::fs::write(&paths.config_toml, edited).unwrap();
 
         let cfg = ApplyConfig {
             base_url: "http://127.0.0.1:18080",
@@ -3246,23 +3238,22 @@ supports_websockets = true
             preserve_external_model_catalog: false,
         };
 
-        apply_provider(&paths, &cfg).unwrap();
-        let toml = read_toml(&paths);
-        assert!(toml.contains("model_provider = \"Other\""), "{toml}");
-        assert!(toml.contains("stream_max_retries = 21"), "{toml}");
+        let err = apply_provider(&paths, &cfg)
+            .expect_err("same-session provider switch requires a fresh snapshot baseline");
         assert!(
-            toml.contains("base_url = \"https://old-a.example/v1\""),
-            "inactive pre-snapshot provider must not be redirected: {toml}"
+            err.to_string()
+                .contains("model_provider change during the current Transfer session"),
+            "{err}"
         );
-        let other_start = toml.find("[model_providers.Other]").unwrap();
-        assert!(
-            toml[other_start..].contains("base_url = \"http://127.0.0.1:18080\""),
-            "live-selected provider must own the relay redirect: {toml}"
+        assert_eq!(
+            read_toml(&paths),
+            edited,
+            "identity-change rejection must happen before any routing mutation"
         );
     }
 
     #[test]
-    fn r94_1_live_provider_removal_after_snapshot_is_not_resurrected() {
+    fn r94_1_live_provider_removal_in_policy_session_fails_before_mutation() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
@@ -3270,17 +3261,47 @@ supports_websockets = true
             "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
         )
         .unwrap();
-        crate::snapshot::snapshot_codex_state(
-            &paths,
-            "r94.1-test",
-            "Mock",
-            &[18080],
-        )
-        .unwrap();
+        crate::snapshot::snapshot_codex_state(&paths, "r94.1-test", "Mock", &[18080])
+            .unwrap();
 
+        let edited = "[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n";
+        std::fs::write(&paths.config_toml, edited).unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        let err = apply_provider(&paths, &cfg)
+            .expect_err("removing an active policy provider requires a fresh snapshot baseline");
+        assert!(
+            err.to_string()
+                .contains("model_provider change during the current Transfer session"),
+            "{err}"
+        );
+        assert_eq!(read_toml(&paths), edited);
+    }
+
+    #[test]
+    fn r94_1_identity_only_provider_can_repeat_after_transfer_strips_root_identity() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n",
         )
         .unwrap();
 
@@ -3303,12 +3324,9 @@ supports_websockets = true
         };
 
         apply_provider(&paths, &cfg).unwrap();
-        let toml = read_toml(&paths);
-        assert!(!toml.contains("model_provider ="), "{toml}");
-        assert!(
-            toml.contains("base_url = \"https://old.example/v1\""),
-            "explicit live removal must not reactivate or redirect the snapshot provider: {toml}"
-        );
+        assert!(!read_toml(&paths).contains("model_provider ="));
+        apply_provider(&paths, &cfg).unwrap();
+        assert!(!read_toml(&paths).contains("model_provider ="));
     }
 
     #[test]
@@ -3561,6 +3579,10 @@ supports_websockets = true
 
         assert!(restore_codex_state(&paths).unwrap());
         let restored = read_toml(&paths);
+        assert!(
+            restored.contains("model_provider = \"Other\""),
+            "auto restore must preserve the user's live provider identity edit: {restored}"
+        );
         assert!(
             restored.contains("base_url = \"https://old.example/v1\""),
             "changing active provider must not strand the old provider on Transfer relay: {restored}"

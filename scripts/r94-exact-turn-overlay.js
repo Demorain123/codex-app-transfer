@@ -1166,7 +1166,7 @@
       entry.approx = !!approx;
       entry.preview = String(preview || entry.preview || '').replace(/\s+/g,' ').trim().slice(0,180);
       entry.fullLabel = (entry.approx ? '≈' : '') + r94LocalDateTimeStamp(normalizedEpoch);
-      entry.compactLabel = r94TimelineKindLabel(entry.kind) + ' ' + (entry.approx ? '≈' : '') + r94TimelineCompactStamp(normalizedEpoch);
+      entry.compactLabel = r94TimelineKindLabel(entry.kind) + ' ' + entry.fullLabel;
 
       const scroller = r94TimelineScrollerForEntry(entry);
       const metrics = r94ScrollerMetrics(scroller);

@@ -213,8 +213,8 @@ Write-Host 'R94_R86_STRICT_TIMESTAMP_VERIFIER_SUPERSEDED_PASS' -ForegroundColor 
 Write-Host 'R94_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS' -ForegroundColor Green
 
 # r75 used to require either a legacy or strict per-segment observer profile.
-# r94 owns a third profile: exact-only overlay, with no native-turn child writes
-# and no periodic/characterData timestamp sweep.
+# r94 owns a third profile: native/exact turn ownership plus Transfer-owned
+# live per-output timestamps, with no native-turn child writes and no periodic/characterData timestamp sweep.
 $R94ProfileFunction = @'
 function Assert-GeneratedTimestampProfile([string]$Text) {
     foreach ($Marker in @(
@@ -222,12 +222,16 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
         'R75_OUTPUT_UI_LOCAL_PASS',
         'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
         'R94_EXACT_TURN_CAPABILITY_RUNTIME',
+        'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
         'R94_LEGACY_TIMESTAMP_STAMP_DISABLED',
         'function installOutputObserver() {',
+        'function r94CollectVisualSegments(node, root, depth) {',
+        'host-first-observed-live-output',
+        'r94BaselineCurrentSegments();',
         'new IntersectionObserver(function(entries) {',
         'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
         'state.observer = { disconnect: r94Cleanup };',
-        'timestampMode: "exact-final-turn-overlay",'
+        'timestampMode: "hybrid-native-final+live-segment-overlay",'
     )) {
         if (-not $Text.Contains($Marker)) { throw "r94 generated exact-overlay profile missing: $Marker" }
     }
@@ -299,7 +303,7 @@ $R94PollApplyExact = @'
     $Patched = $Patched.Replace("    try { sweepOutputSegments(false); } catch {}`n",'')
     $Patched = $Patched.Replace(
         'timestampMode: "live-output-segment + single-final-answer",',
-        'timestampMode: "exact-final-turn-overlay",'
+        'timestampMode: "hybrid-native-final+live-segment-overlay",'
     )
 '@
 $PatchedR75 = Replace-R94NormalizedRequired     $PatchedR75     $R94PollApply     $R94PollApplyExact     'remove inherited periodic timestamp sweep'
@@ -309,7 +313,7 @@ foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
     'R94_LEGACY_TIMESTAMP_STAMP_DISABLED',
     '$StrictObserver = $NewObserver',
-    'exact-final-turn-overlay'
+    'hybrid-native-final+live-segment-overlay'
 )) {
     if (-not $PatchedR75.Contains($Marker)) {
         throw "r94 generated r75 source missing exact-overlay marker: $Marker"
@@ -337,7 +341,10 @@ if (-not $R94FinalStampProbe.Contains('R94_LEGACY_TIMESTAMP_STAMP_DISABLED')) {
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
     'R94_EXACT_TURN_CAPABILITY_RUNTIME',
-    'window.__casR94TurnCapability = capability;'
+    'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
+    'window.__casR94TurnCapability = capability;',
+    'host-first-observed-live-output',
+    'r94BaselineCurrentSegments();'
 )) {
     if (-not $R94FinalObserverProbe.Contains($Marker)) {
         throw "r94 final NewObserver probe did not materialize exact turn capability: $Marker"

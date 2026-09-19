@@ -137,22 +137,24 @@ fn proxy_port_from_url(base_url: &str) -> u16 {
 }
 
 // CAS-R94-1-PROVIDER-CONFIG-TRUTH
-// CAS-R94-1-PROVIDER-POLICY-CARRY-FORWARD
+// CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY
 //
-// r94.1 separates provider *identity* from provider *policy*, but unlike the
-// first preview it does not stop at diagnostics. When the user's active custom
-// provider contains behavior fields that Codex cannot apply to the built-in
-// \`openai\` provider, Transfer keeps that source provider active and changes
-// only the provider endpoint to the local Transfer relay. The rest of the
-// provider table stays in place, so current and future user-added provider
-// settings remain effective without being copied to unsupported TOML roots.
+// r94.1 keeps r94's provider-identity behavior: Transfer removes the root
+// model_provider selection so Codex resolves the built-in `openai` provider
+// and existing thread/history identity stays on `openai`.
 //
-// We still prefer the built-in \`openai\` path when the source provider contains
-// only identity/routing/auth boilerplate. This keeps the r94 Desktop/history
-// compatibility path for the common case. If semantic carry-forward cannot be
-// represented safely (for example a source id that collides with built-in
-// \`openai\`, or a non-Responses wire API), apply fails before mutating routing
-// keys instead of silently downgrading the user's policy.
+// User-authored provider *behavior* is handled separately. Portable network
+// policy fields (retry budgets, stream timeouts, query/header maps) are copied
+// into a Transfer-owned [model_providers.openai] overlay while the original
+// source provider table remains untouched. Stock Codex ignores configured
+// fields that collide with the built-in `openai` id, so No-Lagging B pairs
+// this config overlay with a version-matched Codex runtime patch that merges
+// only those portable fields into the built-in provider object.
+//
+// This is intentionally not a cosmetic TOML rewrite: a sidecar manifest marks
+// when the native runtime overlay is required, restore is symmetric, and any
+// field that cannot be represented safely fails closed instead of silently
+// falling back to Codex defaults such as stream_max_retries=5.
 const PROVIDER_IDENTITY_ROUTING_KEYS: &[&str] = &[
     "name",
     "base_url",
@@ -367,17 +369,29 @@ fn literal_string_eq(value: &str, expected: &str) -> bool {
         .eq_ignore_ascii_case(expected)
 }
 
-fn provider_policy_carry_forward_block_reason(
+const OPENAI_POLICY_OVERLAY_FIELDS: &[&str] = &[
+    "query_params",
+    "http_headers",
+    "env_http_headers",
+    "request_max_retries",
+    "stream_max_retries",
+    "stream_idle_timeout_ms",
+    "websocket_connect_timeout_ms",
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct OpenAiPolicyOverlayManifest {
+    schema_version: u32,
+    source_provider: String,
+    effective_provider: String,
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+fn provider_policy_overlay_block_reason(
     policy: &ProviderPolicyTruth,
 ) -> Option<&'static str> {
     if !policy.has_provider_policy() {
         return Some("no-user-provider-policy");
-    }
-    if policy.source_provider == "openai" {
-        // Provider ids are case-sensitive. Only the exact built-in id collides;
-        // a user provider such as "OpenAi" is a distinct custom provider and is
-        // precisely the migration r94.1 must preserve.
-        return Some("built-in-openai-id-collision");
     }
     if policy.section_requires_quoted_key
         || !policy
@@ -385,14 +399,9 @@ fn provider_policy_carry_forward_block_reason(
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        // sync_table_field currently targets standard bare TOML table keys.
-        // Do not guess how to rewrite quoted/dotted provider ids.
         return Some("provider-id-requires-quoted-toml-key");
     }
     if policy.has_nested_provider_table {
-        // Nested provider-owned tables (auth/gateway_oauth/aws or future
-        // provider subtables) can carry endpoint/auth semantics that cannot be
-        // preserved by redirecting only the parent table's base_url.
         return Some("nested-provider-policy-not-portable");
     }
     if policy
@@ -402,24 +411,119 @@ fn provider_policy_carry_forward_block_reason(
     {
         return Some("wire-api-not-responses");
     }
-    if policy.requires_openai_auth.as_deref() != Some("true") {
-        // Transfer's local relay authentication is supplied through the same
-        // auth.json path used by the built-in OpenAI provider. A source provider
-        // that relies on env_key/command/AWS auth cannot simply be pointed at
-        // the relay without changing request authentication semantics.
-        return Some("relay-auth-path-not-openai-auth");
+
+    // ModelProviderInfo uses plain bools for these capabilities, so after TOML
+    // deserialization Codex cannot distinguish "omitted" from explicit false.
+    // Explicit true already equals built-in OpenAI's defaults; explicit false
+    // cannot be merged safely by the minimal runtime patch and therefore fails.
+    if policy.supports_websockets.as_deref() == Some("false")
+        || policy.supports_standalone_web_search.as_deref() == Some("false")
+    {
+        return Some("boolean-provider-capability-not-portable");
     }
+
     if policy.behavior_fields.iter().any(|field| {
-        matches!(
-            field.as_str(),
-            "auth" | "gateway_oauth" | "aws" | "model_catalog_url"
-        ) || field.starts_with("auth.")
-            || field.starts_with("gateway_oauth.")
-            || field.starts_with("aws.")
+        !OPENAI_POLICY_OVERLAY_FIELDS.contains(&field.as_str())
+            && !matches!(
+                field.as_str(),
+                "supports_websockets" | "supports_standalone_web_search"
+            )
     }) {
-        return Some("endpoint-coupled-provider-policy");
+        return Some("unsupported-openai-overlay-field");
     }
     None
+}
+
+fn remove_openai_policy_overlay_manifest(paths: &CodexPaths) -> Result<(), CodexError> {
+    match std::fs::remove_file(&paths.openai_policy_overlay_json) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn write_openai_policy_overlay(
+    paths: &CodexPaths,
+    policy: &ProviderPolicyTruth,
+    source_config: &str,
+) -> Result<(), CodexError> {
+    let source_section = format!("model_providers.{}", policy.source_provider);
+    let target_section = "model_providers.openai";
+    let mut fields = std::collections::BTreeMap::new();
+
+    for field in OPENAI_POLICY_OVERLAY_FIELDS {
+        if let Some(literal) =
+            snapshot_table_field_literal(source_config, &source_section, field)
+        {
+            sync_table_field(
+                &paths.config_toml,
+                target_section,
+                field,
+                Some(&literal),
+            )?;
+            fields.insert((*field).to_string(), literal);
+        }
+    }
+
+    // Explicit true capability fields need no overlay because they match the
+    // built-in OpenAI defaults. The gate above rejects explicit false.
+    let manifest = OpenAiPolicyOverlayManifest {
+        schema_version: 1,
+        source_provider: policy.source_provider.clone(),
+        effective_provider: "openai".to_string(),
+        fields,
+    };
+    if manifest.fields.is_empty() {
+        remove_openai_policy_overlay_manifest(paths)?;
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&paths.app_home)?;
+    std::fs::write(
+        &paths.openai_policy_overlay_json,
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    Ok(())
+}
+
+fn restore_openai_policy_overlay(
+    paths: &CodexPaths,
+    snapshot_config: &str,
+) -> Result<(), CodexError> {
+    let manifest = match std::fs::read(&paths.openai_policy_overlay_json) {
+        Ok(bytes) => serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes).ok(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    let Some(manifest) = manifest else {
+        return Ok(());
+    };
+
+    let live = match std::fs::read_to_string(&paths.config_toml) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let section = "model_providers.openai";
+
+    for (field, expected_literal) in manifest.fields {
+        let live_literal = snapshot_table_field_literal(&live, section, &field);
+        // User edits made while Transfer is active win. Restore only a field
+        // that still exactly matches the Transfer-owned overlay literal.
+        if live_literal.as_deref().map(str::trim) != Some(expected_literal.trim()) {
+            continue;
+        }
+        let original = snapshot_table_field_literal(snapshot_config, section, &field);
+        sync_table_field(
+            &paths.config_toml,
+            section,
+            &field,
+            original.as_deref(),
+        )?;
+    }
+
+    remove_openai_policy_overlay_manifest(paths)?;
+    Ok(())
 }
 
 fn log_provider_policy_truth(
@@ -457,7 +561,7 @@ fn log_provider_policy_truth(
         behavior_fields = %behavior_fields,
         carried_forward = carried_forward,
         reason = reason,
-        "provider policy semantic carry-forward decision"
+        "provider policy built-in-openai overlay decision"
     );
 }
 

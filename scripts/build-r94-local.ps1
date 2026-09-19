@@ -808,6 +808,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         "`$TempTruthJs = Join-Path `$PSScriptRoot 'r94-telemetry-truth.js'",
         'R94_SEMANTIC_RUNTIME_CORRECTNESS_PASS',
         'visible/package identity is r94.1 / 2.4.5+94.1',
+        "`$R94Builder = `$R94Builder.Replace('2.4.5+94','2.4.5+94.1')",
         '.r94-r89-pane-runtime-patch.generated.inc.ps1'
     )) {
         if (-not $Builder.Contains($Marker)) { throw "r94 retargeted builder invariant missing: $Marker" }

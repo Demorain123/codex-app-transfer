@@ -67,14 +67,16 @@ match_new = '''        "transfer_port_stale_owner" => {
 text = text[:match_start] + match_new + text[match_end:]
 
 # Patch only the stale-listener recommendation arm. Do not couple to the exact
-# r39 Chinese/English wording; preserve the following transfer_stopped arm.
+# r39 Chinese/English wording OR to whether out.push(...) is one-line/multiline;
+# branch labels are the semantic boundaries and the following transfer_stopped arm
+# remains untouched.
 recommend_scope = text.find('''    match transfer.code.as_str() {
 ''')
 if recommend_scope < 0:
     raise SystemExit("r94 stale exit guard recovery: transfer recommendations match missing")
-recommend_start = text.find('''        "transfer_port_stale_owner" => out.push(
+recommend_start = text.find('''        "transfer_port_stale_owner" =>
 ''', recommend_scope)
-recommend_next = text.find('''        "transfer_stopped" => out.push(
+recommend_next = text.find('''        "transfer_stopped" =>
 ''', recommend_start)
 if recommend_start < 0 or recommend_next < 0:
     raise SystemExit("r94 stale exit guard recovery: stale recommendation semantic boundary missing")

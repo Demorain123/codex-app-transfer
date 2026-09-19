@@ -568,15 +568,22 @@ foreach ($Marker in @(
     'provider_policy_carry_forward_block_reason',
     'custom-provider-policy-preserved',
     'built-in-openai-id-collision',
+    'provider-id-requires-quoted-toml-key',
     'wire-api-not-responses',
+    'relay-auth-path-not-openai-auth',
+    'endpoint-coupled-provider-policy',
     'provider_section_fields',
     'behavior_fields',
     'sync_table_field(',
     '"base_url"',
     'r94_1_provider_policy_truth_reads_custom_provider_fields',
     'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
+    'r94_1_restore_preserves_post_apply_user_endpoint_edit',
+    'r94_1_policy_with_non_openai_auth_fails_before_routing_mutation',
     'r94_1_identity_only_provider_still_normalizes_to_builtin_openai',
     'r94_1_builtin_openai_policy_collision_fails_before_routing_mutation',
+    'CAS-R94-1-PROVIDER-ENDPOINT-RESTORE-SYMMETRY',
+    'provider_endpoint_owned_by_transfer',
     'snapshot_toml_value_literal(snapshot_config, "model_context_window")',
     'model_context_window_set: !preserve_external_model_catalog',
     'r94_1_external_catalog_removes_transfer_only_global_window',
@@ -618,7 +625,9 @@ Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - provider behavior fields remain on the active source provider; Transfer rewrites only the provider endpoint needed for relay routing'
 Write-Host '  - identity-only providers still normalize to built-in openai, preserving the common r94 Desktop/history path'
-Write-Host '  - unsupported semantic migrations fail before routing mutation instead of silently changing retry/timeout behavior'
+Write-Host '  - unsupported provider ids, wire protocols, and endpoint-coupled auth policies fail before routing mutation'
+Write-Host '  - provider endpoint restore is symmetric and only reverts an endpoint still proven to be Transfer-owned'
+Write-Host '  - post-apply user endpoint edits win over snapshot restoration'
 Write-Host '  - provider policy is never faked by moving values to unsupported TOML root keys'
 Write-Host '  - external catalog removes only a proven Transfer-owned root window, restores explicit snapshot-owned values, and preserves ambiguous live edits'
 Write-Host '  - unrelated user config keys and future provider fields remain user-owned'

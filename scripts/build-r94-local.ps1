@@ -128,6 +128,7 @@ foreach ($Marker in @(
     'function r94HostEpochNow() {',
     'host-first-observed-live-output',
     'r94BaselineCurrentSegments();',
+    'r94SuppressNativeFinalSegmentBadge(turn);',
     'new IntersectionObserver(function(entries) {',
     'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
     'state.observer = { disconnect: r94Cleanup };'
@@ -292,6 +293,7 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = '__casR94ComposerStatusDiagnostics' },
     @{ Text = $ThemeInjectorRsText; Marker = 'mount=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'unsafe=' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'editorLeak=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }

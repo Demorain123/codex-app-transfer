@@ -385,6 +385,9 @@ struct OpenAiPolicyOverlayManifest {
     source_provider: String,
     effective_provider: String,
     fields: std::collections::BTreeMap<String, String>,
+    /// Original target literals captured before Transfer writes the overlay.
+    /// None means the field did not exist and should be removed on restore.
+    previous_fields: std::collections::BTreeMap<String, Option<String>>,
 }
 
 fn provider_policy_overlay_block_reason(
@@ -449,12 +452,28 @@ fn write_openai_policy_overlay(
 ) -> Result<(), CodexError> {
     let source_section = format!("model_providers.{}", policy.source_provider);
     let target_section = "model_providers.openai";
+    let target_before = match std::fs::read_to_string(&paths.config_toml) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let prior_manifest = std::fs::read(&paths.openai_policy_overlay_json)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes).ok());
     let mut fields = std::collections::BTreeMap::new();
+    let mut previous_fields = std::collections::BTreeMap::new();
 
     for field in OPENAI_POLICY_OVERLAY_FIELDS {
         if let Some(literal) =
             snapshot_table_field_literal(source_config, &source_section, field)
         {
+            let previous = prior_manifest
+                .as_ref()
+                .and_then(|manifest| manifest.previous_fields.get(*field).cloned())
+                .unwrap_or_else(|| {
+                    snapshot_table_field_literal(&target_before, target_section, field)
+                });
+            previous_fields.insert((*field).to_string(), previous);
             sync_table_field(
                 &paths.config_toml,
                 target_section,
@@ -472,6 +491,7 @@ fn write_openai_policy_overlay(
         source_provider: policy.source_provider.clone(),
         effective_provider: "openai".to_string(),
         fields,
+        previous_fields,
     };
     if manifest.fields.is_empty() {
         remove_openai_policy_overlay_manifest(paths)?;
@@ -486,10 +506,7 @@ fn write_openai_policy_overlay(
     Ok(())
 }
 
-fn restore_openai_policy_overlay(
-    paths: &CodexPaths,
-    snapshot_config: &str,
-) -> Result<(), CodexError> {
+fn restore_openai_policy_overlay(paths: &CodexPaths) -> Result<(), CodexError> {
     let manifest = match std::fs::read(&paths.openai_policy_overlay_json) {
         Ok(bytes) => serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes).ok(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -506,18 +523,22 @@ fn restore_openai_policy_overlay(
     };
     let section = "model_providers.openai";
 
-    for (field, expected_literal) in manifest.fields {
-        let live_literal = snapshot_table_field_literal(&live, section, &field);
+    for (field, expected_literal) in &manifest.fields {
+        let live_literal = snapshot_table_field_literal(&live, section, field);
         // User edits made while Transfer is active win. Restore only a field
         // that still exactly matches the Transfer-owned overlay literal.
         if live_literal.as_deref().map(str::trim) != Some(expected_literal.trim()) {
             continue;
         }
-        let original = snapshot_table_field_literal(snapshot_config, section, &field);
+        let original = manifest
+            .previous_fields
+            .get(field)
+            .cloned()
+            .unwrap_or(None);
         sync_table_field(
             &paths.config_toml,
             section,
-            &field,
+            field,
             original.as_deref(),
         )?;
     }

@@ -83,24 +83,30 @@ $MainProcessCollector = @'
     .toLowerCase();
 
   // CAS-R94-ACTIVE-THREAD-FALLBACK
-  // Current Codex builds do not always expose the selected sidebar row with the
-  // old active attributes. Reuse the already-resolved pane thread id first,
-  // then route identity, then legacy sidebar/conversation attributes.
+  // CAS-R94-MULTI-PANE-THREAD-COLLECTOR
+  // Current Codex split view can expose a parent thread and one or more child
+  // sub-agent threads at the same time. Collect every visible pane thread id;
+  // only fall back to route/sidebar identity when no pane bar is available.
   const activeThreadExpression = "(() => {" +
     "const a=(e,n)=>e&&e.getAttribute?e.getAttribute(n):null;" +
-    "const b=document.querySelector('[data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]');" +
-    "const bt=a(b,'data-cas-pane-thread-id');if(bt)return bt;" +
+    "const out=[];const seen=new Set();" +
+    "for(const b of document.querySelectorAll('[data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]')){" +
+      "const v=String(a(b,'data-cas-pane-thread-id')||'').replace(/^local:/i,'').trim().toLowerCase();" +
+      "if(v&&!seen.has(v)){seen.add(v);out.push(v);}" +
+    "}" +
+    "if(out.length)return out;" +
     "const p=String(location&&location.pathname||'');" +
     "const m=p.match(/\\/(?:local|thread|conversation)\\/([^/?#]+)/)||p.match(/\\/hotkey-window\\/thread\\/([^/?#]+)/);" +
-    "if(m&&m[1]){try{return decodeURIComponent(m[1]);}catch{return m[1];}}" +
+    "if(m&&m[1]){let v=m[1];try{v=decodeURIComponent(v);}catch{};v=String(v).replace(/^local:/i,'').trim().toLowerCase();if(v)return [v];}" +
     "const r=document.querySelector('[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-active=\"true\"]')||" +
       "document.querySelector('[data-app-action-sidebar-thread-row][aria-current=\"page\"]')||" +
       "document.querySelector('[data-app-action-sidebar-thread-active=\"true\"]')||" +
       "document.querySelector('[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-active]:not([data-app-action-sidebar-thread-active=\"false\"])');" +
-    "return a(r,'data-app-action-sidebar-thread-id')||" +
+    "const v=a(r,'data-app-action-sidebar-thread-id')||" +
       "a(r&&r.querySelector('[data-app-action-sidebar-thread-id]'),'data-app-action-sidebar-thread-id')||" +
       "a(document.querySelector('[data-conversation-id]'),'data-conversation-id')||" +
-      "a(document.querySelector('[data-above-composer-conversation-id]'),'data-above-composer-conversation-id')||null;" +
+      "a(document.querySelector('[data-above-composer-conversation-id]'),'data-above-composer-conversation-id')||'';" +
+    "return v?[String(v).replace(/^local:/i,'').trim().toLowerCase()]:[];" +
   "})()";
 
   const codexUsageRoots = () => {
@@ -363,13 +369,20 @@ $MainProcessCollector = @'
         if (type && type !== 'window' && type !== 'webview') continue;
         const url = String(contents.getURL?.() || '');
         if (url && !url.startsWith('app://')) continue;
-        const threadId = await contents.executeJavaScript(activeThreadExpression, true);
-        if (typeof threadId !== 'string' || !normalizeUsageThreadId(threadId)) continue;
-        const sessionFile = await findUsageSessionFile(threadId);
-        if (!sessionFile) continue;
-        const envelope = await latestUsageInfo(sessionFile);
-        if (!envelope) continue;
-        await pushLocalUsage(contents, threadId, envelope);
+        const threadValue = await contents.executeJavaScript(activeThreadExpression, true);
+        const threadIds = Array.from(new Set(
+          (Array.isArray(threadValue) ? threadValue : [threadValue])
+            .map(normalizeUsageThreadId)
+            .filter(Boolean)
+        ));
+        if (!threadIds.length) continue;
+        for (const threadId of threadIds) {
+          const sessionFile = await findUsageSessionFile(threadId);
+          if (!sessionFile) continue;
+          const envelope = await latestUsageInfo(sessionFile);
+          if (!envelope) continue;
+          await pushLocalUsage(contents, threadId, envelope);
+        }
       } catch {}
     }
   };

@@ -137,6 +137,7 @@ foreach ($Marker in @(
     'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
     'R94_MULTI_PANE_THREAD_OWNERSHIP_RUNTIME',
     'R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME',
+    'R94_MULTI_PANE_FAIL_CLOSED_RUNTIME',
     'function r94ThreadIdForNode(node) {',
     'const latestObservedTurnByThread = new Map();',
     'R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME',

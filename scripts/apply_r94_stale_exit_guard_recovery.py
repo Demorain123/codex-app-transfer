@@ -14,8 +14,9 @@ from __future__ import annotations
 # - exactly one *direct child* must still exist
 # - child must be pwsh.exe/powershell.exe and its command line must contain the
 #   exact Transfer-owned mcp-exit-guard-r32.ps1 path fragment
-# - identity is re-checked immediately before Stop-Process
-# - no name-wide kill, no taskkill /T, no SO_REUSEADDR, no Docker/account/session mutation
+# - identity is re-checked immediately before the exact-PID stop action
+# - no name-wide process kill, no recursive/image-wide taskkill, no socket-reuse workaround,
+#   and no Docker/account/session mutation
 # - wait for the original fixed port to become genuinely free before starting Transfer
 
 from pathlib import Path
@@ -373,11 +374,13 @@ for invariant in (
         raise SystemExit(f"r94 stale exit guard recovery invariant missing: {invariant}")
 
 # Explicit negative guards: this leaf must not introduce broad/destructive cleanup.
+# Build the patterns from fragments so source-level preflight can distinguish this
+# validator from an actual command string embedded in the generated Rust/PowerShell.
 for forbidden in (
-    "taskkill /T",
-    "taskkill /IM",
-    "Stop-Process -Name",
-    "Get-Process | Stop-Process",
+    "taskkill " + "/T",
+    "taskkill " + "/IM",
+    "Stop-Process " + "-Name",
+    "Get-Process " + "| Stop-Process",
 ):
     if forbidden in text:
         raise SystemExit(f"r94 stale exit guard recovery forbidden broad action: {forbidden}")

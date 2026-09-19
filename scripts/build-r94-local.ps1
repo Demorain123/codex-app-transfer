@@ -33,6 +33,7 @@ $R94StaleExitGuardRecovery = Join-Path $PSScriptRoot 'apply_r94_stale_exit_guard
 $R94RecoveryExplainabilityUi = Join-Path $PSScriptRoot 'apply_r46_recovery_explainability_ui.py'
 $R94ProxyHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\proxy.rs'
 $R94ChainHealthRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\chain_health.rs'
+$R941ApplyRs = Join-Path $RepoRoot 'crates\codex_integration\src\apply.rs'
 
 $TempBuilder = Join-Path $PSScriptRoot '.build-r94-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'
@@ -65,7 +66,8 @@ foreach ($Path in @(
     $R94StaleExitGuardRecovery,
     $R94RecoveryExplainabilityUi,
     $R94ProxyHandlerRs,
-    $R94ChainHealthRs
+    $R94ChainHealthRs,
+    $R941ApplyRs
 )) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r94 required source missing: $Path" }
 }
@@ -131,6 +133,7 @@ $R94StaleExitGuardRecoveryText = Normalize-Eol ([System.IO.File]::ReadAllText($R
 $R94RecoveryExplainabilityUiText = Normalize-Eol ([System.IO.File]::ReadAllText($R94RecoveryExplainabilityUi))
 $ProxyHandlerText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ProxyHandlerRs))
 $ChainHealthText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ChainHealthRs))
+$R941ApplyRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R941ApplyRs))
 
 foreach ($Marker in @(
     'apply_r39_lifecycle_selective_modern.py',
@@ -511,9 +514,9 @@ Write-Host '  - finalizer itself rejects misleading native/global tok/s pane att
 
 $RuntimeDebugContracts = @(
     @{ Text = $RuntimeDebugBannerText; Marker = 'CAS-R94-RUNTIME-DEBUG-BANNER-V1' },
-    @{ Text = $RuntimeDebugBannerText; Marker = 'DBG94-1' },
-    @{ Text = $RuntimeDebugBannerText; Marker = "EXPECTED_TRANSFER_REVISION = 'r94'" },
-    @{ Text = $RuntimeDebugBannerText; Marker = "EXPECTED_TRANSFER_VERSION = '2.4.5+94'" },
+    @{ Text = $RuntimeDebugBannerText; Marker = 'DBG94.1-1' },
+    @{ Text = $RuntimeDebugBannerText; Marker = "EXPECTED_TRANSFER_REVISION = 'r94.1'" },
+    @{ Text = $RuntimeDebugBannerText; Marker = "EXPECTED_TRANSFER_VERSION = '2.4.5+94.1'" },
     @{ Text = $RuntimeDebugBannerText; Marker = 'runtimeDebugMode' },
     @{ Text = $AppLayoutText; Marker = 'RuntimeDebugBanner' },
     @{ Text = $SettingsPageText; Marker = "toggle('runtimeDebugMode', false)" },
@@ -549,14 +552,44 @@ foreach ($Contract in $RuntimeDebugContracts) {
     }
 }
 Write-Host 'R94_RUNTIME_DEBUG_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
-if (-not $CargoTomlText.Contains('version = "2.4.5+94"')) {
-    throw 'r94 backend Cargo package version is not 2.4.5+94'
+if (-not $CargoTomlText.Contains('version = "2.4.5+94.1"')) {
+    throw 'r94.1 backend Cargo package version is not 2.4.5+94.1'
 }
 if (-not $CargoLockText.Contains('name = "codex-app-transfer"') -or
-    -not $CargoLockText.Contains('version = "2.4.5+94"')) {
-    throw 'r94 Cargo.lock app package identity is not 2.4.5+94'
+    -not $CargoLockText.Contains('version = "2.4.5+94.1"')) {
+    throw 'r94.1 Cargo.lock app package identity is not 2.4.5+94.1'
 }
 Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
+
+foreach ($Marker in @(
+    'CAS-R94-1-PROVIDER-CONFIG-TRUTH',
+    'CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY',
+    'source provider policy is preserved in user config but is not effective after built-in openai normalization',
+    'snapshot_toml_value_literal(snapshot_config, "model_context_window")',
+    'model_context_window_set: !preserve_external_model_catalog',
+    'r94_1_provider_policy_truth_reads_custom_provider_without_reactivating_it',
+    'r94_1_external_catalog_removes_transfer_only_global_window',
+    'r94_1_external_catalog_preserves_user_owned_global_window'
+)) {
+    if (-not $R941ApplyRsText.Contains($Marker)) {
+        throw "r94.1 provider/config truth contract missing: $Marker"
+    }
+}
+foreach ($Forbidden in @(
+    'sync_root_value(&paths.config_toml, "stream_max_retries"',
+    'sync_root_value(&paths.config_toml, "request_max_retries"',
+    'sync_root_value(&paths.config_toml, "wire_api"',
+    'sync_root_value(&paths.config_toml, "supports_websockets"'
+)) {
+    if ($R941ApplyRsText.Contains($Forbidden)) {
+        throw "r94.1 must not fake provider policy by moving it to unsupported root keys: $Forbidden"
+    }
+}
+Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - custom-provider retry/timeout policy is diagnosed, never silently claimed as built-in openai policy'
+Write-Host '  - inactive custom provider tables remain preserved for old-thread compatibility'
+Write-Host '  - external catalog restores root model_context_window from snapshot ownership instead of retaining Transfer-only 1M'
+Write-Host '  - unrelated user config keys are not auto-deleted'
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
@@ -643,6 +676,11 @@ try {
     # Start from the frozen r90 generator so pane ownership/WAITING/truth-first
     # telemetry stay inherited. r94 replaces the final timestamp owner and adds exact turn/status capability.
     $Builder = $Builder.Replace('R90','R94').Replace('r90','r94').Replace('+90','+94')
+    # r94.1 preview identity: internal R94 filenames/markers stay unchanged so
+    # the already-validated exact-turn/timestamp pipeline is not renamed.
+    $Builder = $Builder.Replace('2.4.5+94','2.4.5+94.1')
+    $Builder = $Builder.Replace('Sub2API Grok Compat r94','Sub2API Grok Compat r94.1')
+    $Builder = $Builder.Replace('visible/package identity is r94.1 / 2.4.5+94.1.1','visible/package identity is r94.1 / 2.4.5+94.1')
 
     $OldPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'"
     $NewPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'"
@@ -700,7 +738,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         "`$TempPaneJs = Join-Path `$PSScriptRoot 'r94-pane-runtime.js'",
         "`$TempTruthJs = Join-Path `$PSScriptRoot 'r94-telemetry-truth.js'",
         'R94_SEMANTIC_RUNTIME_CORRECTNESS_PASS',
-        'visible/package identity is r94 / 2.4.5+94',
+        'visible/package identity is r94.1 / 2.4.5+94.1',
         '.r94-r89-pane-runtime-patch.generated.inc.ps1'
     )) {
         if (-not $Builder.Contains($Marker)) { throw "r94 retargeted builder invariant missing: $Marker" }
@@ -760,8 +798,11 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'
         Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
         Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'
-        Write-Host '  - optional Runtime Debug (DBG94-1) exposes package/runtime/PID evidence in Transfer and the live Codex renderer'
-        Write-Host '  - visible/package identity is r94 / 2.4.5+94'
+        Write-Host '  - optional Runtime Debug (DBG94.1-1) exposes package/runtime/PID evidence in Transfer and the live Codex renderer'
+        Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_RUNTIME_PASS' -ForegroundColor Green
+        Write-Host '  - provider identity remains built-in openai; custom retry/timeout policy is source diagnostics only'
+        Write-Host '  - external model catalog owns per-model context unless the snapshot proves a user-owned root override'
+        Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     }
 }
 finally {

@@ -137,6 +137,8 @@ foreach ($Marker in @(
     'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
     'R94_MULTI_PANE_THREAD_OWNERSHIP_RUNTIME',
     'R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME',
+    'function r94RememberLatestObservedTurn(turn) {',
+    'latestObservedTurn = turn;',
     'R94_MULTI_PANE_FAIL_CLOSED_RUNTIME',
     'function r94ThreadIdForNode(node) {',
     'const latestObservedTurnByThread = new Map();',
@@ -161,6 +163,11 @@ foreach ($Marker in @(
 )) {
     if (-not $OverlayJs.Contains($Marker)) { throw "r94 turn overlay contract missing: $Marker" }
 }
+if ($OverlayJs -match 'function r94RememberLatestObservedTurn\(turn\)[\s\S]{0,220}r94RememberLatestObservedTurn\(turn\);') {
+    throw 'r94 latest-owner helper regressed to self recursion'
+}
+Write-Host 'R94_LATEST_OWNER_HELPER_NONRECURSIVE_PASS' -ForegroundColor Green
+
 foreach ($Forbidden in @(
     'characterData: true',
     'characterData:true',

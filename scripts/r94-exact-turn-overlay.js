@@ -1553,9 +1553,16 @@
         return;
       }
 
-      if (exact.sourceElement instanceof Element && exact.sourceElement.isConnected) {
-        // Codex owns final/user sent-time UI even when it is hover-revealed.
-        // Never duplicate that native timestamp with a Transfer turn badge.
+      if (
+        exact.sourceElement instanceof Element &&
+        exact.sourceElement.isConnected &&
+        r94NativeTimestampVisible(exact.sourceElement)
+      ) {
+        // R94_NATIVE_TIMESTAMP_VISIBILITY_GATE_RUNTIME
+        // Native ownership suppresses the Transfer badge only while the native
+        // sent-time is actually visible. Codex can keep hidden/opacity-zero
+        // time nodes mounted in the DOM; mere connectivity is not user-visible
+        // timestamp ownership and previously caused badge=0/nativeSupp runaway.
         r94RemoveTurnBadge(turn);
         r94SuppressNativeFinalSegmentBadge(turn);
         diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;

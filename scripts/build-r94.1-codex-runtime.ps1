@@ -117,13 +117,21 @@ if ($PreflightOnly) {
         'provider.stream_idle_timeout_ms.is_some()',
         'provider.websocket_connect_timeout_ms.is_some()',
         'provider.http_headers.take()',
-        'provider.query_params.take()',
-        $PatchTestMarker,
-        'assert_eq!(openai.stream_max_retries, Some(15))',
-        'assert_eq!(openai.base_url.as_deref(), Some("http://127.0.0.1:18080"))'
+        'provider.query_params.take()'
     )) {
         if (-not $MergeReplacement.Contains($Marker)) {
             throw "r94.1 Codex runtime patch contract missing: $Marker"
+        }
+    }
+    foreach ($Marker in @(
+        $PatchTestMarker,
+        'assert_eq!(openai.stream_max_retries, Some(15))',
+        'assert_eq!(openai.request_max_retries, Some(7))',
+        'assert_eq!(openai.base_url.as_deref(), Some("http://127.0.0.1:18080"))',
+        'assert_ne!(openai.name, "User OpenAi")'
+    )) {
+        if (-not $PatchTest.Contains($Marker)) {
+            throw "r94.1 Codex runtime patch test contract missing: $Marker"
         }
     }
     if ($MergeReplacement.Contains('built_in_provider.base_url') -or

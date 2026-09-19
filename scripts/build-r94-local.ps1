@@ -254,6 +254,10 @@ foreach ($Marker in @(
 # they intentionally appear as literals inside its runtime fail-closed guard.
 # The finalizer applies those checks to generated $Patched JavaScript instead.
 Write-Host 'R94_COMPOSER_STATUS_INSIDE_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_EDITOR_SAFE_STATUS_CONTRACT_PASS' -ForegroundColor Green
+Write-Host '  - status mount host must be outside ProseMirror/contenteditable and structurally tied to composer controls'
+Write-Host '  - failed/unknown mount discovery removes the bar and retries later; it never falls back into the draft'
+Write-Host '  - runtime Debug MATCH requires an r94-inline-safe bar and editorLeak=0'
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
     'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS',

@@ -30,9 +30,10 @@ def run_leaf(rel: str) -> None:
             ) from exc
 
 
-# 1) Native read-only Windows listener/binder attribution. This also adds the
-#    required windows-rs features and module registration.
-run_leaf("scripts/apply_r38_windows_port_owner.py")
+# 1) Native read-only Windows listener/binder attribution. Use the modern
+#    substrate-only leaf: the historical r38 leaf also expected an r38-specific
+#    proxy_runner lifecycle anchor and is intentionally not replayed here.
+run_leaf("scripts/apply_r39_windows_owner_selective_modern.py")
 
 # 2) Teach Chain Health/Recovery to distinguish a free stopped Transfer from a
 #    live external binder or unresolved listener residue. Never kill, port-hop,
@@ -127,6 +128,7 @@ for marker in (
     "CAS-R38-WINDOWS-TCP-OWNER",
     "GetExtendedTcpTable",
     "TCP_TABLE_OWNER_PID_LISTENER",
+    "listener_owner_evidence",
 ):
     if marker not in owner:
         raise SystemExit(f"modern r39 lifecycle Windows owner invariant missing: {marker}")

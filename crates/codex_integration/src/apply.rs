@@ -169,6 +169,7 @@ struct ProviderPolicyTruth {
     stream_idle_timeout_ms: Option<String>,
     websocket_connect_timeout_ms: Option<String>,
     wire_api: Option<String>,
+    requires_openai_auth: Option<String>,
     supports_websockets: Option<String>,
     supports_standalone_web_search: Option<String>,
     behavior_fields: Vec<String>,
@@ -264,6 +265,11 @@ fn provider_policy_truth_for_source(
             "websocket_connect_timeout_ms",
         ),
         wire_api: snapshot_table_field_literal(content, &section, "wire_api"),
+        requires_openai_auth: snapshot_table_field_literal(
+            content,
+            &section,
+            "requires_openai_auth",
+        ),
         supports_websockets: snapshot_table_field_literal(
             content,
             &section,
@@ -321,6 +327,21 @@ fn provider_policy_carry_forward_block_reason(
     {
         return Some("wire-api-not-responses");
     }
+    if policy.requires_openai_auth.as_deref() != Some("true") {
+        // Transfer's local relay authentication is supplied through the same
+        // auth.json path used by the built-in OpenAI provider. A source provider
+        // that relies on env_key/command/AWS auth cannot simply be pointed at
+        // the relay without changing request authentication semantics.
+        return Some("relay-auth-path-not-openai-auth");
+    }
+    if policy.behavior_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "auth" | "gateway_oauth" | "aws" | "model_catalog_url"
+        )
+    }) {
+        return Some("endpoint-coupled-provider-policy");
+    }
     None
 }
 
@@ -345,6 +366,10 @@ fn log_provider_policy_truth(
         stream_idle_timeout_ms = policy.stream_idle_timeout_ms.as_deref().unwrap_or("<unset>"),
         websocket_connect_timeout_ms = policy
             .websocket_connect_timeout_ms
+            .as_deref()
+            .unwrap_or("<unset>"),
+        requires_openai_auth = policy
+            .requires_openai_auth
             .as_deref()
             .unwrap_or("<unset>"),
         supports_websockets = policy.supports_websockets.as_deref().unwrap_or("<unset>"),
@@ -2959,6 +2984,40 @@ supports_websockets = true
             restored.contains("base_url = \"https://user-edited.example/v1\""),
             "post-apply user endpoint edit must win over snapshot restoration: {restored}"
         );
+    }
+
+    #[test]
+    fn r94_1_policy_with_non_openai_auth_fails_before_routing_mutation() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        let original = "model_provider = \"EnvProvider\"\n\n[model_providers.EnvProvider]\nname = \"EnvProvider\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nenv_key = \"UPSTREAM_KEY\"\nstream_max_retries = 15\n";
+        std::fs::write(&paths.config_toml, original).unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        let err = apply_provider(&paths, &cfg)
+            .expect_err("endpoint-coupled auth must fail closed instead of silently changing credentials");
+        assert!(
+            err.to_string().contains("relay-auth-path-not-openai-auth"),
+            "{err}"
+        );
+        assert_eq!(read_toml(&paths), original);
     }
 
     #[test]

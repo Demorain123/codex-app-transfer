@@ -592,7 +592,7 @@ foreach ($Marker in @(
     'r94_1_live_provider_switch_after_snapshot_wins',
     'r94_1_live_provider_removal_after_snapshot_is_not_resurrected',
     'r94_1_dotted_provider_text_inside_unrelated_table_is_not_root_policy',
-    'r94_1_snapshot_policy_without_live_provider_table_fails_closed',
+    'r94_1_snapshot_policy_without_live_provider_table_is_detected',
     'r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table',
     'live-provider-table-missing',
     'root_scope',

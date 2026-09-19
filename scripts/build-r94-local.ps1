@@ -123,6 +123,13 @@ foreach ($Marker in @(
     '[data-chatgpt-conversation-turn="true"]',
     'function r94NativeTimestampVisible(node) {',
     'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
+    'R94_FULL_DATE_TIMESTAMP_RUNTIME',
+    'function r94LocalDateTimeStamp(epoch) {',
+    'R94_TIMELINE_NAV_RUNTIME',
+    "const R94_TIMELINE_RAIL_ID = 'cas-r94-timeline-rail';",
+    'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',
+    'function r94JumpTimelineEntry(key) {',
+    "window.matchMedia('(prefers-reduced-motion: reduce)')",
     'function r94CollectVisualSegments(node, root, depth) {',
     'function r94TopLevelSegments(turn) {',
     'function r94AssistantMessageSurface(node) {',
@@ -156,6 +163,14 @@ Write-Host '  - user-only wrappers are excluded from assistant timestamping'
 Write-Host '  - existing/remounted history is baselined and cannot receive a fresh host-now timestamp'
 Write-Host '  - native final sent-time wins; Transfer removes its final segment badge instead of duplicating Codex'
 Write-Host '  - all Transfer timestamp badges live in the overlay root with pointer-events:none'
+Write-Host 'R94_FULL_DATE_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
+Write-Host '  - Transfer-owned timestamp labels use host-local YYYY-MM-DD HH:mm:ss; tooltip also carries the short local timezone'
+Write-Host '  - ambiguous native time-only history is never assigned a guessed date'
+Write-Host 'R94_TIMELINE_NAV_CONTRACT_PASS' -ForegroundColor Green
+Write-Host '  - a separate Transfer-owned left rail exposes dated U/A/T/G/S/F time nodes without mutating Codex React DOM'
+Write-Host '  - rail hover/focus expands time labels; click performs bounded smooth jump and respects prefers-reduced-motion'
+Write-Host '  - disconnected/virtualized anchors retain a bounded normalized position fallback instead of inventing history timestamps'
+Write-Host '  - rail DOM is excluded from timestamp MutationObserver scans and removed during runtime cleanup'
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_GENERATION_PATCH',
     'R94_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS',

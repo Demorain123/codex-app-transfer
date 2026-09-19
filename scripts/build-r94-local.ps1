@@ -294,6 +294,7 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'mount=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'unsafe=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'editorLeak=' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'SEGMode=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }

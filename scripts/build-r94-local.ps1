@@ -495,11 +495,7 @@ foreach ($Marker in @(
 }
 foreach ($Forbidden in @(
     'R94_TURN_STATUS_BASE_OWNER_PASS',
-    'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
-    'nativeFallback.nativeSpeed',
-    'exact.contextPercent = Number.isFinite(exact.inputTokens)',
-    'contextPercent: Number.isFinite(inputTokens)',
-    "('total ' + shortNumber(displayUsage.sessionTotalTokens))"
+    'R94_TURN_STATUS_BASE_OWNER_RUNTIME'
 )) {
     if ($TurnNotificationFinalizer.Contains($Forbidden)) {
         throw "r94 turn finalizer still permits base-status downgrade: $Forbidden"
@@ -508,6 +504,7 @@ foreach ($Forbidden in @(
 Assert-PowerShellParses $ComposerStatusFinalizer 'r94 composer status finalizer'
 Assert-PowerShellParses $TurnNotificationFinalizer 'r94 turn notification finalizer'
 Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - finalizer itself rejects misleading native/global tok/s pane attribution and input-only context math after materialization'
 
 $RuntimeDebugContracts = @(
     @{ Text = $RuntimeDebugBannerText; Marker = 'CAS-R94-RUNTIME-DEBUG-BANNER-V1' },

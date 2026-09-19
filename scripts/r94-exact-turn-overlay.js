@@ -1161,11 +1161,15 @@
     }
 
     function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {
+      // R94_NATIVE_RAIL_METADATA_ONLY_RUNTIME
+      // Keep bounded timestamp metadata for diagnostics/future native-rail
+      // augmentation, but create no visible rail/marker DOM and do no scroll
+      // geometry work during streaming.
       const normalizedEpoch = r94EpochMillis(epoch);
       if (!key || !Number.isFinite(normalizedEpoch)) return;
       let entry = timelineEntries.get(key);
       if (!entry) {
-        entry = { key, epoch: normalizedEpoch, anchor: null, kind: kind || 'assistant', approx: !!approx, preview: '', ratio: null };
+        entry = { key, epoch: normalizedEpoch, anchor: null, kind: kind || 'assistant', approx: !!approx, preview: '' };
       }
       entry.epoch = normalizedEpoch;
       if (anchor instanceof Element) entry.anchor = anchor;
@@ -1173,95 +1177,17 @@
       entry.approx = !!approx;
       entry.preview = String(preview || entry.preview || '').replace(/\s+/g,' ').trim().slice(0,180);
       entry.fullLabel = (entry.approx ? '≈' : '') + r94LocalDateTimeStamp(normalizedEpoch);
-      entry.compactLabel = r94TimelineKindLabel(entry.kind) + ' ' + entry.fullLabel;
-
-      const scroller = r94TimelineScrollerForEntry(entry);
-      const metrics = r94ScrollerMetrics(scroller);
-      const ratio = r94TimelineRatioForAnchor(entry.anchor, metrics);
-      if (Number.isFinite(ratio)) {
-        entry.ratio = ratio;
-        timelineScroller = scroller;
-      }
-
       timelineEntries.delete(key);
       timelineEntries.set(key, entry);
       r94TrimTimelineEntries();
-
-      let marker = timelineMarkers.get(key);
-      if (!marker || !marker.isConnected) {
-        marker = r94CreateTimelineMarker(timelineRail, entry);
-        marker.addEventListener('click', function(event) {
-          event.preventDefault();
-          event.stopPropagation();
-          r94JumpTimelineEntry(key);
-        });
-        timelineMarkers.set(key, marker);
-      } else {
-        marker.setAttribute('aria-label', entry.fullLabel + ' · ' + entry.kind + ' · click to jump');
-        marker.title = entry.fullLabel + ' · ' + entry.kind + (entry.preview ? (' · ' + entry.preview) : '');
-        if (marker.__casR94Label) marker.__casR94Label.textContent = entry.compactLabel;
-      }
       diagnostics.timelineLastKind = entry.kind;
       r94SyncDiagnostics();
     }
 
     function r94PositionTimelineRail() {
-      if (!(timelineRail instanceof HTMLElement)) return;
-      if (!timelineEntries.size) {
-        timelineRail.style.display = 'none';
-        return;
-      }
-
-      const scroller = r94TimelineScrollerForEntry(null);
-      const metrics = r94ScrollerMetrics(scroller);
-      if (!metrics) {
-        timelineRail.style.display = 'none';
-        return;
-      }
-      timelineScroller = scroller;
-
-      const railTop = Math.max(64, Math.min(innerHeight - 120, metrics.rect.top + 18));
-      const railBottom = Math.max(railTop + 80, Math.min(innerHeight - 18, metrics.rect.bottom - 18));
-      const railHeight = Math.max(80, railBottom - railTop);
-      const railLeft = Math.max(6, Math.min(innerWidth - 150, metrics.rect.left + 8));
-      timelineRail.style.display = 'block';
-      timelineRail.style.left = Math.round(railLeft) + 'px';
-      timelineRail.style.top = Math.round(railTop) + 'px';
-      timelineRail.style.height = Math.round(railHeight) + 'px';
-
-      let activeKey = '';
-      let activeDistance = Number.POSITIVE_INFINITY;
-      const readingRatio = Math.max(0, Math.min(1, (metrics.scrollTop + metrics.clientHeight * 0.28) / Math.max(1, metrics.scrollHeight)));
-
-      for (const [key, entry] of timelineEntries) {
-        if (entry.anchor instanceof Element && entry.anchor.isConnected) {
-          const ratio = r94TimelineRatioForAnchor(entry.anchor, metrics);
-          if (Number.isFinite(ratio)) entry.ratio = ratio;
-        }
-        const marker = timelineMarkers.get(key);
-        if (!marker) continue;
-        if (!Number.isFinite(entry.ratio)) {
-          marker.style.display = 'none';
-          continue;
-        }
-        marker.style.display = 'block';
-        marker.style.top = Math.round(4 + entry.ratio * Math.max(1, railHeight - 8)) + 'px';
-
-        const distance = Math.abs(entry.ratio - readingRatio);
-        if (distance < activeDistance) {
-          activeDistance = distance;
-          activeKey = key;
-        }
-      }
-
-      timelineActiveKey = activeKey;
-      diagnostics.timelineActiveKey = activeKey;
-      for (const [key, marker] of timelineMarkers) {
-        const active = key === activeKey;
-        marker.setAttribute('data-cas-r94-timeline-active', active ? 'true' : 'false');
-        if (typeof marker.__casR94SetExpanded === 'function') marker.__casR94SetExpanded(false);
-      }
-      r94SyncDiagnostics();
+      // R94_NATIVE_RAIL_NO_CUSTOM_PAINT_RUNTIME
+      // Intentionally empty. Codex's official minimap/rail remains the only
+      // visible navigation rail.
     }
 
     function r94RemoveTurnBadge(turn) {

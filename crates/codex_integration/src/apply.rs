@@ -173,6 +173,7 @@ struct ProviderPolicyTruth {
     supports_websockets: Option<String>,
     supports_standalone_web_search: Option<String>,
     behavior_fields: Vec<String>,
+    section_requires_quoted_key: bool,
 }
 
 impl ProviderPolicyTruth {
@@ -195,12 +196,16 @@ fn root_string_value(content: &str, key: &str) -> Option<String> {
         })
 }
 
-fn provider_section_fields(content: &str, source_provider: &str) -> Option<Vec<String>> {
+fn provider_section_fields(
+    content: &str,
+    source_provider: &str,
+) -> Option<(Vec<String>, bool)> {
     let plain_header = format!("[model_providers.{source_provider}]");
     let quoted_provider = source_provider.replace('"', "\\\"");
     let quoted_header = format!("[model_providers.\"{quoted_provider}\"]");
     let mut in_section = false;
     let mut found_section = false;
+    let mut section_requires_quoted_key = false;
     let mut fields = Vec::new();
 
     for line in content.lines() {
@@ -209,8 +214,13 @@ fn provider_section_fields(content: &str, source_provider: &str) -> Option<Vec<S
             if in_section {
                 break;
             }
-            in_section = trimmed == plain_header || trimmed == quoted_header;
-            found_section |= in_section;
+            let plain = trimmed == plain_header;
+            let quoted = trimmed == quoted_header;
+            in_section = plain || quoted;
+            if in_section {
+                found_section = true;
+                section_requires_quoted_key = quoted;
+            }
             continue;
         }
         if !in_section || trimmed.is_empty() || trimmed.starts_with('#') {
@@ -228,14 +238,15 @@ fn provider_section_fields(content: &str, source_provider: &str) -> Option<Vec<S
         }
     }
 
-    found_section.then_some(fields)
+    found_section.then_some((fields, section_requires_quoted_key))
 }
 
 fn provider_policy_truth_for_source(
     content: &str,
     source_provider: &str,
 ) -> Option<ProviderPolicyTruth> {
-    let fields = provider_section_fields(content, source_provider)?;
+    let (fields, section_requires_quoted_key) =
+        provider_section_fields(content, source_provider)?;
     let section = format!("model_providers.{source_provider}");
     let behavior_fields = fields
         .into_iter()
@@ -281,6 +292,7 @@ fn provider_policy_truth_for_source(
             "supports_standalone_web_search",
         ),
         behavior_fields,
+        section_requires_quoted_key,
     })
 }
 
@@ -311,10 +323,11 @@ fn provider_policy_carry_forward_block_reason(
         // precisely the migration r94.1 must preserve.
         return Some("built-in-openai-id-collision");
     }
-    if !policy
-        .source_provider
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    if policy.section_requires_quoted_key
+        || !policy
+            .source_provider
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         // sync_table_field currently targets standard bare TOML table keys.
         // Do not guess how to rewrite quoted/dotted provider ids.

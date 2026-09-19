@@ -3276,7 +3276,7 @@ supports_websockets = true
     }
 
     #[test]
-    fn r94_1_snapshot_policy_without_live_provider_table_fails_closed() {
+    fn r94_1_snapshot_policy_without_live_provider_table_is_detected() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(

@@ -1172,6 +1172,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const exactTurn = !!window.__casR94TurnCapability;
     const statusNodes = Array.from(document.querySelectorAll('[data-cas-status-inside-composer="true"]'));
     const statusBars = statusNodes.length;
+    const statusPrimary = statusNodes.length ? statusNodes[0] : null;
+    const statusTurnSource = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-turn-source') || '') : '';
+    const statusTurnId = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-turn-id') || '') : '';
+    const statusPaneThreadId = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-pane-thread-id') || '') : '';
     const statusEditorLeaks = statusNodes.filter((node) =>
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
@@ -1233,6 +1237,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       exactTurn,
       statusInsideComposer,
       statusBars,
+      statusTurnSource,
+      statusTurnId,
+      statusPaneThreadId,
       statusEditorLeaks,
       composerCandidates,
       editables,
@@ -1303,6 +1310,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · calls/slow/mount/fast=' + s.composerMountCalls + '/' + s.composerMountAttempts + '/' +
           s.composerMountCount + '/' + s.composerFastReuses +
         ' · unsafe=' + s.composerUnsafeRejects + '</div>',
+      '<div>Status src=' + escapeHtml(s.statusTurnSource || '-') +
+        ' · paneTid=' + escapeHtml(s.statusPaneThreadId || '-') +
+        ' · turn=' + escapeHtml(s.statusTurnId || '-') + '</div>',
       '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
         ' · nativeSupp=' + s.tsSuppressed +
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',

@@ -74,10 +74,8 @@ recommend_scope = text.find('''    match transfer.code.as_str() {
 ''')
 if recommend_scope < 0:
     raise SystemExit("r94 stale exit guard recovery: transfer recommendations match missing")
-recommend_start = text.find('''        "transfer_port_stale_owner" =>
-''', recommend_scope)
-recommend_next = text.find('''        "transfer_stopped" =>
-''', recommend_start)
+recommend_start = text.find('        "transfer_port_stale_owner" =>', recommend_scope)
+recommend_next = text.find('        "transfer_stopped" =>', recommend_start)
 if recommend_start < 0 or recommend_next < 0:
     raise SystemExit("r94 stale exit guard recovery: stale recommendation semantic boundary missing")
 recommend_segment = text[recommend_start:recommend_next]

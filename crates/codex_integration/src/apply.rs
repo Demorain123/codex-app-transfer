@@ -135,14 +135,32 @@ fn proxy_port_from_url(base_url: &str) -> u16 {
 }
 
 // CAS-R94-1-PROVIDER-CONFIG-TRUTH
+// CAS-R94-1-PROVIDER-POLICY-CARRY-FORWARD
 //
-// r94.1 intentionally separates provider *identity* from provider *policy*.
-// Transfer strips root model_provider so Codex falls back to its built-in
-// `openai` provider, but a user-owned custom provider table may still contain
-// retry/timeout policy. Those values must not be silently presented as effective
-// after the identity normalization. We therefore capture them from the snapshot
-// for diagnostics only; r94.1 does NOT copy them to unsupported root keys and
-// does NOT restore the custom provider identity.
+// r94.1 separates provider *identity* from provider *policy*, but unlike the
+// first preview it does not stop at diagnostics. When the user's active custom
+// provider contains behavior fields that Codex cannot apply to the built-in
+// \`openai\` provider, Transfer keeps that source provider active and changes
+// only the provider endpoint to the local Transfer relay. The rest of the
+// provider table stays in place, so current and future user-added provider
+// settings remain effective without being copied to unsupported TOML roots.
+//
+// We still prefer the built-in \`openai\` path when the source provider contains
+// only identity/routing/auth boilerplate. This keeps the r94 Desktop/history
+// compatibility path for the common case. If semantic carry-forward cannot be
+// represented safely (for example a source id that collides with built-in
+// \`openai\`, or a non-Responses wire API), apply fails before mutating routing
+// keys instead of silently downgrading the user's policy.
+const PROVIDER_IDENTITY_ROUTING_KEYS: &[&str] = &[
+    "name",
+    "base_url",
+    "wire_api",
+    "requires_openai_auth",
+    "env_key",
+    "env_key_instructions",
+    "experimental_bearer_token",
+];
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ProviderPolicyTruth {
     source_provider: String,
@@ -152,16 +170,13 @@ struct ProviderPolicyTruth {
     websocket_connect_timeout_ms: Option<String>,
     wire_api: Option<String>,
     supports_websockets: Option<String>,
+    supports_standalone_web_search: Option<String>,
+    behavior_fields: Vec<String>,
 }
 
 impl ProviderPolicyTruth {
     fn has_provider_policy(&self) -> bool {
-        self.request_max_retries.is_some()
-            || self.stream_max_retries.is_some()
-            || self.stream_idle_timeout_ms.is_some()
-            || self.websocket_connect_timeout_ms.is_some()
-            || self.wire_api.is_some()
-            || self.supports_websockets.is_some()
+        !self.behavior_fields.is_empty()
     }
 }
 
@@ -179,15 +194,55 @@ fn root_string_value(content: &str, key: &str) -> Option<String> {
         })
 }
 
-fn provider_policy_truth_from_config(content: &str) -> Option<ProviderPolicyTruth> {
-    let source_provider = root_string_value(content, "model_provider")?;
-    if source_provider.trim().is_empty() {
-        return None;
+fn provider_section_fields(content: &str, source_provider: &str) -> Option<Vec<String>> {
+    let plain_header = format!("[model_providers.{source_provider}]");
+    let quoted_provider = source_provider.replace('"', "\\\"");
+    let quoted_header = format!("[model_providers.\"{quoted_provider}\"]");
+    let mut in_section = false;
+    let mut found_section = false;
+    let mut fields = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if in_section {
+                break;
+            }
+            in_section = trimmed == plain_header || trimmed == quoted_header;
+            found_section |= in_section;
+            continue;
+        }
+        if !in_section || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((raw_key, _)) = trimmed.split_once('=') {
+            let key = raw_key
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
+            if !key.is_empty() && !fields.iter().any(|existing| existing == &key) {
+                fields.push(key);
+            }
+        }
     }
 
+    found_section.then_some(fields)
+}
+
+fn provider_policy_truth_for_source(
+    content: &str,
+    source_provider: &str,
+) -> Option<ProviderPolicyTruth> {
+    let fields = provider_section_fields(content, source_provider)?;
     let section = format!("model_providers.{source_provider}");
+    let behavior_fields = fields
+        .into_iter()
+        .filter(|key| !PROVIDER_IDENTITY_ROUTING_KEYS.contains(&key.as_str()))
+        .collect();
+
     Some(ProviderPolicyTruth {
-        source_provider,
+        source_provider: source_provider.to_string(),
         request_max_retries: snapshot_table_field_literal(
             content,
             &section,
@@ -214,22 +269,68 @@ fn provider_policy_truth_from_config(content: &str) -> Option<ProviderPolicyTrut
             &section,
             "supports_websockets",
         ),
+        supports_standalone_web_search: snapshot_table_field_literal(
+            content,
+            &section,
+            "supports_standalone_web_search",
+        ),
+        behavior_fields,
     })
 }
 
-fn log_provider_policy_truth(snapshot_config: Option<&str>) {
-    let Some(policy) = snapshot_config.and_then(provider_policy_truth_from_config) else {
-        return;
-    };
+fn provider_policy_truth_from_config(content: &str) -> Option<ProviderPolicyTruth> {
+    let source_provider = root_string_value(content, "model_provider")?;
+    if source_provider.trim().is_empty() {
+        return None;
+    }
+    provider_policy_truth_for_source(content, &source_provider)
+}
+
+fn literal_string_eq(value: &str, expected: &str) -> bool {
+    value
+        .trim()
+        .trim_matches('"')
+        .eq_ignore_ascii_case(expected)
+}
+
+fn provider_policy_carry_forward_block_reason(
+    policy: &ProviderPolicyTruth,
+) -> Option<&'static str> {
+    if !policy.has_provider_policy() {
+        return Some("no-user-provider-policy");
+    }
+    if policy.source_provider.eq_ignore_ascii_case("openai") {
+        // Codex 0.144.x does not generally allow user model_providers.openai
+        // to override the built-in provider, so keeping this id would still
+        // make retry/timeout values ineffective.
+        return Some("built-in-openai-id-collision");
+    }
+    if policy
+        .wire_api
+        .as_deref()
+        .is_some_and(|wire_api| !literal_string_eq(wire_api, "responses"))
+    {
+        return Some("wire-api-not-responses");
+    }
+    None
+}
+
+fn log_provider_policy_truth(
+    policy: &ProviderPolicyTruth,
+    carried_forward: bool,
+    effective_provider: &str,
+    reason: &str,
+) {
     if !policy.has_provider_policy() {
         return;
     }
 
-    tracing::warn!(
+    let behavior_fields = policy.behavior_fields.join(",");
+    tracing::info!(
         target: "codex_integration::apply",
         marker = "CAS-R94-1-PROVIDER-CONFIG-TRUTH",
         source_provider = %policy.source_provider,
-        effective_provider = "openai",
+        effective_provider = effective_provider,
         request_max_retries = policy.request_max_retries.as_deref().unwrap_or("<unset>"),
         stream_max_retries = policy.stream_max_retries.as_deref().unwrap_or("<unset>"),
         stream_idle_timeout_ms = policy.stream_idle_timeout_ms.as_deref().unwrap_or("<unset>"),
@@ -237,10 +338,15 @@ fn log_provider_policy_truth(snapshot_config: Option<&str>) {
             .websocket_connect_timeout_ms
             .as_deref()
             .unwrap_or("<unset>"),
-        wire_api = policy.wire_api.as_deref().unwrap_or("<unset>"),
         supports_websockets = policy.supports_websockets.as_deref().unwrap_or("<unset>"),
-        carried_forward = false,
-        "source provider policy is preserved in user config but is not effective after built-in openai normalization"
+        supports_standalone_web_search = policy
+            .supports_standalone_web_search
+            .as_deref()
+            .unwrap_or("<unset>"),
+        behavior_fields = %behavior_fields,
+        carried_forward = carried_forward,
+        reason = reason,
+        "provider policy semantic carry-forward decision"
     );
 }
 
@@ -278,7 +384,60 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     // user-authored values remain, while known stale Transfer signatures are
     // stripped from the snapshot copy by snapshot_codex_state().
     let snapshot_config = read_snapshot_config(paths);
-    log_provider_policy_truth(snapshot_config.as_deref());
+
+    // Resolve the provider id from the snapshot, then inspect the *live* provider
+    // block so user edits made after the snapshot (including future Codex
+    // provider fields) are preserved too. If the live block disappeared, do not
+    // resurrect it from an old snapshot.
+    let provider_policy = snapshot_config
+        .as_deref()
+        .and_then(provider_policy_truth_from_config)
+        .and_then(|snapshot_policy| {
+            match std::fs::read_to_string(&paths.config_toml) {
+                Ok(live) => provider_policy_truth_for_source(
+                    &live,
+                    &snapshot_policy.source_provider,
+                ),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "codex_integration::apply",
+                        marker = "CAS-R94-1-PROVIDER-CONFIG-TRUTH",
+                        error = %e,
+                        "could not inspect live provider block; refusing to infer carry-forward from stale snapshot state"
+                    );
+                    None
+                }
+            }
+        });
+
+    // Capability-aware fail-closed gate. Do this before openai_base_url or
+    // chatgpt_base_url are modified, so an unsupported semantic migration never
+    // leaves a half-applied config.
+    if let Some(policy) = provider_policy.as_ref().filter(|policy| policy.has_provider_policy()) {
+        if cfg.base_url.trim().is_empty() {
+            log_provider_policy_truth(
+                policy,
+                false,
+                "unchanged",
+                "relay-url-unavailable",
+            );
+            return Err(CodexError::Other(format!(
+                "r94.1 cannot preserve provider policy for '{}' because the Transfer relay URL is empty",
+                policy.source_provider
+            )));
+        }
+        if let Some(reason) = provider_policy_carry_forward_block_reason(policy) {
+            log_provider_policy_truth(policy, false, "unchanged", reason);
+            return Err(CodexError::Other(format!(
+                "r94.1 cannot preserve provider policy for '{}' without changing behavior: {reason}",
+                policy.source_provider
+            )));
+        }
+    }
+    let carry_forward_provider_policy = provider_policy
+        .as_ref()
+        .is_some_and(|policy| policy.has_provider_policy());
 
     // 2. config.toml: openai_base_url
     if cfg.base_url.is_empty() {
@@ -307,23 +466,48 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         sync_root_value(&paths.config_toml, "chatgpt_base_url", None)?;
     }
 
-    // 2b. **无条件 strip model_provider 字段**(#258 验证后强约束):
+    // 2b. Provider identity / policy semantic carry-forward.
     //
-    // 用户硬性要求 — 使用本项目时 config.toml **必须没有 model_provider 这一项**。
-    // 残留 user 之前配过的 model_provider(任何值,包括 "openai")可能让 Codex CLI
-    // 走非预期 provider 路径,**导致回话丢失**(endpoint 走 stale custom block /
-    // history 链断 / autocompact 找不到 prior turn 等)。
+    // Common case: no provider-only behavior fields -> keep r94's built-in
+    // openai normalization by stripping model_provider.
     //
-    // 等价性:Codex CLI 在缺失字段时 fallback 到 openai,跟显式写
-    // `model_provider = "openai"` 行为等价(都会读 openai_base_url 走 proxy);
-    // 但**只有 strip 才能确保不残留任何 user-set 值**。
+    // Policy case: the user selected a non-built-in custom provider and its
+    // table contains behavior fields (retry/timeouts/headers/query params/
+    // capability flags or future unknown fields). Those settings only remain
+    // effective while that provider is selected, so retain the original
+    // provider id and rewrite only its base_url to the Transfer relay. The
+    // provider table itself is otherwise untouched.
     //
-    // 不留 env opt-in:任何允许写回 `model_provider = "openai"` 的 escape hatch
-    // 都可能让上面"回话丢失"风险复发,所以无条件 strip。如果未来 Codex CLI
-    // 真的需要显式 openai 字段才生效,再 reopen 这条决策。
-    //
-    // 快照已在第 1 步拿到用户原值,restore 时能完整退回原值(包括 custom)。
-    sync_root_value(&paths.config_toml, "model_provider", None)?;
+    // This deliberately avoids copying values into TOML roots that Codex does
+    // not read. Restore still uses the pre-apply snapshot to recover the user's
+    // original provider id and original endpoint.
+    if carry_forward_provider_policy {
+        let policy = provider_policy
+            .as_ref()
+            .expect("carry-forward implies provider policy");
+        let section = format!("model_providers.{}", policy.source_provider);
+        let relay_literal = toml_string_literal(cfg.base_url);
+        sync_table_field(
+            &paths.config_toml,
+            &section,
+            "base_url",
+            Some(&relay_literal),
+        )?;
+        let provider_literal = toml_string_literal(&policy.source_provider);
+        sync_root_value(
+            &paths.config_toml,
+            "model_provider",
+            Some(&provider_literal),
+        )?;
+        log_provider_policy_truth(
+            policy,
+            true,
+            &policy.source_provider,
+            "custom-provider-policy-preserved",
+        );
+    } else {
+        sync_root_value(&paths.config_toml, "model_provider", None)?;
+    }
 
     // 2c. **#212/#215 Codex 联网默认开**(Codex docs "Full access" 配对):
     // 之前 #212 用 workspace-write + network_access 真机仍弹审批弹窗 ——
@@ -2581,7 +2765,7 @@ model = \"gpt-5.5\"
     // ── CAS-R94.1 provider/config truth ───────────────────────────────
 
     #[test]
-    fn r94_1_provider_policy_truth_reads_custom_provider_without_reactivating_it() {
+    fn r94_1_provider_policy_truth_reads_custom_provider_fields() {
         let config = r#"model_provider = "OpenAi"
 model_context_window = 1000000
 
@@ -2606,6 +2790,129 @@ supports_websockets = true
         assert_eq!(truth.wire_api.as_deref(), Some("\"responses\""));
         assert_eq!(truth.supports_websockets.as_deref(), Some("true"));
         assert!(truth.has_provider_policy());
+    }
+
+    #[test]
+    fn r94_1_provider_policy_carry_forward_keeps_user_fields_effective() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\nrequest_max_retries = 7\nstream_idle_timeout_ms = 90000\nquery_params = { user_policy = \"keep\" }\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        apply_provider(&paths, &cfg).unwrap();
+        let toml = read_toml(&paths);
+        assert!(toml.contains("model_provider = \"OpenAi\""), "{toml}");
+        assert!(toml.contains("stream_max_retries = 15"), "{toml}");
+        assert!(toml.contains("request_max_retries = 7"), "{toml}");
+        assert!(toml.contains("stream_idle_timeout_ms = 90000"), "{toml}");
+        assert!(
+            toml.contains("query_params = { user_policy = \"keep\" }"),
+            "{toml}"
+        );
+        assert!(
+            toml.contains("base_url = \"http://127.0.0.1:18080\""),
+            "only the provider endpoint should be redirected to Transfer: {toml}"
+        );
+        assert!(!toml.contains("https://old.example/v1"), "{toml}");
+    }
+
+    #[test]
+    fn r94_1_identity_only_provider_still_normalizes_to_builtin_openai() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        apply_provider(&paths, &cfg).unwrap();
+        let toml = read_toml(&paths);
+        assert!(!toml.contains("model_provider ="), "{toml}");
+        assert!(
+            toml.contains("openai_base_url = \"http://127.0.0.1:18080\""),
+            "{toml}"
+        );
+        assert!(
+            toml.contains("base_url = \"https://old.example/v1\""),
+            "inactive user provider table must remain untouched: {toml}"
+        );
+    }
+
+    #[test]
+    fn r94_1_builtin_openai_policy_collision_fails_before_routing_mutation() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        let original = "model_provider = \"openai\"\n\n[model_providers.openai]\nname = \"OpenAI\"\nbase_url = \"https://api.openai.com/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n";
+        std::fs::write(&paths.config_toml, original).unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        let err = apply_provider(&paths, &cfg).expect_err("same-id built-in override must fail closed");
+        assert!(
+            err.to_string().contains("built-in-openai-id-collision"),
+            "{err}"
+        );
+        assert_eq!(
+            read_toml(&paths),
+            original,
+            "unsupported carry-forward must fail before routing keys are mutated"
+        );
     }
 
     #[test]
@@ -2643,7 +2950,8 @@ supports_websockets = true
         assert!(toml.contains("model_catalog_json = \"V:/user/catalog.json\""));
         assert!(toml.contains("[model_providers.OpenAi]"));
         assert!(toml.contains("stream_max_retries = 15"));
-        assert!(!toml.contains("model_provider ="));
+        assert!(toml.contains("model_provider = \"OpenAi\""));
+        assert!(toml.contains("base_url = \"http://127.0.0.1:18080\""));
         assert!(
             !toml.contains("model_context_window ="),
             "external catalog must not inherit a Transfer-only global 1M override: {toml}"

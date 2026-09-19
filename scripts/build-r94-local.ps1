@@ -122,6 +122,12 @@ foreach ($Marker in @(
     '[data-content-search-assistant-turn-key]',
     '[data-chatgpt-conversation-turn="true"]',
     'function r94NativeTimestampVisible(node) {',
+    'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
+    'function r94CollectVisualSegments(node, root, depth) {',
+    'function r94TopLevelSegments(turn) {',
+    'function r94HostEpochNow() {',
+    'host-first-observed-live-output',
+    'r94BaselineCurrentSegments();',
     'new IntersectionObserver(function(entries) {',
     'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
     'state.observer = { disconnect: r94Cleanup };'
@@ -206,15 +212,19 @@ Write-Host 'R93_STATUS_FINALIZER_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'R94_COMPOSER_STATUS_INSIDE_FINALIZER',
     'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
-    'R94_COMPOSER_INLINE_MOUNT_V2_PASS',
+    'R94_COMPOSER_INLINE_MOUNT_V3_EDITOR_SAFE_PASS',
     'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS',
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
     'R94_CURRENT_COMPOSER_ROOT_RUNTIME',
     'R94_COMPOSER_INLINE_MOUNT_RUNTIME',
-    'R94_COMPOSER_MOUNT_V2',
-    "bar.setAttribute('data-cas-status-owner','r94-inline');",
+    'R94_COMPOSER_MOUNT_V3',
+    'R94_EDITOR_BOUNDARY_GUARD_RUNTIME',
+    'R94_COMPOSER_FAIL_CLOSED_MOUNT_RUNTIME',
+    "bar.setAttribute('data-cas-status-owner','r94-inline-safe');",
+    "bar.setAttribute('contenteditable','false');",
+    'function r94SafeComposerSurface(editable) {',
     '[data-testid*="composer"]',
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
@@ -279,7 +289,9 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = '__casR94TimestampDiagnostics' },
     @{ Text = $ThemeInjectorRsText; Marker = '__casR94ComposerStatusDiagnostics' },
     @{ Text = $ThemeInjectorRsText; Marker = 'mount=' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'unsafe=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
 )
 foreach ($Contract in $RuntimeDebugContracts) {
@@ -442,24 +454,24 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host 'R94_EXACT_TURN_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - r90 pane ownership / WAITING / truth-first telemetry remains inherited'
         Write-Host '  - legacy per-segment timestamp stamping is disabled at the final r86/r78 owner'
-        Write-Host '  - final timestamps are exact-only; native time wins, with passively observed turn/completed as exact fallback'
+        Write-Host '  - native final/user timestamps remain authoritative; live assistant/progress/tool blocks get host first-observed ≈ timestamps in the Transfer overlay'
         Write-Host '  - native Codex turn/action-row DOM is read-only; labels live in a Transfer-owned overlay root'
         Write-Host '  - mutation observation is childList-only; visible-turn work is IntersectionObserver bounded'
-        Write-Host '  - no Date.now historical estimate, characterData stream observer, or periodic timestamp sweep survives'
+        Write-Host '  - historical/remounted blocks never receive host-now estimates; live segment discovery stays childList-only with no periodic timestamp sweep'
         Write-Host '  - status bar is one Transfer-owned child inside .composer-surface-chrome before the input wrapper; no detached viewport status overlay is used'
         Write-Host '  - native/global Usage polling cannot overwrite pane/local status counters or tok/s'
         Write-Host '  - exact TurnCapability accepts turn lifecycle + turn-scoped usage notifications when passively observed'
         Write-Host '  - r76 bounded rollout tail preserves task_started/turn_context/token_count/task_complete turn identity without whole-file parsing'
         Write-Host '  - repeated token_count/lifecycle payloads are fingerprint-deduped before UI refresh'
         Write-Host '  - composer status prefers exact threadId+turnId usage and only falls back to thread snapshot when no newer turn identity exists'
-        Write-Host '  - duplicate fallback timestamp is suppressed whenever Codex already renders an exact native time'
+        Write-Host '  - native final timestamp ownership is never duplicated, even when Codex reveals that timestamp only on hover'
         Write-Host '  - Runtime Debug is off by default; when enabled it shows DBG94-1 identity in Transfer and injects live MATCH/LEGACY/MISSING evidence into Codex'
     } else {
         Write-Host ''
         Write-Host 'R94_EXACT_TURN_RUNTIME_PASS' -ForegroundColor Green
-        Write-Host '  - exact one-per-turn timestamp overlay is installed without native turn child mutation'
+        Write-Host '  - hybrid timestamp overlay keeps native final/user times and adds ≈ first-observed time to each live output block without native turn child mutation'
         Write-Host '  - legacy r74-r90 stamp path is inert'
-        Write-Host '  - composer status is mounted inside the rounded input surface as a single Transfer-owned row; native/global speed remains isolated'
+        Write-Host '  - composer status is mounted in the rounded composer shell but outside the editable tree; telemetry can never become prompt text'
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'
         Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
         Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'

@@ -911,14 +911,20 @@
       'data-tool-call-id',
       'data-call-id'
     ];
-    const nodes = [surface];
-    for (const child of surface.querySelectorAll(
+
+    for (const attr of attrs) {
+      const value = r94NormalizeItemId(surface.getAttribute(attr));
+      if (value) return value;
+    }
+
+    // One descendant identity is sufficient; do not enumerate a large
+    // streaming Markdown subtree just to discover an item id.
+    const child = surface.querySelector(
       '[data-item-id],[data-message-id],[data-content-search-item-id],[data-agent-item-id],[data-tool-call-id],[data-call-id]'
-    )) nodes.push(child);
-    for (const node of nodes) {
-      if (!(node instanceof Element)) continue;
+    );
+    if (child instanceof Element) {
       for (const attr of attrs) {
-        const value = r94NormalizeItemId(node.getAttribute(attr));
+        const value = r94NormalizeItemId(child.getAttribute(attr));
         if (value) return value;
       }
     }

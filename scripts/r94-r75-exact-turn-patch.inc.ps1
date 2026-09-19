@@ -363,6 +363,8 @@ foreach ($Marker in @(
     'R94_NATIVE_RAIL_NO_CUSTOM_PAINT_RUNTIME',
     'R94_STREAMING_SEGMENT_THROTTLE_RUNTIME',
     'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
+    'R94_MULTI_PANE_THREAD_OWNERSHIP_RUNTIME',
+    'R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME',
     'window.setTimeout(r94FlushSegmentTurns, 220)',
     'const timelineRail = null;',
     'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',

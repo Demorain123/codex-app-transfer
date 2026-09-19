@@ -476,6 +476,13 @@ foreach ($Marker in @(
     'R94_TURN_SCOPED_STATUS_PASS',
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
     'R94_NATIVE_ACTIVE_SINGLE_PANE_FALLBACK_RUNTIME',
+    'R94_EXACT_USAGE_DIRECT_DECODE_RUNTIME',
+    'R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME',
+    'R94_STATUS_TRUTH_SEMANTICS_RUNTIME',
+    'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
+    'state.ingestExternalUsage = ingestExternalUsage',
+    'contextTokens',
+    "('session ' + shortNumber(displayUsage.sessionTotalTokens))",
     'native-active-single-pane',
     'r94NormalizePaneId',
     'R94_TURN_STATUS_PANE_OWNER_PASS',
@@ -560,10 +567,13 @@ foreach ($Marker in @(
     'safeEnvelope.recentItems = Array.isArray(envelope.recentItems)',
     'R94_USAGE_LOOKUP_MISS_TTL_MS = 10000',
     'CAS-R94-LOCAL-USAGE-COLLECTOR-DIAGNOSTICS',
+    'CAS-R94-EXACT-INGEST-ACK-DIAGNOSTICS',
     '__casR94LocalUsageCollectorDiagnostics',
     "stage: 'file-miss'",
     "stage: 'envelope-miss'",
-    "stage: pushed ? 'push-ok' : 'push-failed'",
+    "'ingest-missing'",
+    "'ingest-ok'",
+    "pushOk: !!(pushed && pushed.ok)",
     'data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]',
     'localUsageMissCache.set(normalized, Date.now());',
     'localUsageSnapshotCache.set(filePath, { size: stat.size, envelope: fallbackEnvelope });',
@@ -606,6 +616,11 @@ Write-Host 'R94_MULTI_PANE_SUBAGENT_TELEMETRY_PREFLIGHT_PASS' -ForegroundColor G
 Write-Host 'R94_R77_ACTIVE_THREAD_RESOLVER_COMPAT_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_TIMESTAMP_VISIBLE_NATIVE_GATE_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_NATIVE_SINGLE_PANE_USAGE_FALLBACK_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_EXACT_USAGE_INGEST_EXPORT_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_STATUS_TRUTH_SEMANTICS_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - ctx uses Codex last_token_usage.total_tokens / model_context_window on exact JSONL'
+Write-Host '  - in/out mean latest model request, session means cumulative total_token_usage'
+Write-Host '  - native/global tok/s is never relabeled as pane-local speed'
 Write-Host 'R94_LOCAL_USAGE_COLLECTOR_DIAGNOSTICS_PREFLIGHT_PASS' -ForegroundColor Green
 
 

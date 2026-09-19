@@ -1659,7 +1659,7 @@
 
     function r94RememberLatestObservedTurn(turn) {
       if (!(turn instanceof Element) || !turn.isConnected) return;
-      r94RememberLatestObservedTurn(turn);
+      latestObservedTurn = turn;
       const ids = r94IdsForTurn(turn);
       const threadId = String(ids && ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
       if (threadId) latestObservedTurnByThread.set(threadId, turn);
@@ -1676,6 +1676,9 @@
         if (/inprogress|in_progress|running|started|pending/.test(latestStatus)) return false;
       }
 
+      // R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME
+      // Retained as the compatibility contract name for the inherited r94
+      // streaming-owner verifier. The implementation below is now per-thread.
       // R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME
       // Parent and sub-agent panes can stream concurrently. Keep one mutation
       // owner per thread instead of letting the last mutation in either pane

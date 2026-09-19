@@ -170,6 +170,13 @@ if ($R39LifecycleSelectiveText.Contains('run_leaf("scripts/apply_r38_windows_por
 }
 foreach ($Marker in @(
     'CAS-R94-STALE-EXIT-GUARD-RECOVERY',
+    'CAS-R39-BINDER-TERMINOLOGY',
+    'classification=unresolved_listener_residue',
+    'match_start_token',
+    'match_next_token',
+    'recommend_start',
+    'recommend_next',
+    'preserve_stale_listener_evidence',
     'recover_stale_exit_guard_listener_r94',
     'r94_find_stale_exit_guard_child',
     'r94_stop_exact_stale_exit_guard',
@@ -245,6 +252,7 @@ Write-Host '  - fixed-port listener handle inheritance is explicitly blocked and
 Write-Host '  - current r28 bind/recovery anchors required by the selective r39 upgrade are present'
 Write-Host 'R94_WINDOWS_LISTENER_NOINHERIT_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_STALE_EXIT_GUARD_TRY_REPAIR_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - repair leaf targets the r39 binder-terminology owner via semantic branch boundaries'
 Write-Host '  - dead binder is verified twice before any process action'
 Write-Host '  - only one exact direct-child r32 Exit Guard may be stopped after identity re-check'
 Write-Host '  - configured fixed port is preserved; live owners and ambiguous candidates fail closed'

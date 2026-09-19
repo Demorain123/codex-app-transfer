@@ -9,7 +9,9 @@ if (-not (Test-Path -LiteralPath $R94OverlayBodyPath)) {
 $R94OverlayBody = [System.IO.File]::ReadAllText($R94OverlayBodyPath)
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
-    'R94_EXACT_TURN_CAPABILITY_RUNTIME'
+    'R94_EXACT_TURN_CAPABILITY_RUNTIME',
+    'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
+    'host-first-observed-live-output'
 )) {
     if (-not $R94OverlayBody.Contains($Marker)) {
         throw "r94 r78 owner received an incomplete exact-turn observer source: $Marker"
@@ -41,7 +43,9 @@ $PatchedR75 = Replace-BlockRequired `
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
     'R94_EXACT_TURN_CAPABILITY_RUNTIME',
+    'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
     'window.__casR94TurnCapability = capability;',
+    'host-first-observed-live-output',
     'new IntersectionObserver(function(entries) {',
     'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
     'state.observer = { disconnect: r94Cleanup };'
@@ -53,7 +57,7 @@ foreach ($Marker in @(
 
 # r94 live-only timestamp observer — compatibility phrase for the inherited r86 verifier.
 # r93 live-only timestamp observer — same compatibility phrase after r90->r93 retargeting.
-# The actual observer above is exact-only and visible-turn bounded.
+# The actual observer above is hybrid: exact native/turn ownership plus childList-only, live first-observed per-output overlay timestamps.
 Write-Host 'R94_R78_EXACT_OVERLAY_FINAL_OWNER_PASS' -ForegroundColor Green
 
 # R93 composer/status correctness is finalized inside r75 after all r74/r75
@@ -88,6 +92,8 @@ $R94ComposerStatusFinalizerText = [System.IO.File]::ReadAllText($R94ComposerStat
 foreach ($Marker in @(
     'R94_COMPOSER_STATUS_INSIDE_FINALIZER',
     'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
+    'R94_COMPOSER_INLINE_MOUNT_V3_EDITOR_SAFE_PASS',
+    'R94_EDITOR_BOUNDARY_GUARD_RUNTIME',
     'R94_NATIVE_USAGE_SCAN_DISABLED_PASS',
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS'
 )) {

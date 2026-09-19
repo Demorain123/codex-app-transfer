@@ -793,7 +793,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - repeated token_count/lifecycle payloads are fingerprint-deduped before UI refresh'
         Write-Host '  - composer status prefers exact threadId+turnId usage and only falls back to thread snapshot when no newer turn identity exists'
         Write-Host '  - native final timestamp ownership is never duplicated, even when Codex reveals that timestamp only on hover'
-        Write-Host '  - Runtime Debug is off by default; when enabled it shows DBG94-1 identity in Transfer and injects live MATCH/LEGACY/MISSING evidence into Codex'
+        Write-Host '  - Runtime Debug is off by default; when enabled it shows DBG94.1-1 identity in Transfer and injects live MATCH/LEGACY/MISSING evidence into Codex'
     } else {
         Write-Host ''
         Write-Host 'R94_EXACT_TURN_RUNTIME_PASS' -ForegroundColor Green

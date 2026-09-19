@@ -733,12 +733,17 @@
     window.__casR94TurnCapability = capability;
 
     const diagnostics = {
-      exactOnly: true,
+      exactOnly: false,
+      hybridSegmentMode: true,
       observedTurns: 0,
       visibleTurns: 0,
       badges: 0,
       cacheSize: 0,
+      liveSegmentsStamped: 0,
+      liveSegmentBadges: 0,
+      liveSegmentCache: 0,
       lastSource: '',
+      lastLiveSegmentSource: '',
       nativeTimestampSuppressed: 0,
     };
     window.__casR94TimestampDiagnostics = diagnostics;
@@ -748,10 +753,21 @@
     const pendingRoots = new Set();
     const entryByTurn = new WeakMap();
     const visibleEntries = new Set();
+
+    // Live per-output timestamp state. Existing DOM is baselined at install so
+    // only blocks first appearing during an actually-live turn receive ≈ time.
+    const baselineSegmentNodes = new WeakSet();
+    const baselineSegmentKeys = new Set();
+    const segmentTimeByKey = new Map();
+    const segmentEntryByNode = new WeakMap();
+    const visibleSegmentEntries = new Set();
+    const pendingSegmentTurns = new Set();
+
     let disposed = false;
     let mutationObserver = null;
     let frameId = 0;
     let scanFrameId = 0;
+    let segmentFrameId = 0;
 
     const resizeObserver = typeof ResizeObserver === 'function'
       ? new ResizeObserver(function() { r94SchedulePosition(); })
@@ -782,6 +798,8 @@
       diagnostics.visibleTurns = visibleTurns.size;
       diagnostics.badges = visibleEntries.size;
       diagnostics.cacheSize = capability.size();
+      diagnostics.liveSegmentBadges = visibleSegmentEntries.size;
+      diagnostics.liveSegmentCache = segmentTimeByKey.size;
     }
 
     function r94RemoveTurnBadge(turn) {
@@ -802,9 +820,9 @@
         return;
       }
 
-      if (exact.sourceElement instanceof Element && r94NativeTimestampVisible(exact.sourceElement)) {
-        // Codex already renders this exact timestamp. Keep native UI as the
-        // single source of truth and suppress our fallback overlay duplicate.
+      if (exact.sourceElement instanceof Element && exact.sourceElement.isConnected) {
+        // Codex owns final/user sent-time UI even when it is hover-revealed.
+        // Never duplicate that native timestamp with a Transfer turn badge.
         r94RemoveTurnBadge(turn);
         diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
         diagnostics.lastSource = exact.record.source || '';
@@ -845,6 +863,137 @@
       r94SyncDiagnostics();
     }
 
+    function r94TrimSegmentCache() {
+      while (segmentTimeByKey.size > R94_SEGMENT_CACHE_LIMIT) {
+        const oldest = segmentTimeByKey.keys().next().value;
+        if (oldest == null) break;
+        segmentTimeByKey.delete(oldest);
+      }
+    }
+
+    function r94SegmentIsNativeFinal(segment, turn) {
+      if (!(segment instanceof Element) || !(turn instanceof Element)) return false;
+      if (segment.matches('[data-local-conversation-final-assistant]')) return true;
+      const native = turn.querySelector(R94_NATIVE_TIME_SELECTOR);
+      if (!(native instanceof Element)) return false;
+      return segment === native || segment.contains(native);
+    }
+
+    function r94BaselineTurnSegments(turn) {
+      if (!(turn instanceof Element) || !turn.isConnected) return;
+      for (const segment of r94TopLevelSegments(turn)) {
+        if (!(segment instanceof Element)) continue;
+        baselineSegmentNodes.add(segment);
+        const key = r94SegmentKey(segment, turn);
+        if (key) baselineSegmentKeys.add(key);
+      }
+    }
+
+    function r94BaselineCurrentSegments() {
+      const candidates = [];
+      const seen = new Set();
+      for (const node of Array.from(document.querySelectorAll(R94_TURN_SELECTOR))) {
+        const turn = r94CanonicalTurn(node);
+        if (!(turn instanceof Element) || seen.has(turn) || insideComposer(turn) || r94IsUserSurface(turn)) continue;
+        seen.add(turn);
+        candidates.push(turn);
+      }
+      // Current/near-current DOM is enough. Historical virtualization remains
+      // protected by latest-turn + live-state gates below.
+      for (const turn of candidates.slice(-12)) r94BaselineTurnSegments(turn);
+    }
+
+    function r94TurnIsLatest(turn) {
+      const ids = r94IdsForTurn(turn);
+      if (!ids) return false;
+      const latest = ids.threadId ? capability.latestForThread(ids.threadId) : null;
+      if (latest && latest.turnId) return r94NormalizeTurnId(latest.turnId) === ids.turnId;
+      const domLatest = r94LatestVisibleAssistantTurnFor(turn);
+      return !!(domLatest && (domLatest === turn || domLatest.contains(turn) || turn.contains(domLatest)));
+    }
+
+    function r94TurnIsLive(turn) {
+      const ids = r94IdsForTurn(turn);
+      if (!ids) return false;
+      const record = capability.getRecord(ids.threadId, ids.turnId);
+      const status = String(record && record.status || '').toLowerCase();
+      if (/inprogress|in_progress|running|started|pending/.test(status)) return true;
+      if (/completed|failed|interrupted|cancelled|canceled/.test(status)) return false;
+      if (r94ActiveGenerationUiPresentFor(turn)) return true;
+
+      const externalThread = String(state.metrics && state.metrics.externalThreadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      if (externalThread && idsThread && externalThread !== idsThread) return false;
+      const updated = Number(state.metrics && state.metrics.externalUpdatedAt);
+      if (!Number.isFinite(updated) || updated <= 0) return false;
+      const age = r94HostEpochNow() - updated;
+      return age >= -5000 && age <= 90000;
+    }
+
+    function r94EnsureSegmentEntry(segment, turn, key, epoch, source) {
+      if (!(segment instanceof Element) || !segment.isConnected || !key || !Number.isFinite(epoch)) return;
+      let entry = segmentEntryByNode.get(segment);
+      if (!entry) {
+        entry = { segment, turn, key, epoch, source, badge: null };
+        segmentEntryByNode.set(segment, entry);
+      } else {
+        entry.turn = turn;
+        entry.key = key;
+        entry.epoch = epoch;
+        entry.source = source;
+      }
+      if (!entry.badge || !entry.badge.isConnected) {
+        entry.badge = r94CreateSegmentBadge(overlayRoot, epoch);
+      }
+      visibleSegmentEntries.add(entry);
+      diagnostics.lastLiveSegmentSource = source;
+    }
+
+    function r94StampLiveSegments(turn) {
+      if (!(turn instanceof Element) || !turn.isConnected) return;
+      if (!r94TurnIsLatest(turn) || !r94TurnIsLive(turn)) return;
+
+      const segments = r94TopLevelSegments(turn);
+      for (const segment of segments) {
+        if (!(segment instanceof Element) || !segment.isConnected || r94SegmentIsNativeFinal(segment, turn)) continue;
+        const key = r94SegmentKey(segment, turn);
+        if (!key) continue;
+
+        const cached = segmentTimeByKey.get(key);
+        if (cached && Number.isFinite(cached.epoch)) {
+          r94EnsureSegmentEntry(segment, turn, key, cached.epoch, cached.source || 'host-first-observed-live-cache');
+          continue;
+        }
+
+        if (baselineSegmentNodes.has(segment) || baselineSegmentKeys.has(key)) continue;
+
+        const epoch = r94HostEpochNow();
+        const source = 'host-first-observed-live-output';
+        segmentTimeByKey.delete(key);
+        segmentTimeByKey.set(key, { epoch, source });
+        r94TrimSegmentCache();
+        diagnostics.liveSegmentsStamped = (diagnostics.liveSegmentsStamped || 0) + 1;
+        r94EnsureSegmentEntry(segment, turn, key, epoch, source);
+      }
+      r94SyncDiagnostics();
+      r94SchedulePosition();
+    }
+
+    function r94FlushSegmentTurns() {
+      segmentFrameId = 0;
+      const turns = Array.from(pendingSegmentTurns);
+      pendingSegmentTurns.clear();
+      for (const turn of turns) {
+        if (turn instanceof Element && turn.isConnected) r94StampLiveSegments(turn);
+      }
+    }
+
+    function r94ScheduleSegmentTurn(turn) {
+      if (disposed || document.visibilityState === 'hidden' || !(turn instanceof Element)) return;
+      pendingSegmentTurns.add(turn);
+      if (!segmentFrameId) segmentFrameId = requestAnimationFrame(r94FlushSegmentTurns);
+    }
+
     function r94RefreshTurn(turn) {
       if (!(turn instanceof Element) || !turn.isConnected) return;
       if (intersectionObserver && !visibleTurns.has(turn)) return;
@@ -879,10 +1028,28 @@
         writes.push({ entry, x, y });
       }
 
+      for (const entry of Array.from(visibleSegmentEntries)) {
+        if (!entry.segment || !entry.segment.isConnected || !entry.badge || !entry.badge.isConnected) {
+          visibleSegmentEntries.delete(entry);
+          continue;
+        }
+        let rect;
+        try { rect = entry.segment.getBoundingClientRect(); } catch { rect = null; }
+        if (!rect || rect.width <= 0 || rect.height <= 0 || rect.bottom < -120 || rect.top > innerHeight + 120) {
+          entry.badge.style.display = 'none';
+          continue;
+        }
+        const x = Math.max(12, Math.min(innerWidth - 10, rect.right - 3));
+        const y = Math.max(12, Math.min(innerHeight - 12, rect.bottom + 2));
+        writes.push({ entry, x, y, segment: true });
+      }
+
       for (const item of writes) {
         const badge = item.entry.badge;
         badge.style.display = 'block';
-        badge.style.transform = 'translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,-100%)';
+        badge.style.transform = item.segment
+          ? ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,0)')
+          : ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,-100%)');
       }
       r94SyncDiagnostics();
     }
@@ -989,6 +1156,7 @@
           const owner = r94CanonicalTurn(element);
           if (owner) {
             r94ScheduleScan(owner);
+            r94ScheduleSegmentTurn(owner);
             if (!intersectionObserver || visibleTurns.has(owner)) r94RefreshTurn(owner);
             continue;
           }
@@ -1017,7 +1185,12 @@
         if (entry.badge && entry.badge.isConnected) entry.badge.remove();
         entry.badge = null;
       }
+      for (const entry of Array.from(visibleSegmentEntries)) {
+        if (entry.badge && entry.badge.isConnected) entry.badge.remove();
+        entry.badge = null;
+      }
       visibleEntries.clear();
+      visibleSegmentEntries.clear();
       visibleTurns.clear();
       r94SyncDiagnostics();
     }
@@ -1033,6 +1206,7 @@
         const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
         if (threadId && idsThread && threadId !== idsThread) continue;
         r94RefreshTurn(turn);
+        r94ScheduleSegmentTurn(turn);
       }
     }
 
@@ -1043,8 +1217,11 @@
         if (intersectionObserver) intersectionObserver.disconnect();
         if (resizeObserver) resizeObserver.disconnect();
         if (scanFrameId) cancelAnimationFrame(scanFrameId);
+        if (segmentFrameId) cancelAnimationFrame(segmentFrameId);
         scanFrameId = 0;
+        segmentFrameId = 0;
         pendingRoots.clear();
+        pendingSegmentTurns.clear();
         r94ClearVisibleBadges();
         return;
       }
@@ -1057,6 +1234,9 @@
         }
       }
       r94ScheduleScan(document.documentElement);
+      for (const turn of Array.from(observedTurns)) {
+        if (turn.isConnected) r94ScheduleSegmentTurn(turn);
+      }
       r94SchedulePosition();
     }
 
@@ -1068,14 +1248,19 @@
       if (resizeObserver) resizeObserver.disconnect();
       if (frameId) cancelAnimationFrame(frameId);
       if (scanFrameId) cancelAnimationFrame(scanFrameId);
+      if (segmentFrameId) cancelAnimationFrame(segmentFrameId);
       window.removeEventListener('resize', r94SchedulePosition);
       window.removeEventListener('scroll', r94SchedulePosition, true);
       document.removeEventListener('visibilitychange', r94HandleVisibility);
       window.removeEventListener('cas-r94-turn-capability-update', r94HandleCapabilityUpdate);
       pendingRoots.clear();
+      pendingSegmentTurns.clear();
       observedTurns.clear();
       visibleTurns.clear();
       visibleEntries.clear();
+      visibleSegmentEntries.clear();
+      segmentTimeByKey.clear();
+      baselineSegmentKeys.clear();
       capability.clear();
       if (overlayRoot.isConnected) overlayRoot.remove();
       if (window.__casR94TimestampDiagnostics === diagnostics) delete window.__casR94TimestampDiagnostics;
@@ -1092,6 +1277,7 @@
     document.addEventListener('visibilitychange', r94HandleVisibility);
     window.addEventListener('cas-r94-turn-capability-update', r94HandleCapabilityUpdate);
 
+    r94BaselineCurrentSegments();
     r94StartMutationObservation();
     r94ScanRoot(document.documentElement);
     r94SchedulePosition();

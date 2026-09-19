@@ -43,7 +43,7 @@ Write-Host 'R94_1_PREVIEW_WRAPPER_IDENTITY_PASS' -ForegroundColor Green
 
 if (-not $PreflightOnly) {
     $WorkspaceCargo = Join-Path $RepoRoot 'Cargo.toml'
-    & cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration r94_1_ --lib
+    & cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration --lib r94_1_
     if ($LASTEXITCODE -ne 0) {
         throw "r94.1 provider/config truth focused tests failed with exit code $LASTEXITCODE"
     }

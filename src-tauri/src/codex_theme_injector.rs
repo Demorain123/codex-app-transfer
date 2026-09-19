@@ -1176,7 +1176,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
     ).length;
-    const statusInsideComposer = statusNodes.some((node) =>
+    const statusInsideComposer = statusEditorLeaks === 0 && statusNodes.some((node) =>
       node instanceof Element &&
       node.getAttribute('data-cas-status-owner') === 'r94-inline-safe' &&
       !node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')

@@ -75,7 +75,7 @@ $MainProcessCollector = @'
   const localUsageFileCache = new Map();
   const localUsageMissCache = new Map();
   const localUsageSnapshotCache = new Map();
-  const R94_USAGE_LOOKUP_MISS_TTL_MS = 30000;
+  const R94_USAGE_LOOKUP_MISS_TTL_MS = 10000;
 
   const normalizeUsageThreadId = (value) => String(value || '')
     .replace(/^local:/i, '')

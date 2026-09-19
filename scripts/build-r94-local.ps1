@@ -571,6 +571,9 @@ foreach ($Marker in @(
     'provider-id-requires-quoted-toml-key',
     'nested-provider-policy-not-portable',
     'CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY',
+    'CAS-R94-1-RUNTIME-DEBUG-DRAG',
+    'data-cas-runtime-debug-draggable',
+    'setPointerCapture',
     'wire-api-not-responses',
     'relay-auth-path-not-openai-auth',
     'endpoint-coupled-provider-policy',
@@ -733,6 +736,21 @@ try {
     $Builder = $Builder.Replace('Sub2API Grok Compat r94','Sub2API Grok Compat r94.1')
     $Builder = $Builder.Replace('visible/package identity is r94 / 2.4.5+94.1','visible/package identity is r94.1 / 2.4.5+94.1')
 
+    # r94.1 identity must propagate one level deeper too. The retargeted r90
+    # builder creates its own r94 wrapper from the frozen r89 baseline; without
+    # this patch that nested wrapper still emits r94 / 2.4.5+94 while its
+    # invariant has already been retargeted to r94.1.
+    $OldNestedIdentityRetarget = @'
+$R94Builder = $OriginalBuilder.Replace('R89','R94').Replace('r89','r94').Replace('+89','+94')
+'@
+    $NewNestedIdentityRetarget = @'
+$R94Builder = $OriginalBuilder.Replace('R89','R94').Replace('r89','r94').Replace('+89','+94')
+$R94Builder = $R94Builder.Replace('2.4.5+94','2.4.5+94.1')
+$R94Builder = $R94Builder.Replace('Sub2API Grok Compat r94','Sub2API Grok Compat r94.1')
+$R94Builder = $R94Builder.Replace('visible/package identity is r94 / 2.4.5+94.1','visible/package identity is r94.1 / 2.4.5+94.1')
+'@
+    $Builder = Replace-Required $Builder $OldNestedIdentityRetarget $NewNestedIdentityRetarget 'r94.1 nested generated builder identity propagation'
+
     $OldPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot 'r89-r75-pane-runtime-patch-v4.inc.ps1'"
     $NewPaneSource = "`$R89PanePatch = Join-Path `$PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'"
     $Builder = Replace-Required $Builder $OldPaneSource $NewPaneSource 'temporary exact-overlay pane include path'
@@ -850,9 +868,11 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
         Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'
         Write-Host '  - optional Runtime Debug (DBG94.1-1) exposes package/runtime/PID evidence in Transfer and the live Codex renderer'
-        Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_RUNTIME_PASS' -ForegroundColor Green
-        Write-Host '  - provider identity remains built-in openai; custom retry/timeout policy is source diagnostics only'
+        Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_RUNTIME_PASS' -ForegroundColor Green
+        Write-Host '  - identity-only providers still normalize to built-in openai'
+        Write-Host '  - eligible custom provider policy remains active and only its endpoint is redirected to Transfer'
         Write-Host '  - external model catalog owns per-model context; user-owned/ambiguous live root overrides are never silently deleted'
+        Write-Host '  - runtime debug panel is freely draggable for this session'
         Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     }
 }

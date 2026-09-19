@@ -1,8 +1,9 @@
 // R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME
 // R94_EXACT_TURN_CAPABILITY_RUNTIME
-// Exact-only, one-timestamp-per-turn renderer.
-// Native Codex conversation DOM is treated as read-only: this module never
-// inserts children into a turn/action row and never writes timestamp attrs.
+// Hybrid timestamp renderer: keep Codex/native exact sent-time ownership for
+// prompts/final answers, and add host first-observed ≈ timestamps to live
+// assistant/progress/tool output blocks. Native Codex conversation DOM stays
+// read-only; every Transfer timestamp lives in the overlay root.
 
   const R94_OVERLAY_ID = 'cas-r94-timestamp-overlay';
   const R94_BADGE_CLASS = 'cas-r94-turn-time';

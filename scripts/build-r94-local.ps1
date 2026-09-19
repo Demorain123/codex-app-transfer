@@ -563,11 +563,22 @@ Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'CAS-R94-1-PROVIDER-CONFIG-TRUTH',
+    'CAS-R94-1-PROVIDER-POLICY-CARRY-FORWARD',
     'CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY',
-    'source provider policy is preserved in user config but is not effective after built-in openai normalization',
+    'provider_policy_carry_forward_block_reason',
+    'custom-provider-policy-preserved',
+    'built-in-openai-id-collision',
+    'wire-api-not-responses',
+    'provider_section_fields',
+    'behavior_fields',
+    'sync_table_field(',
+    '"base_url"',
+    'r94_1_provider_policy_truth_reads_custom_provider_fields',
+    'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
+    'r94_1_identity_only_provider_still_normalizes_to_builtin_openai',
+    'r94_1_builtin_openai_policy_collision_fails_before_routing_mutation',
     'snapshot_toml_value_literal(snapshot_config, "model_context_window")',
     'model_context_window_set: !preserve_external_model_catalog',
-    'r94_1_provider_policy_truth_reads_custom_provider_without_reactivating_it',
     'r94_1_external_catalog_removes_transfer_only_global_window',
     'r94_1_external_catalog_preserves_ambiguous_post_snapshot_live_window',
     'r94_1_external_catalog_preserves_user_owned_global_window',
@@ -579,14 +590,24 @@ foreach ($Marker in @(
     }
 }
 foreach ($Forbidden in @(
+    'source provider policy is preserved in user config but is not effective after built-in openai normalization',
+    'carried_forward = false,',
     'sync_root_value(&paths.config_toml, "stream_max_retries"',
     'sync_root_value(&paths.config_toml, "request_max_retries"',
+    'sync_root_value(&paths.config_toml, "stream_idle_timeout_ms"',
+    'sync_root_value(&paths.config_toml, "websocket_connect_timeout_ms"',
     'sync_root_value(&paths.config_toml, "wire_api"',
-    'sync_root_value(&paths.config_toml, "supports_websockets"'
+    'sync_root_value(&paths.config_toml, "supports_websockets"',
+    'sync_root_value(&paths.config_toml, "query_params"',
+    'sync_root_value(&paths.config_toml, "http_headers"'
 )) {
     if ($R941ApplyRsText.Contains($Forbidden)) {
-        throw "r94.1 must not fake provider policy by moving it to unsupported root keys: $Forbidden"
+        throw "r94.1 provider policy carry-forward contract violated: $Forbidden"
     }
+}
+if (-not $R941ApplyRsText.Contains('Some(&relay_literal)') -or
+    -not $R941ApplyRsText.Contains('Some(&provider_literal)')) {
+    throw 'r94.1 provider policy carry-forward must keep the source provider active and redirect only its endpoint'
 }
 $DoubleSuffix = '94.1' + '.1'
 if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocation.MyCommand.Path)).Contains($DoubleSuffix)) {
@@ -594,11 +615,13 @@ if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocati
 }
 Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 
-Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_PREFLIGHT_PASS' -ForegroundColor Green
-Write-Host '  - custom-provider retry/timeout policy is diagnosed, never silently claimed as built-in openai policy'
-Write-Host '  - inactive custom provider tables remain preserved for old-thread compatibility'
+Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - provider behavior fields remain on the active source provider; Transfer rewrites only the provider endpoint needed for relay routing'
+Write-Host '  - identity-only providers still normalize to built-in openai, preserving the common r94 Desktop/history path'
+Write-Host '  - unsupported semantic migrations fail before routing mutation instead of silently changing retry/timeout behavior'
+Write-Host '  - provider policy is never faked by moving values to unsupported TOML root keys'
 Write-Host '  - external catalog removes only a proven Transfer-owned root window, restores explicit snapshot-owned values, and preserves ambiguous live edits'
-Write-Host '  - unrelated user config keys are not auto-deleted'
+Write-Host '  - unrelated user config keys and future provider fields remain user-owned'
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',

@@ -25,6 +25,11 @@ $R94DesktopHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\desktop
 $R94ThemeInjectorRs = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
 $R94CargoToml = Join-Path $RepoRoot 'src-tauri\Cargo.toml'
 $R94CargoLock = Join-Path $RepoRoot 'Cargo.lock'
+$R94ModernSelective = Join-Path $PSScriptRoot 'apply_r43_r65_selective_modern.py'
+$R94R39LifecycleSelective = Join-Path $PSScriptRoot 'apply_r39_lifecycle_selective_modern.py'
+$R94R39WindowsOwnerSelective = Join-Path $PSScriptRoot 'apply_r39_windows_owner_selective_modern.py'
+$R94ProxyHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\proxy.rs'
+$R94ChainHealthRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\chain_health.rs'
 
 $TempBuilder = Join-Path $PSScriptRoot '.build-r94-from-r90.generated.ps1'
 $TempPanePatch = Join-Path $PSScriptRoot '.r94-r89-pane-runtime-patch.generated.inc.ps1'
@@ -49,7 +54,12 @@ foreach ($Path in @(
     $R94DesktopHandlerRs,
     $R94ThemeInjectorRs,
     $R94CargoToml,
-    $R94CargoLock
+    $R94CargoLock,
+    $R94ModernSelective,
+    $R94R39LifecycleSelective,
+    $R94R39WindowsOwnerSelective,
+    $R94ProxyHandlerRs,
+    $R94ChainHealthRs
 )) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "r94 required source missing: $Path" }
 }
@@ -107,6 +117,59 @@ $DesktopHandlerRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94Desktop
 $ThemeInjectorRsText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ThemeInjectorRs))
 $CargoTomlText = Normalize-Eol ([System.IO.File]::ReadAllText($R94CargoToml))
 $CargoLockText = Normalize-Eol ([System.IO.File]::ReadAllText($R94CargoLock))
+$ModernSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ModernSelective))
+$R39LifecycleSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94R39LifecycleSelective))
+$R39WindowsOwnerSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94R39WindowsOwnerSelective))
+$ProxyHandlerText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ProxyHandlerRs))
+$ChainHealthText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ChainHealthRs))
+
+foreach ($Marker in @(
+    'apply_r39_lifecycle_selective_modern.py',
+    'R82_R39_LIFECYCLE_SELECTIVE_CARRY_FORWARD_PASS'
+)) {
+    if (-not $ModernSelectiveText.Contains($Marker)) {
+        throw "r94 modern selective carry-forward source missing: $Marker"
+    }
+}
+if (-not $R39LifecycleSelectiveText.Contains('apply_r39_windows_owner_selective_modern.py')) {
+    throw 'r94 r39 lifecycle selective source must use the modern Windows-owner substrate leaf'
+}
+if ($R39LifecycleSelectiveText.Contains('run_leaf("scripts/apply_r38_windows_port_owner.py")')) {
+    throw 'r94 r39 lifecycle selective source regressed to the historical r38 proxy-runner-coupled owner leaf'
+}
+foreach ($Marker in @(
+    'MODERN-R39-WINDOWS-OWNER-SELECTIVE',
+    'MODERN_R39_WINDOWS_OWNER_SELECTIVE_PASS',
+    'GetExtendedTcpTable',
+    'TCP_TABLE_OWNER_PID_LISTENER'
+)) {
+    if (-not $R39WindowsOwnerSelectiveText.Contains($Marker)) {
+        throw "r94 modern Windows owner source missing: $Marker"
+    }
+}
+if ($R39WindowsOwnerSelectiveText.Contains('PATH = ROOT / "src-tauri/src/proxy_runner.rs"')) {
+    throw 'r94 modern Windows owner substrate must not patch proxy_runner.rs'
+}
+foreach ($Marker in @(
+    'const RETRY_MS: &[u64] = &[50, 100, 200, 400, 800];',
+    '[proxy-lifecycle-r28] bind busy requested_port='
+)) {
+    if (-not $ProxyHandlerText.Contains($Marker)) {
+        throw "r94 r39 bind-policy baseline anchor missing: $Marker"
+    }
+}
+foreach ($Marker in @(
+    'let proxy_status = state.proxy_manager.status();',
+    'fn recovery_classification(snapshot: &ChainHealthSnapshot)',
+    'state.proxy_manager.stop_silent();'
+)) {
+    if (-not $ChainHealthText.Contains($Marker)) {
+        throw "r94 r39 recovery-classification baseline anchor missing: $Marker"
+    }
+}
+Write-Host 'R94_R39_LIFECYCLE_SOURCE_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - Windows owner substrate is decoupled from historical r38 proxy_runner anchors'
+Write-Host '  - current r28 bind/recovery anchors required by the selective r39 upgrade are present'
 
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',

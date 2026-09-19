@@ -399,8 +399,33 @@ $MainProcessCollector = @'
     }
   };
 
+  // CAS-R94-LOCAL-USAGE-COLLECTOR-DIAGNOSTICS
+  let localUsageCollectorTick = 0;
+  const publishLocalUsageCollectorDiagnostics = async (contents, patch) => {
+    if (!contents || contents.isDestroyed?.()) return false;
+    const safe = {
+      tick: localUsageCollectorTick,
+      stage: String(patch?.stage || 'unknown'),
+      threadId: normalizeUsageThreadId(patch?.threadId || ''),
+      threadCount: Number(patch?.threadCount) || 0,
+      fileHit: patch?.fileHit === true,
+      envelopeHit: patch?.envelopeHit === true,
+      pushOk: patch?.pushOk === true,
+      error: String(patch?.error || '').slice(0, 180),
+      at: Date.now(),
+    };
+    const expression =
+      "globalThis.__casR94LocalUsageCollectorDiagnostics=" + JSON.stringify(safe);
+    try {
+      await contents.executeJavaScript(expression, true);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const pushLocalUsage = async (contents, threadId, envelope) => {
-    if (!contents || !envelope || contents.isDestroyed?.()) return;
+    if (!contents || !envelope || contents.isDestroyed?.()) return false;
     // Keep the historical r83 exact-replacement anchor intact. r83 inserts
     // the safe model field into this object during the nested carry-forward.
     // r94 turn metadata is appended afterwards so both generations compose.
@@ -429,12 +454,20 @@ $MainProcessCollector = @'
       "globalThis.__casOutputTelemetryRuntime&&" +
       "globalThis.__casOutputTelemetryRuntime.ingestExternalUsage&&" +
       "globalThis.__casOutputTelemetryRuntime.ingestExternalUsage(" + JSON.stringify(safeEnvelope) + ")";
-    try { await contents.executeJavaScript(expression, true); } catch {}
+    try {
+      await contents.executeJavaScript(expression, true);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const runLocalUsageCollector = async (electron) => {
+    localUsageCollectorTick += 1;
     let contentsList = [];
-    try { contentsList = electron.webContents.getAllWebContents(); } catch { return; }
+    try { contentsList = electron.webContents.getAllWebContents(); }
+    catch { return; }
+
     for (const contents of contentsList) {
       try {
         if (!contents || contents.isDestroyed?.()) continue;
@@ -442,21 +475,85 @@ $MainProcessCollector = @'
         if (type && type !== 'window' && type !== 'webview') continue;
         const url = String(contents.getURL?.() || '');
         if (url && !url.startsWith('app://')) continue;
-        const threadValue = await contents.executeJavaScript(activeThreadExpression, true);
+
+        await publishLocalUsageCollectorDiagnostics(contents, {
+          stage: 'renderer-eligible',
+          threadCount: 0,
+        });
+
+        let threadValue;
+        try {
+          threadValue = await contents.executeJavaScript(activeThreadExpression, true);
+        } catch (error) {
+          await publishLocalUsageCollectorDiagnostics(contents, {
+            stage: 'thread-expression-error',
+            error: error && error.message || String(error || ''),
+          });
+          continue;
+        }
+
         const threadIds = Array.from(new Set(
           (Array.isArray(threadValue) ? threadValue : [threadValue])
             .map(normalizeUsageThreadId)
             .filter(Boolean)
         ));
-        if (!threadIds.length) continue;
+
+        if (!threadIds.length) {
+          await publishLocalUsageCollectorDiagnostics(contents, {
+            stage: 'thread-miss',
+            threadCount: 0,
+          });
+          continue;
+        }
+
+        await publishLocalUsageCollectorDiagnostics(contents, {
+          stage: 'threads-found',
+          threadId: threadIds[0],
+          threadCount: threadIds.length,
+        });
+
         for (const threadId of threadIds) {
           const sessionFile = await findUsageSessionFile(threadId);
-          if (!sessionFile) continue;
+          if (!sessionFile) {
+            await publishLocalUsageCollectorDiagnostics(contents, {
+              stage: 'file-miss',
+              threadId,
+              threadCount: threadIds.length,
+              fileHit: false,
+            });
+            continue;
+          }
+
           const envelope = await latestUsageInfo(sessionFile);
-          if (!envelope) continue;
-          await pushLocalUsage(contents, threadId, envelope);
+          if (!envelope) {
+            await publishLocalUsageCollectorDiagnostics(contents, {
+              stage: 'envelope-miss',
+              threadId,
+              threadCount: threadIds.length,
+              fileHit: true,
+              envelopeHit: false,
+            });
+            continue;
+          }
+
+          const pushed = await pushLocalUsage(contents, threadId, envelope);
+          await publishLocalUsageCollectorDiagnostics(contents, {
+            stage: pushed ? 'push-ok' : 'push-failed',
+            threadId,
+            threadCount: threadIds.length,
+            fileHit: true,
+            envelopeHit: true,
+            pushOk: pushed,
+          });
         }
-      } catch {}
+      } catch (error) {
+        try {
+          await publishLocalUsageCollectorDiagnostics(contents, {
+            stage: 'collector-error',
+            error: error && error.message || String(error || ''),
+          });
+        } catch {}
+      }
     }
   };
 
@@ -528,6 +625,10 @@ try {
         'last_token_usage',
         'total_token_usage',
         'armLocalUsageCollector(electron)',
+        'CAS-R94-LOCAL-USAGE-COLLECTOR-DIAGNOSTICS',
+        '__casR94LocalUsageCollectorDiagnostics',
+        "stage: 'file-miss'",
+        "stage: pushed ? 'push-ok' : 'push-failed'",
         'ingestExternalUsage'
     )) {
         if (-not $Combined.Contains($Marker)) { throw "r76 telemetry source verification failed: $Marker" }

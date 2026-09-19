@@ -42,6 +42,71 @@
     return '';
   }
 
+  // R94_MULTI_PANE_THREAD_OWNERSHIP_RUNTIME
+  // Split-view and sub-agent panes are independent Codex threads. Never pair a
+  // turn with location.pathname just because the root route still points at the
+  // parent thread. Reuse the pane runtime's already-resolved thread identity.
+  function r94KnownPaneThreadIds() {
+    const ids = [];
+    const seen = new Set();
+    document.querySelectorAll('[data-cas-pane-statusbar="true"][data-cas-pane-thread-id]').forEach(function(bar) {
+      const id = String(bar.getAttribute('data-cas-pane-thread-id') || '').replace(/^local:/i, '').trim().toLowerCase();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  function r94ThreadIdForNode(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    if (!(element instanceof Element)) return '';
+
+    const directAttrs = [
+      'data-turn-thread-id',
+      'data-thread-id',
+      'data-conversation-id',
+      'data-above-composer-conversation-id'
+    ];
+    let current = element;
+    for (let depth = 0; depth < 12 && current instanceof Element; depth += 1) {
+      for (const attr of directAttrs) {
+        const value = String(current.getAttribute(attr) || '').replace(/^local:/i, '').trim().toLowerCase();
+        if (value) return value;
+      }
+      current = current.parentElement;
+    }
+
+    try {
+      if (typeof paneForNode === 'function') {
+        const pane = paneForNode(element);
+        if (pane instanceof Element) {
+          const bar = pane.querySelector('[data-cas-pane-statusbar="true"][data-cas-pane-thread-id]');
+          const barId = String(bar && bar.getAttribute('data-cas-pane-thread-id') || '').replace(/^local:/i, '').trim().toLowerCase();
+          if (barId) return barId;
+
+          if (typeof composerForPane === 'function' && typeof paneThreadId === 'function') {
+            const composer = composerForPane(pane);
+            const runtimeId = String(paneThreadId(pane, composer) || '').replace(/^local:/i, '').trim().toLowerCase();
+            if (runtimeId) return runtimeId;
+          }
+        }
+      }
+    } catch {}
+
+    const paneIds = r94KnownPaneThreadIds();
+    if (paneIds.length === 1) return paneIds[0];
+    if (paneIds.length > 1) return '';
+    return String(r94CurrentThreadId() || '').replace(/^local:/i, '').trim().toLowerCase();
+  }
+
+  function r94NotificationFallbackThreadId() {
+    const paneIds = r94KnownPaneThreadIds();
+    if (paneIds.length === 1) return paneIds[0];
+    if (paneIds.length > 1) return '';
+    return String(r94CurrentThreadId() || '').replace(/^local:/i, '').trim().toLowerCase();
+  }
+
   function r94NormalizeTurnId(value) {
     let raw = r94Decode(value);
     if (!raw) return '';
@@ -71,7 +136,7 @@
       '';
     const turnId = r94NormalizeTurnId(rawTurn);
     if (!turnId) return null;
-    const threadId = r94CurrentThreadId();
+    const threadId = r94ThreadIdForNode(turn);
     return {
       threadId: threadId || null,
       turnId,
@@ -422,7 +487,7 @@
       const outerMethod = String(value.method || value.type || '');
       const method = outerMethod === 'event_msg' && nestedMethod ? nestedMethod : (outerMethod || nestedMethod);
       if (method === 'turn/completed' || method === 'turn_completed' || method === 'task_complete') {
-        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null;
+        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
           ? params.turn
           : {
@@ -435,7 +500,7 @@
         return !!rememberLifecycle(threadId, turn);
       }
       if (method === 'turn/started' || method === 'turn_started' || method === 'task_started') {
-        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null;
+        const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
           ? params.turn
           : {
@@ -447,7 +512,7 @@
       }
       if (method === 'item/started' || method === 'item_started') {
         return !!rememberItemLifecycle(
-          params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
+          params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null,
           params.turnId || params.turn_id,
           params.item && typeof params.item === 'object' ? params.item : (value.item && typeof value.item === 'object' ? value.item : null),
           params.startedAtMs ?? params.started_at_ms ?? value.startedAtMs ?? value.started_at_ms,
@@ -456,7 +521,7 @@
       }
       if (method === 'item/completed' || method === 'item_completed') {
         return !!rememberItemLifecycle(
-          params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
+          params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null,
           params.turnId || params.turn_id,
           params.item && typeof params.item === 'object' ? params.item : (value.item && typeof value.item === 'object' ? value.item : null),
           params.completedAtMs ?? params.completed_at_ms ?? value.completedAtMs ?? value.completed_at_ms,
@@ -465,7 +530,7 @@
       }
       if (method === 'thread/tokenUsage/updated' || method === 'thread_token_usage_updated') {
         return !!rememberUsage(
-          params.threadId || params.thread_id || value.threadId || value.thread_id || r94CurrentThreadId() || null,
+          params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null,
           params.turnId || params.turn_id,
           params.tokenUsage || params.token_usage
         );

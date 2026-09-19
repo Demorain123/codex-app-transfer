@@ -820,23 +820,43 @@
     turn.querySelectorAll(R94_SEMANTIC_OUTPUT_SELECTOR).forEach(function(node) { raw.push(node); });
 
     const filtered = [];
-    const seen = new Set();
+    const seenNodes = new Set();
+    const seenItemIds = new Set();
     for (const node of raw) {
-      if (!r94SemanticOutputSurfaceUsable(node, turn) || seen.has(node)) continue;
-      seen.add(node);
+      if (!r94SemanticOutputSurfaceUsable(node, turn) || seenNodes.has(node)) continue;
+      seenNodes.add(node);
+
+      // The renderer can expose the same app-server item id on a card wrapper
+      // and on one or more descendants. One lifecycle item == one timestamp.
+      const itemId = r94ItemIdForSurface(node);
+      if (itemId) {
+        const normalized = String(itemId).toLowerCase();
+        if (seenItemIds.has(normalized)) continue;
+        seenItemIds.add(normalized);
+      }
       filtered.push(node);
     }
 
-    // Prefer concrete tool/agent/status descendants over their generic assistant
-    // wrapper. Plain assistant updates remain one unit. A final assistant block
-    // stays one unit and is later suppressed when Codex already owns its sent-time.
     return filtered.filter(function(node) {
       const kind = r94SemanticKind(node);
-      if (kind !== 'assistant') return true;
       for (const other of filtered) {
-        if (other === node || !node.contains(other)) continue;
+        if (other === node || !other.contains(node)) continue;
         const otherKind = r94SemanticKind(other);
+
+        // Nested controls/status fragments inside one tool/agent/status card are
+        // presentation details of the same output item, not separate outputs.
+        if (otherKind === kind && kind !== 'assistant') return false;
         if (otherKind === 'tool' || otherKind === 'agent' || otherKind === 'status') return false;
+      }
+
+      // A generic assistant wrapper that only exists to contain a concrete
+      // operational item is not an additional model-output timestamp.
+      if (kind === 'assistant') {
+        for (const other of filtered) {
+          if (other === node || !node.contains(other)) continue;
+          const otherKind = r94SemanticKind(other);
+          if (otherKind === 'tool' || otherKind === 'agent' || otherKind === 'status') return false;
+        }
       }
       return true;
     });

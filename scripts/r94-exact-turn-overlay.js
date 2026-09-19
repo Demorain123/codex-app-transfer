@@ -476,6 +476,251 @@
     return r94AnchorUsable(turn) ? { node: turn, mode: 'final' } : null;
   }
 
+  // R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME
+  // Reuses the proven r84/r90 visual segmentation model, but renders every
+  // timestamp in the Transfer-owned overlay. Native Codex/React DOM stays
+  // read-only and historical/remounted blocks are never assigned "now".
+  const R94_SEGMENT_BADGE_CLASS = 'cas-r94-segment-time';
+  const R94_SEGMENT_CACHE_LIMIT = 384;
+
+  function r94HostEpochNow() {
+    try {
+      const origin = Number(performance && performance.timeOrigin);
+      const offset = Number(performance && typeof performance.now === 'function' ? performance.now() : NaN);
+      if (Number.isFinite(origin) && Number.isFinite(offset) && origin > 0) return origin + offset;
+    } catch {}
+    return new Date().getTime();
+  }
+
+  function r94IsUserSurface(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    if (!(element instanceof Element)) return false;
+    return !!element.closest('[data-message-author-role="user"],[data-message-author="user"]');
+  }
+
+  function r94StrongSemanticOutputSurface(node) {
+    if (!(node instanceof Element)) return false;
+    if (node.matches('[data-local-conversation-final-assistant]')) return true;
+    return node.matches('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
+  }
+
+  function r94DirectVisualChildren(parent) {
+    if (!(parent instanceof Element)) return [];
+    return Array.from(parent.children || []).filter(function(child) {
+      if (!(child instanceof Element) || !isVisible(child)) return false;
+      if (child.closest('#' + R94_OVERLAY_ID)) return false;
+      if (insideComposer(child) || insideOwnUi(child) || r94IsUserSurface(child)) return false;
+      return normalizedText(child).length >= 2 || r94StrongSemanticOutputSurface(child);
+    });
+  }
+
+  function r94AtomicTextSurface(node) {
+    if (!(node instanceof Element)) return false;
+    if (r94StrongSemanticOutputSurface(node)) return true;
+    const tag = String(node.tagName || '').toLowerCase();
+    return ['p','li','pre','blockquote','table','tr','details','summary'].includes(tag);
+  }
+
+  function r94VerticalRowCount(children) {
+    const rects = [];
+    for (const child of children) {
+      if (!(child instanceof Element) || !isVisible(child)) continue;
+      try {
+        const rect = child.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        rects.push({ top: rect.top, bottom: rect.bottom });
+      } catch {}
+    }
+    rects.sort(function(a,b) { return a.top - b.top; });
+    if (!rects.length) return 0;
+    let rows = 1;
+    let bottom = rects[0].bottom;
+    for (let i = 1; i < rects.length; i += 1) {
+      const rect = rects[i];
+      if (rect.top > bottom + 2) rows += 1;
+      bottom = Math.max(bottom, rect.bottom);
+    }
+    return rows;
+  }
+
+  function r94CollectVisualSegments(node, root, depth) {
+    if (!(node instanceof Element) || !isVisible(node) || insideComposer(node) || insideOwnUi(node) || r94IsUserSurface(node)) return [];
+    if (normalizedText(node).length < 2 && !r94StrongSemanticOutputSurface(node)) return [];
+    if (node.matches('[data-local-conversation-final-assistant]')) return [node];
+    if (r94AtomicTextSurface(node)) return [node];
+    if (depth >= 12) return [node];
+
+    const semantic = node.closest('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
+    if (semantic instanceof Element && semantic !== root && root instanceof Element && root.contains(semantic)) {
+      let owner = semantic;
+      let parent = semantic.parentElement;
+      while (parent instanceof Element && parent !== root) {
+        if (r94StrongSemanticOutputSurface(parent)) owner = parent;
+        parent = parent.parentElement;
+      }
+      if (owner === node || node.contains(owner)) return [owner];
+    }
+
+    const children = r94DirectVisualChildren(node);
+    if (!children.length) return [node];
+    if (children.length === 1) return r94CollectVisualSegments(children[0], root, depth + 1);
+    if (r94VerticalRowCount(children) < 2) return [node];
+
+    const out = [];
+    for (const child of children) {
+      const nested = r94CollectVisualSegments(child, root, depth + 1);
+      for (const item of nested) out.push(item);
+    }
+    return out.length ? out : [node];
+  }
+
+  function r94TopLevelSegments(turn) {
+    if (!(turn instanceof Element)) return [];
+    let candidates = [];
+    const direct = r94DirectVisualChildren(turn);
+    if (!direct.length) candidates = r94CollectVisualSegments(turn, turn, 0);
+    else {
+      for (const child of direct) {
+        const nested = r94CollectVisualSegments(child, turn, 0);
+        for (const item of nested) candidates.push(item);
+      }
+    }
+
+    const unique = [];
+    const seen = new Set();
+    for (const candidate of candidates) {
+      if (!(candidate instanceof Element) || seen.has(candidate)) continue;
+      if (!turn.contains(candidate) && candidate !== turn) continue;
+      if (!isVisible(candidate) || insideComposer(candidate) || insideOwnUi(candidate) || r94IsUserSurface(candidate)) continue;
+      if (normalizedText(candidate).length < 2 && !r94StrongSemanticOutputSurface(candidate)) continue;
+      seen.add(candidate);
+      unique.push(candidate);
+    }
+    return unique;
+  }
+
+  function r94StructuralPath(node, stop) {
+    const parts = [];
+    let current = node;
+    for (let depth = 0; depth < 18 && current instanceof Element && current !== stop; depth += 1) {
+      const parent = current.parentElement;
+      if (!(parent instanceof Element)) break;
+      const siblings = Array.from(parent.children || []).filter(function(child) {
+        return !(child instanceof Element && child.closest('#' + R94_OVERLAY_ID));
+      });
+      const index = siblings.indexOf(current);
+      parts.unshift(index >= 0 ? index : 0);
+      current = parent;
+    }
+    return parts.join('.');
+  }
+
+  function r94Hash(value) {
+    const text = String(value || '');
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+  }
+
+  function r94SegmentKey(segment, turn) {
+    if (!(segment instanceof Element) || !(turn instanceof Element)) return '';
+    const ids = r94IdsForTurn(turn);
+    const rootId = ids && ids.turnId ? ids.turnId : r94StructuralPath(turn, document.body);
+    const semanticId =
+      segment.getAttribute('data-message-id') ||
+      segment.getAttribute('data-testid') ||
+      segment.getAttribute('role') || '';
+    const textHead = normalizedText(segment).slice(0, 96);
+    return r94Hash(rootId + '|' + r94StructuralPath(segment, turn) + '|' + semanticId + '|' + textHead);
+  }
+
+  function r94CreateSegmentBadge(root, epoch) {
+    const badge = document.createElement('div');
+    badge.className = R94_SEGMENT_BADGE_CLASS;
+    badge.setAttribute('aria-hidden','true');
+    badge.textContent = '≈' + clock(epoch);
+    badge.title = fullTime(epoch) + ' · approximate: first observed locally while this output block was live';
+    badge.style.cssText = [
+      'position:absolute',
+      'left:0',
+      'top:0',
+      'display:block',
+      'max-width:180px',
+      'padding:0 2px',
+      'border:0',
+      'background:transparent',
+      'box-shadow:none',
+      'color:color-mix(in srgb,CanvasText 48%,transparent)',
+      'font:9px/1.15 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'font-variant-numeric:tabular-nums',
+      'white-space:nowrap',
+      'pointer-events:none',
+      'user-select:none',
+      'opacity:.78',
+      'will-change:transform',
+    ].join(';') + ';';
+    root.appendChild(badge);
+    return badge;
+  }
+
+  function r94ActiveGenerationUiPresentFor(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    const pane = typeof paneForNode === 'function' ? paneForNode(element) : null;
+    const composer = typeof composerForPane === 'function'
+      ? composerForPane(pane)
+      : (typeof findComposerRoot === 'function' ? findComposerRoot() : null);
+    const scope = pane instanceof Element
+      ? pane
+      : (composer instanceof Element ? (composer.parentElement || composer) : document);
+
+    const controls = scope.querySelectorAll ? scope.querySelectorAll('button,[role="button"]') : [];
+    for (const control of controls) {
+      if (!(control instanceof Element) || !isVisible(control) || insideOwnUi(control)) continue;
+      const hint = [
+        control.getAttribute('aria-label'),
+        control.getAttribute('title'),
+        control.getAttribute('data-testid'),
+        control.getAttribute('data-state'),
+        control.textContent,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (/(^|[\s:_-])(stop|cancel|interrupt|abort|pause)([\s:_-]|$)|停止|取消|中止|终止|暂停/i.test(hint)) return true;
+    }
+
+    const busy = scope.querySelectorAll
+      ? scope.querySelectorAll('[aria-busy="true"],[data-loading="true"],[data-state="loading"],[data-state="pending"],[data-state="running"],[class*="animate-spin"],[class*="spinner"]')
+      : [];
+    for (const node of busy) {
+      if (node instanceof Element && isVisible(node) && !insideOwnUi(node)) return true;
+    }
+    return false;
+  }
+
+  function r94LatestVisibleAssistantTurnFor(node) {
+    const element = node instanceof Element ? node : node && node.parentElement;
+    const pane = typeof paneForNode === 'function' ? paneForNode(element) : null;
+    const scope = pane instanceof Element ? pane : document;
+    const all = Array.from(scope.querySelectorAll(R94_TURN_SELECTOR))
+      .filter(function(candidate) {
+        return candidate instanceof Element &&
+          candidate.isConnected &&
+          !insideComposer(candidate) &&
+          !insideOwnUi(candidate) &&
+          !r94IsUserSurface(candidate);
+      });
+    const seen = new Set();
+    const ordered = [];
+    for (const candidate of all) {
+      const turn = r94CanonicalTurn(candidate);
+      if (!(turn instanceof Element) || seen.has(turn)) continue;
+      seen.add(turn);
+      ordered.push(turn);
+    }
+    return ordered.length ? ordered[ordered.length - 1] : null;
+  }
+
   function installOutputObserver() {
     if (!document.body) {
       setTimeout(installOutputObserver, 120);

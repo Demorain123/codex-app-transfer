@@ -465,7 +465,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - native Codex turn/action-row DOM is read-only; labels live in a Transfer-owned overlay root'
         Write-Host '  - mutation observation is childList-only; visible-turn work is IntersectionObserver bounded'
         Write-Host '  - historical/remounted blocks never receive host-now estimates; live segment discovery stays childList-only with no periodic timestamp sweep'
-        Write-Host '  - status bar is one Transfer-owned child inside .composer-surface-chrome before the input wrapper; no detached viewport status overlay is used'
+        Write-Host '  - status bar mounts only in a structurally verified composer shell, as a sibling of the editor branch; unsafe/unknown surfaces fail closed'
         Write-Host '  - native/global Usage polling cannot overwrite pane/local status counters or tok/s'
         Write-Host '  - exact TurnCapability accepts turn lifecycle + turn-scoped usage notifications when passively observed'
         Write-Host '  - r76 bounded rollout tail preserves task_started/turn_context/token_count/task_complete turn identity without whole-file parsing'

@@ -826,6 +826,7 @@
         // Codex owns final/user sent-time UI even when it is hover-revealed.
         // Never duplicate that native timestamp with a Transfer turn badge.
         r94RemoveTurnBadge(turn);
+        r94SuppressNativeFinalSegmentBadge(turn);
         diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
         diagnostics.lastSource = exact.record.source || '';
         r94SyncDiagnostics();
@@ -879,6 +880,26 @@
       const native = turn.querySelector(R94_NATIVE_TIME_SELECTOR);
       if (!(native instanceof Element)) return false;
       return segment === native || segment.contains(native);
+    }
+
+    function r94SuppressNativeFinalSegmentBadge(turn) {
+      if (!(turn instanceof Element)) return;
+      const segments = r94TopLevelSegments(turn);
+      if (!segments.length) return;
+      const explicitFinal = turn.querySelector('[data-local-conversation-final-assistant]');
+      let target = null;
+      if (explicitFinal instanceof Element) {
+        target = segments.find(function(segment) {
+          return segment === explicitFinal || segment.contains(explicitFinal) || explicitFinal.contains(segment);
+        }) || null;
+      }
+      if (!(target instanceof Element)) target = segments[segments.length - 1] || null;
+      if (!(target instanceof Element)) return;
+      const entry = segmentEntryByNode.get(target);
+      if (!entry) return;
+      visibleSegmentEntries.delete(entry);
+      if (entry.badge && entry.badge.isConnected) entry.badge.remove();
+      entry.badge = null;
     }
 
     function r94BaselineTurnSegments(turn) {

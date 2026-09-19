@@ -28,6 +28,7 @@ $R94CargoLock = Join-Path $RepoRoot 'Cargo.lock'
 $R94ModernSelective = Join-Path $PSScriptRoot 'apply_r43_r65_selective_modern.py'
 $R94R39LifecycleSelective = Join-Path $PSScriptRoot 'apply_r39_lifecycle_selective_modern.py'
 $R94R39WindowsOwnerSelective = Join-Path $PSScriptRoot 'apply_r39_windows_owner_selective_modern.py'
+$R94WindowsListenerNoInherit = Join-Path $PSScriptRoot 'apply_r94_windows_listener_noinherit.py'
 $R94ProxyHandlerRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\proxy.rs'
 $R94ChainHealthRs = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\chain_health.rs'
 
@@ -58,6 +59,7 @@ foreach ($Path in @(
     $R94ModernSelective,
     $R94R39LifecycleSelective,
     $R94R39WindowsOwnerSelective,
+    $R94WindowsListenerNoInherit,
     $R94ProxyHandlerRs,
     $R94ChainHealthRs
 )) {
@@ -120,6 +122,7 @@ $CargoLockText = Normalize-Eol ([System.IO.File]::ReadAllText($R94CargoLock))
 $ModernSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ModernSelective))
 $R39LifecycleSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94R39LifecycleSelective))
 $R39WindowsOwnerSelectiveText = Normalize-Eol ([System.IO.File]::ReadAllText($R94R39WindowsOwnerSelective))
+$R94WindowsListenerNoInheritText = Normalize-Eol ([System.IO.File]::ReadAllText($R94WindowsListenerNoInherit))
 $ProxyHandlerText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ProxyHandlerRs))
 $ChainHealthText = Normalize-Eol ([System.IO.File]::ReadAllText($R94ChainHealthRs))
 
@@ -133,6 +136,28 @@ foreach ($Marker in @(
 }
 if (-not $R39LifecycleSelectiveText.Contains('apply_r39_windows_owner_selective_modern.py')) {
     throw 'r94 r39 lifecycle selective source must use the modern Windows-owner substrate leaf'
+}
+if (-not $R39LifecycleSelectiveText.Contains('apply_r94_windows_listener_noinherit.py')) {
+    throw 'r94 r39 lifecycle selective source must install the fixed-port listener no-inherit guard'
+}
+foreach ($Marker in @(
+    'CAS-R94-WINDOWS-LISTENER-NOINHERIT',
+    'SetHandleInformation',
+    'GetHandleInformation',
+    'HANDLE_FLAG_INHERIT',
+    'listener_inherit_guard_verified',
+    'inheritable=false'
+)) {
+    if (-not $R94WindowsListenerNoInheritText.Contains($Marker)) {
+        throw "r94 Windows listener no-inherit source missing: $Marker"
+    }
+}
+if (-not $R94WindowsListenerNoInheritText.Contains('SetHandleInformation(handle, HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0))')) {
+    throw 'r94 Windows listener guard must explicitly clear HANDLE_FLAG_INHERIT'
+}
+if ($R94WindowsListenerNoInheritText.Contains('SO_REUSEADDR') -and
+    -not $R94WindowsListenerNoInheritText.Contains('no SO_REUSEADDR workaround')) {
+    throw 'r94 Windows listener guard must not use SO_REUSEADDR'
 }
 if ($R39LifecycleSelectiveText.Contains('run_leaf("scripts/apply_r38_windows_port_owner.py")')) {
     throw 'r94 r39 lifecycle selective source regressed to the historical r38 proxy-runner-coupled owner leaf'
@@ -169,7 +194,9 @@ foreach ($Marker in @(
 }
 Write-Host 'R94_R39_LIFECYCLE_SOURCE_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - Windows owner substrate is decoupled from historical r38 proxy_runner anchors'
+Write-Host '  - fixed-port listener handle inheritance is explicitly blocked and read-back verified'
 Write-Host '  - current r28 bind/recovery anchors required by the selective r39 upgrade are present'
+Write-Host 'R94_WINDOWS_LISTENER_NOINHERIT_PREFLIGHT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',

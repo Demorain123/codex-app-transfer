@@ -41,14 +41,12 @@ foreach ($Check in @(
 
 Write-Host 'R94_1_PREVIEW_WRAPPER_IDENTITY_PASS' -ForegroundColor Green
 
-if (-not $PreflightOnly) {
-    $WorkspaceCargo = Join-Path $RepoRoot 'Cargo.toml'
-    & cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration --lib r94_1_
-    if ($LASTEXITCODE -ne 0) {
-        throw "r94.1 provider policy semantic carry-forward focused tests failed with exit code $LASTEXITCODE"
-    }
-    Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_FOCUSED_TESTS_PASS' -ForegroundColor Green
+$WorkspaceCargo = Join-Path $RepoRoot 'Cargo.toml'
+& cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration --lib r94_1_
+if ($LASTEXITCODE -ne 0) {
+    throw "r94.1 provider policy semantic carry-forward focused tests failed with exit code $LASTEXITCODE"
 }
+Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_FOCUSED_TESTS_PASS' -ForegroundColor Green
 
 $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner)
 if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
@@ -61,6 +59,7 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($PreflightOnly) {
     Write-Host 'R94_1_PREVIEW_WRAPPER_PREFLIGHT_PASS' -ForegroundColor Green
+    Write-Host '  - focused r94.1 Rust tests + inherited r94 generated-chain preflight completed; release build was not started'
 } else {
     Write-Host 'R94_1_PREVIEW_WRAPPER_RUNTIME_PASS' -ForegroundColor Green
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'

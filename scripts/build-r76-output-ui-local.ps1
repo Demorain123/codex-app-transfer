@@ -450,15 +450,36 @@ $MainProcessCollector = @'
           completedAtMs: Number(item?.completedAtMs) || null,
         })).filter((item) => item.turnId && item.itemId)
       : [];
+    // CAS-R94-EXACT-INGEST-ACK-DIAGNOSTICS
+    // executeJavaScript succeeding only proves renderer transport succeeded.
+    // Require an explicit acknowledgement from the telemetry runtime so
+    // diagnostics cannot claim push-ok when ingestExternalUsage is absent.
+    const payload = JSON.stringify(safeEnvelope);
     const expression =
-      "globalThis.__casOutputTelemetryRuntime&&" +
-      "globalThis.__casOutputTelemetryRuntime.ingestExternalUsage&&" +
-      "globalThis.__casOutputTelemetryRuntime.ingestExternalUsage(" + JSON.stringify(safeEnvelope) + ")";
+      "(() => {" +
+      "const rt=globalThis.__casOutputTelemetryRuntime;" +
+      "if(!rt)return 'runtime-missing';" +
+      "if(typeof rt.ingestExternalUsage!=='function')return 'ingest-missing';" +
+      "try{return rt.ingestExternalUsage(" + payload + ")===true?'ingest-ok':'ingest-rejected';}" +
+      "catch(error){return 'ingest-error:'+String(error&&error.message||error||'').slice(0,120);}" +
+      "})()";
     try {
-      await contents.executeJavaScript(expression, true);
-      return true;
-    } catch {
-      return false;
+      const raw = await contents.executeJavaScript(expression, true);
+      const result = String(raw || 'ingest-empty');
+      const stage = result.startsWith('ingest-error:')
+        ? 'ingest-error'
+        : result;
+      return {
+        ok: result === 'ingest-ok',
+        stage,
+        error: result.startsWith('ingest-error:') ? result.slice('ingest-error:'.length) : '',
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        stage: 'execute-error',
+        error: String(error && error.message || error || '').slice(0, 180),
+      };
     }
   };
 
@@ -538,12 +559,13 @@ $MainProcessCollector = @'
 
           const pushed = await pushLocalUsage(contents, threadId, envelope);
           await publishLocalUsageCollectorDiagnostics(contents, {
-            stage: pushed ? 'push-ok' : 'push-failed',
+            stage: pushed && pushed.stage ? pushed.stage : 'ingest-unknown',
             threadId,
             threadCount: threadIds.length,
             fileHit: true,
             envelopeHit: true,
-            pushOk: pushed,
+            pushOk: !!(pushed && pushed.ok),
+            error: pushed && pushed.error ? pushed.error : '',
           });
         }
       } catch (error) {
@@ -626,9 +648,12 @@ try {
         'total_token_usage',
         'armLocalUsageCollector(electron)',
         'CAS-R94-LOCAL-USAGE-COLLECTOR-DIAGNOSTICS',
+        'CAS-R94-EXACT-INGEST-ACK-DIAGNOSTICS',
         '__casR94LocalUsageCollectorDiagnostics',
         "stage: 'file-miss'",
-        "stage: pushed ? 'push-ok' : 'push-failed'",
+        "'ingest-missing'",
+        "'ingest-ok'",
+        "pushOk: !!(pushed && pushed.ok)",
         'ingestExternalUsage'
     )) {
         if (-not $Combined.Contains($Marker)) { throw "r76 telemetry source verification failed: $Marker" }

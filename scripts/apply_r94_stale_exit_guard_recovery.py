@@ -41,37 +41,51 @@ for token in required:
     if token not in text:
         raise SystemExit(f"r94 stale exit guard recovery prerequisite missing: {token}")
 
-match_old = '''        "transfer_port_stale_owner" => {
-            actions.push(RecoveryAction::skipped(
-                "preserve_stale_listener_evidence",
-                "Windows 仍报告监听端点，但最初 binder PID 已不存在；已保留现场，不重复 bind、不自动重启 Windows，详情中可查看 binder 证据",
-            ));
-        }
+# Patch the recovery match by semantic branch boundaries instead of translated
+# explanatory text. r39 owns the binder terminology and may legitimately update
+# wording without changing the recovery contract.
+match_start_token = '''        "transfer_port_stale_owner" => {
 '''
+match_next_token = '''        "transfer_stopped" => {
+'''
+match_start = text.find(match_start_token)
+if match_start < 0:
+    raise SystemExit("r94 stale exit guard recovery: stale recovery branch start missing")
+match_end = text.find(match_next_token, match_start)
+if match_end < 0:
+    raise SystemExit("r94 stale exit guard recovery: transfer_stopped branch boundary missing")
+match_segment = text[match_start:match_end]
+if "preserve_stale_listener_evidence" not in match_segment:
+    raise SystemExit("r94 stale exit guard recovery: stale branch is not the expected r39 preserve-evidence owner")
+if "recover_stale_exit_guard_listener_r94" in match_segment:
+    raise SystemExit("r94 stale exit guard recovery: stale branch already points at r94 recovery but marker is absent")
 match_new = '''        "transfer_port_stale_owner" => {
             // CAS-R94-STALE-EXIT-GUARD-RECOVERY
             actions.extend(recover_stale_exit_guard_listener_r94(&state, &before).await);
         }
 '''
-if text.count(match_old) != 1:
-    raise SystemExit(
-        f"r94 stale exit guard recovery: stale match anchor count={text.count(match_old)}, expected 1"
-    )
-text = text.replace(match_old, match_new, 1)
+text = text[:match_start] + match_new + text[match_end:]
 
-recommend_old = '''        "transfer_port_stale_owner" => out.push(
-            "Windows 报告监听端点仍在，而最初 binder PID 已不存在：保留现场并查看 binder/listener 证据；恢复器不会连续重复 bind。".into(),
-        ),
-'''
+# Patch only the stale-listener recommendation arm. Do not couple to the exact
+# r39 Chinese/English wording; preserve the following transfer_stopped arm.
+recommend_scope = text.find('''    match transfer.code.as_str() {
+''')
+if recommend_scope < 0:
+    raise SystemExit("r94 stale exit guard recovery: transfer recommendations match missing")
+recommend_start = text.find('''        "transfer_port_stale_owner" => out.push(
+''', recommend_scope)
+recommend_next = text.find('''        "transfer_stopped" => out.push(
+''', recommend_start)
+if recommend_start < 0 or recommend_next < 0:
+    raise SystemExit("r94 stale exit guard recovery: stale recommendation semantic boundary missing")
+recommend_segment = text[recommend_start:recommend_next]
+if "binder" not in recommend_segment and "listener" not in recommend_segment:
+    raise SystemExit("r94 stale exit guard recovery: unexpected stale recommendation owner")
 recommend_new = '''        "transfer_port_stale_owner" => out.push(
-            "Windows 报告死 PID 仍持有监听端点：可使用“尝试修复”。恢复器只会在 Codex 已退出、连续确认同一 dead binder、且唯一直接子进程精确匹配 Transfer 的 mcp-exit-guard-r32.ps1 时停止该 PID；随后等待同一个固定端口释放并重新启动 Transfer。".into(),
+            "Windows 报告监听端点仍在，而最初 binder PID 已不存在：可使用“尝试修复”。恢复器只会在 Codex 已退出、连续确认同一 dead binder、且唯一直接子进程精确匹配 Transfer 的 mcp-exit-guard-r32.ps1 时停止该 PID；随后等待同一个固定端口释放并重新启动 Transfer。".into(),
         ),
 '''
-if text.count(recommend_old) != 1:
-    raise SystemExit(
-        f"r94 stale exit guard recovery: recommendation anchor count={text.count(recommend_old)}, expected 1"
-    )
-text = text.replace(recommend_old, recommend_new, 1)
+text = text[:recommend_start] + recommend_new + text[recommend_next:]
 
 helper_anchor = '''async fn recover_transfer(
     state: &AdminState,

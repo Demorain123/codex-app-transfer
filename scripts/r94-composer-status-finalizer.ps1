@@ -210,7 +210,6 @@ $Patched = Replace-BlockRequired $Patched '  function renderMirror() {' '  funct
 foreach ($Marker in @(
     'R93_COMPOSER_STATUS_STABILITY_RUNTIME',
     'function r93MountStatusBar(bar, composer) {',
-    'surface.insertBefore(bar, inputWrap);',
     "bar.setAttribute('data-cas-status-inside-composer','true');",
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
     'R94_CURRENT_COMPOSER_ROOT_RUNTIME',

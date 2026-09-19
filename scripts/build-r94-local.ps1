@@ -591,7 +591,11 @@ foreach ($Marker in @(
     'r94_1_dotted_endpoint_coupled_policy_fails_closed',
     'r94_1_live_provider_switch_after_snapshot_wins',
     'r94_1_live_provider_removal_after_snapshot_is_not_resurrected',
+    'r94_1_dotted_provider_text_inside_unrelated_table_is_not_root_policy',
+    'r94_1_snapshot_policy_without_live_provider_table_fails_closed',
     'r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table',
+    'live-provider-table-missing',
+    'root_scope',
     'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
     'r94_1_restore_preserves_post_apply_user_endpoint_edit',
     'r94_1_restore_repairs_old_provider_endpoint_after_active_provider_switch',
@@ -647,6 +651,8 @@ Write-Host '  - quoted/nested provider tables and endpoint-coupled auth policies
 Write-Host '  - ChatGPT-auth + custom-provider preview emits an explicit first-turn relay canary requirement; config success alone is not treated as transport proof'
 Write-Host '  - live model_provider edits in the current session win over the original snapshot; a live removal is never resurrected on later apply'
 Write-Host '  - nested provider subtables are detected across the full document, and dotted auth/AWS policy fails closed'
+Write-Host '  - dotted provider keys are recognized only at TOML root scope; unrelated table text cannot impersonate provider policy'
+Write-Host '  - snapshot policy never partially resurrects a missing live provider table'
 Write-Host '  - root-level dotted provider policy is carried forward without mixing it with a duplicate section table'
 Write-Host '  - provider endpoint restore is symmetric and only reverts an endpoint still proven to be Transfer-owned'
 Write-Host '  - post-apply user endpoint edits win over snapshot restoration'

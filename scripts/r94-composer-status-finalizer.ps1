@@ -99,11 +99,14 @@ $R94ComposerSurfaceCompat = @'
     return isVisible(composer) ? composer : null;
   }
 
+'@
+$Patched = Replace-BlockRequired $Patched '  function r93ComposerSurfaceFor(composer) {' '  function r93MountStatusBar(bar, composer) {' $R94ComposerSurfaceCompat 'r94 current Codex composer surface compatibility'
+
+$R94FindComposerRootCompat = @'
   function findComposerRoot() {
     // R94_CURRENT_COMPOSER_ROOT_RUNTIME
-    // Base and pane-shaped runtimes both call this helper eventually. Resolve
-    // from the one visible editable first so a stale outer
-    // [data-thread-find-composer] node cannot steal the mount.
+    // Resolve from the one visible editable first so stale outer
+    // [data-thread-find-composer] wrappers cannot steal the mount.
     const editable = r94VisibleComposerEditable(null);
     const surface = r94NearestComposerSurface(editable);
     if (surface instanceof Element) return surface;
@@ -117,7 +120,13 @@ $R94ComposerSurfaceCompat = @'
     return null;
   }
 '@
-$Patched = Replace-BlockRequired $Patched '  function r93ComposerSurfaceFor(composer) {' '  function r93MountStatusBar(bar, composer) {' $R94ComposerSurfaceCompat 'r94 current Codex composer surface compatibility'
+if ($Patched.Contains('  function paneForComposer(composer) {')) {
+    $Patched = Replace-BlockRequired $Patched '  function findComposerRoot() {' '  function paneForComposer(composer) {' $R94FindComposerRootCompat 'r94 current pane composer root resolver'
+} elseif ($Patched.Contains('  function ensureStatusBar() {')) {
+    $Patched = Replace-BlockRequired $Patched '  function findComposerRoot() {' '  function ensureStatusBar() {' $R94FindComposerRootCompat 'r94 current base composer root resolver'
+} else {
+    throw 'r94 could not locate composer root resolver boundary'
+}
 
 $R94ComposerMountCompat = @'
   function r93MountStatusBar(bar, composer) {

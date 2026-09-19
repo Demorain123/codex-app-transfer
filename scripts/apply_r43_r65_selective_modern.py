@@ -89,8 +89,15 @@ masked_history_before = sha256(MASKED_HISTORY_FILE)
 print(f"r82 preserve=r70_masked_history file={MASKED_HISTORY_FILE.relative_to(ROOT).as_posix()} sha256_before={masked_history_before}")
 
 # IMPORTANT: do not call historical recursive apply_rXX_unified.py drivers.
-# They recurse into r24-r42 and contain stale source/UI anchors. r82 applies only
-# the reviewed leaf transforms required for the r43-r65 carry-forward.
+# They recurse into r24-r42 and contain stale source/UI anchors. r82+ applies only
+# reviewed leaf transforms. One explicit exception is the proven r38/r39 proxy
+# lifecycle leaf set: it is selectively re-materialized below because later r82+
+# packaging accidentally dropped the fixed-port owner-thread/10048 hardening.
+
+if not has("src-tauri/src/proxy_runner.rs", "CAS-R39-PROXY-OWNER-THREAD"):
+    run_leaf("r39-lifecycle-prereq", "scripts/apply_r39_lifecycle_selective_modern.py")
+else:
+    print("r82 stage=r39-lifecycle-prereq status=already_materialized")
 
 if not has("crates/adapters/src/mapper/grok_build.rs", "CAS-R42-GROK-EFFECTIVE-TOOL-COLLISION-GUARD"):
     run_leaf("r42-prereq", "scripts/apply_r42_grok_tool_collision_guard.py")
@@ -240,6 +247,39 @@ require(
 )
 require("crates/adapters/src/mapper/sub2api_grok_compat.rs", "CAS-R60-SUB2API-POST-COMPACTION-REPLAY")
 require("crates/adapters/src/mapper/responses.rs", "CAS-R60-SUB2API-POST-COMPACTION-REPLAY-HOOK")
+require(
+    "src-tauri/src/proxy_runner.rs",
+    "CAS-R39-PROXY-OWNER-THREAD",
+    "CAS-R39-OWNER-THREAD-STATE-GUARD",
+    "CAS-R39-PROXY-OWNER-THREAD-TESTS",
+    "port_release_verified",
+    "listener_residue_detected",
+)
+require(
+    "src-tauri/src/admin/handlers/proxy.rs",
+    "CAS-R39-BIND-BUSY-NONRETRYABLE",
+    "bind_busy_nonretryable",
+)
+require(
+    "src-tauri/src/admin/handlers/chain_health.rs",
+    "CAS-R38-RECOVERY-PORT-CLASSIFICATION",
+    "CAS-R38-RECOVERY-ASYNC-STOP",
+    "CAS-R39-BINDER-TERMINOLOGY",
+    "transfer_port_occupied_live",
+    "transfer_port_stale_owner",
+)
+require(
+    "src-tauri/src/windows_tcp_owner.rs",
+    "CAS-R38-WINDOWS-TCP-OWNER",
+    "GetExtendedTcpTable",
+    "TCP_TABLE_OWNER_PID_LISTENER",
+)
+_proxy_handler = text("src-tauri/src/admin/handlers/proxy.rs")
+if "const RETRY_MS: &[u64] = &[50, 100, 200, 400, 800];" in _proxy_handler:
+    raise SystemExit("r82 modern carry-forward regressed to r28 blind 10048 retry schedule")
+if "[proxy-lifecycle-r28] bind busy requested_port=" in _proxy_handler:
+    raise SystemExit("r82 modern carry-forward retained r28 bind-busy retry logging")
+print("R82_R39_LIFECYCLE_SELECTIVE_CARRY_FORWARD_PASS")
 
 scan_forbidden()
 print("R82_R66_R69_EXPERIMENTS_ABSENT_PASS")
@@ -253,6 +293,7 @@ print(f"r82 preserve=r70_masked_history file={MASKED_HISTORY_FILE.relative_to(RO
 print("R82_R70_MASKED_HISTORY_PRESERVED_PASS")
 print("R82_R43_R65_SELECTIVE_MATERIALIZATION_PASS")
 print("- no historical recursive apply_rXX_unified.py driver was executed")
-print("- r24-r41 were not replayed; r42 leaf was used only as a required prerequisite when absent")
+print("- r38/r39 fixed-port lifecycle was restored only through reviewed leaf transforms; unrelated r24-r41 behavior was not replayed")
+print("- r42 leaf was used only as a required prerequisite when absent")
 print("- r44 terminal semantics is represented by the verified r45 semantic-terminal invariant")
 print("- r66-r69 Hook A/B experiment markers are absent from runtime sources")

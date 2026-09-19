@@ -135,6 +135,7 @@ foreach ($Marker in @(
     'function r94AssistantMessageSurface(node) {',
     'function r94IsUserSurface(node) {',
     'function r94HostEpochNow() {',
+    'const systemEpoch = new Date().getTime();',
     'host-first-observed-live-output',
     'r94BaselineCurrentSegments();',
     'r94SuppressNativeFinalSegmentBadge(turn);',
@@ -164,7 +165,7 @@ Write-Host '  - existing/remounted history is baselined and cannot receive a fre
 Write-Host '  - native final sent-time wins; Transfer removes its final segment badge instead of duplicating Codex'
 Write-Host '  - all Transfer timestamp badges live in the overlay root with pointer-events:none'
 Write-Host 'R94_FULL_DATE_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
-Write-Host '  - Transfer-owned timestamp labels use host-local YYYY-MM-DD HH:mm:ss; tooltip also carries the short local timezone'
+Write-Host '  - Transfer-owned timestamp labels use the current host system wall clock as YYYY-MM-DD HH:mm:ss; tooltip also carries the short local timezone'
 Write-Host '  - ambiguous native time-only history is never assigned a guessed date'
 Write-Host 'R94_TIMELINE_NAV_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - a separate Transfer-owned left rail exposes dated U/A/T/G/S/F time nodes without mutating Codex React DOM'

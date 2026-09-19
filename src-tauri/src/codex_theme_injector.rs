@@ -1256,6 +1256,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       tsSegmentStamped: Number(ts.liveSegmentsStamped) || 0,
       tsSegmentBadges: Number(ts.liveSegmentBadges) || 0,
       tsSegmentCache: Number(ts.liveSegmentCache) || 0,
+      tsSemanticUnits: Number(ts.semanticUnits) || 0,
+      tsExactItemBindings: Number(ts.exactItemBindings) || 0,
       tsSegmentSource: String(ts.lastLiveSegmentSource || ''),
       timelineEntries: Number(ts.timelineEntries) || 0,
       timelineMarkers: Number(ts.timelineMarkers) || 0,
@@ -1317,6 +1319,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · nativeSupp=' + s.tsSuppressed +
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
       '<div>SEG stamp/badge/cache=' + s.tsSegmentStamped + '/' + s.tsSegmentBadges + '/' + s.tsSegmentCache +
+        ' · semantic=' + s.tsSemanticUnits +
+        ' · itemExact=' + s.tsExactItemBindings +
         (s.tsSegmentSource ? ' · source=' + escapeHtml(s.tsSegmentSource) : '') + '</div>',
       '<div>TL meta=' + s.timelineEntries +
         ' · customMarkers=' + s.timelineMarkers +

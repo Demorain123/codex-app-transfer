@@ -488,6 +488,140 @@
     return badge;
   }
 
+  // R94_TIMELINE_NAV_RUNTIME
+  // Conceptually follows the lightweight DOM-only navigation pattern used by
+  // dsh-scroll-timeline (MIT): a self-rendered rail, hover metadata and
+  // click-to-jump, without patching the host React tree or polling.
+  function r94EnsureTimelineRailRoot() {
+    let rail = document.getElementById(R94_TIMELINE_RAIL_ID);
+    if (rail instanceof HTMLElement) return rail;
+    rail = document.createElement('nav');
+    rail.id = R94_TIMELINE_RAIL_ID;
+    rail.setAttribute('aria-label','Transfer timeline');
+    rail.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:72px',
+      'width:150px',
+      'height:calc(100vh - 144px)',
+      'z-index:2147481900',
+      'pointer-events:none',
+      'overflow:visible',
+      'contain:layout style',
+    ].join(';') + ';';
+
+    const line = document.createElement('div');
+    line.setAttribute('data-cas-r94-timeline-line','true');
+    line.style.cssText = [
+      'position:absolute',
+      'left:7px',
+      'top:0',
+      'bottom:0',
+      'width:1px',
+      'background:color-mix(in srgb,CanvasText 18%,transparent)',
+      'pointer-events:none',
+    ].join(';') + ';';
+    rail.appendChild(line);
+    (document.body || document.documentElement).appendChild(rail);
+    return rail;
+  }
+
+  function r94CreateTimelineMarker(rail, entry) {
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = R94_TIMELINE_MARKER_CLASS;
+    marker.setAttribute('data-cas-r94-timeline-marker','true');
+    marker.setAttribute('aria-label', entry.fullLabel + ' · ' + entry.kind + ' · click to jump');
+    marker.title = entry.fullLabel + ' · ' + entry.kind + (entry.approx ? ' · first observed locally' : '');
+    marker.style.cssText = [
+      'position:absolute',
+      'left:0',
+      'top:0',
+      'width:118px',
+      'height:16px',
+      'padding:0',
+      'margin:0',
+      'border:0',
+      'background:transparent',
+      'text-align:left',
+      'pointer-events:auto',
+      'cursor:pointer',
+      'font:9px/1.15 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'color:color-mix(in srgb,CanvasText 58%,transparent)',
+      'transform:translateY(-50%)',
+      'outline:none',
+    ].join(';') + ';';
+
+    const tick = document.createElement('span');
+    tick.setAttribute('data-cas-r94-timeline-tick','true');
+    tick.style.cssText = [
+      'position:absolute',
+      'left:2px',
+      'top:7px',
+      'width:12px',
+      'height:2px',
+      'border-radius:2px',
+      'background:currentColor',
+      'opacity:.6',
+      'transition:width .12s ease,opacity .12s ease',
+      'pointer-events:none',
+    ].join(';') + ';';
+
+    const label = document.createElement('span');
+    label.setAttribute('data-cas-r94-timeline-label','true');
+    label.textContent = entry.compactLabel;
+    label.style.cssText = [
+      'position:absolute',
+      'left:18px',
+      'top:1px',
+      'display:none',
+      'padding:1px 4px',
+      'border-radius:4px',
+      'background:color-mix(in srgb,Canvas 92%,transparent)',
+      'box-shadow:0 1px 5px color-mix(in srgb,CanvasText 12%,transparent)',
+      'white-space:nowrap',
+      'pointer-events:none',
+    ].join(';') + ';';
+
+    marker.appendChild(tick);
+    marker.appendChild(label);
+
+    const setExpanded = function(on) {
+      const active = marker.getAttribute('data-cas-r94-timeline-active') === 'true';
+      label.style.display = (on || active) ? 'block' : 'none';
+      tick.style.width = (on || active) ? '24px' : '12px';
+      tick.style.opacity = (on || active) ? '1' : '.6';
+    };
+    marker.addEventListener('mouseenter', function() { setExpanded(true); });
+    marker.addEventListener('mouseleave', function() { setExpanded(false); });
+    marker.addEventListener('focus', function() { setExpanded(true); });
+    marker.addEventListener('blur', function() { setExpanded(false); });
+    marker.__casR94SetExpanded = setExpanded;
+    marker.__casR94Label = label;
+    rail.appendChild(marker);
+    return marker;
+  }
+
+  function r94FindScrollableAncestor(node) {
+    let current = node instanceof Element ? node.parentElement : null;
+    for (let depth = 0; depth < 16 && current; depth += 1) {
+      try {
+        const style = getComputedStyle(current);
+        const overflowY = String(style && style.overflowY || '');
+        if (/(auto|scroll)/.test(overflowY) && current.scrollHeight > current.clientHeight + 24) return current;
+      } catch {}
+      current = current.parentElement;
+    }
+    const fallback = document.scrollingElement;
+    return fallback instanceof Element ? fallback : null;
+  }
+
+  function r94EpochMillis(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return numeric > 10000000000 ? numeric : numeric * 1000;
+  }
+
   function r94AnchorUsable(node) {
     if (!(node instanceof Element) || !node.isConnected) return false;
     try { return node.getClientRects().length > 0; } catch { return true; }

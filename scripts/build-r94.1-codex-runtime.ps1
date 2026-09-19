@@ -11,8 +11,51 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $RepoRoot 'target\release\codex-r94.1-runtime.exe'
 }
 
-$PatchRevision = 'r94.1-openai-policy-v1'
+$PatchRevision = 'r94.1-openai-policy-v2'
 $PatchMarker = 'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY'
+$PatchTestMarker = 'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY-TEST'
+$PatchTest = @'
+
+#[test]
+fn r94_1_builtin_openai_policy_overlay_reuses_retry_without_identity_change() {
+    // CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY-TEST
+    unsafe {
+        std::env::set_var("CAS_R94_1_OPENAI_POLICY_OVERLAY", "1");
+    }
+
+    let configured = ModelProviderInfo {
+        name: "User OpenAi".to_string(),
+        base_url: Some("https://must-not-win.example/v1".to_string()),
+        request_max_retries: Some(7),
+        stream_max_retries: Some(15),
+        stream_idle_timeout_ms: Some(90_000),
+        websocket_connect_timeout_ms: Some(12_000),
+        ..ModelProviderInfo::default()
+    };
+    let merged = merge_configured_model_providers(
+        built_in_model_providers(Some("http://127.0.0.1:18080".to_string())),
+        std::collections::HashMap::from([(
+            OPENAI_PROVIDER_ID.to_string(),
+            configured,
+        )]),
+    )
+    .expect("r94.1 overlay merge should succeed");
+
+    unsafe {
+        std::env::remove_var("CAS_R94_1_OPENAI_POLICY_OVERLAY");
+    }
+
+    let openai = merged
+        .get(OPENAI_PROVIDER_ID)
+        .expect("built-in openai must remain present");
+    assert_eq!(openai.base_url.as_deref(), Some("http://127.0.0.1:18080"));
+    assert_ne!(openai.name, "User OpenAi");
+    assert_eq!(openai.request_max_retries, Some(7));
+    assert_eq!(openai.stream_max_retries, Some(15));
+    assert_eq!(openai.stream_idle_timeout_ms, Some(90_000));
+    assert_eq!(openai.websocket_connect_timeout_ms, Some(12_000));
+}
+'@
 $MergeAnchor = @'
         } else {
             model_providers.entry(key).or_insert(provider);
@@ -74,7 +117,10 @@ if ($PreflightOnly) {
         'provider.stream_idle_timeout_ms.is_some()',
         'provider.websocket_connect_timeout_ms.is_some()',
         'provider.http_headers.take()',
-        'provider.query_params.take()'
+        'provider.query_params.take()',
+        $PatchTestMarker,
+        'assert_eq!(openai.stream_max_retries, Some(15))',
+        'assert_eq!(openai.base_url.as_deref(), Some("http://127.0.0.1:18080"))'
     )) {
         if (-not $MergeReplacement.Contains($Marker)) {
             throw "r94.1 Codex runtime patch contract missing: $Marker"
@@ -156,8 +202,12 @@ if (-not $Reuse) {
     if ($LASTEXITCODE -ne 0) { throw "openai/codex clone failed: $LASTEXITCODE" }
 
     $ProviderSource = Join-Path $SourceDir 'codex-rs\model-provider-info\src\lib.rs'
+    $ProviderTests = Join-Path $SourceDir 'codex-rs\model-provider-info\src\model_provider_info_tests.rs'
     if (-not (Test-Path -LiteralPath $ProviderSource)) {
         throw "upstream provider source missing: $ProviderSource"
+    }
+    if (-not (Test-Path -LiteralPath $ProviderTests)) {
+        throw "upstream provider test source missing: $ProviderTests"
     }
     $Text = [System.IO.File]::ReadAllText($ProviderSource)
     if ($Text.Contains($PatchMarker)) {
@@ -196,12 +246,28 @@ if (-not $Reuse) {
         }
     }
 
+    $TestText = [System.IO.File]::ReadAllText($ProviderTests)
+    if ($TestText.Contains($PatchTestMarker)) {
+        throw 'fresh upstream provider tests unexpectedly already contain the r94.1 private test marker'
+    }
+    [System.IO.File]::AppendAllText(
+        $ProviderTests,
+        $PatchTest.Replace($CrLf, $Lf).Replace($Cr, $Lf),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
     New-Item -ItemType Directory -Force -Path $BuildTarget | Out-Null
     $OldTarget = $env:CARGO_TARGET_DIR
     try {
         $env:CARGO_TARGET_DIR = $BuildTarget
         Push-Location (Join-Path $SourceDir 'codex-rs')
         try {
+            cargo test -p codex-model-provider-info r94_1_builtin_openai_policy_overlay_reuses_retry_without_identity_change -- --test-threads=1
+            if ($LASTEXITCODE -ne 0) {
+                throw "r94.1 patched provider merge test failed: $LASTEXITCODE"
+            }
+            Write-Host 'R94_1_CODEX_RUNTIME_PROVIDER_MERGE_TEST_PASS' -ForegroundColor Green
+
             cargo build -p codex-cli --bin codex --release
             if ($LASTEXITCODE -ne 0) {
                 throw "patched codex-cli build failed: $LASTEXITCODE"
@@ -250,3 +316,4 @@ Write-Host "  - bundled runtime: $BundledRuntime"
 Write-Host "  - upstream tag: $Tag"
 Write-Host "  - patched runtime: $OutputPath"
 Write-Host '  - provider identity remains built-in openai; only portable policy fields are merged'
+Write-Host '  - focused upstream merge test proved retry/timeouts change while built-in endpoint/name remain authoritative'

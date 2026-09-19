@@ -134,6 +134,116 @@ fn proxy_port_from_url(base_url: &str) -> u16 {
         .unwrap_or(18080)
 }
 
+// CAS-R94-1-PROVIDER-CONFIG-TRUTH
+//
+// r94.1 intentionally separates provider *identity* from provider *policy*.
+// Transfer strips root model_provider so Codex falls back to its built-in
+// `openai` provider, but a user-owned custom provider table may still contain
+// retry/timeout policy. Those values must not be silently presented as effective
+// after the identity normalization. We therefore capture them from the snapshot
+// for diagnostics only; r94.1 does NOT copy them to unsupported root keys and
+// does NOT restore the custom provider identity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ProviderPolicyTruth {
+    source_provider: String,
+    request_max_retries: Option<String>,
+    stream_max_retries: Option<String>,
+    stream_idle_timeout_ms: Option<String>,
+    websocket_connect_timeout_ms: Option<String>,
+    wire_api: Option<String>,
+    supports_websockets: Option<String>,
+}
+
+impl ProviderPolicyTruth {
+    fn has_provider_policy(&self) -> bool {
+        self.request_max_retries.is_some()
+            || self.stream_max_retries.is_some()
+            || self.stream_idle_timeout_ms.is_some()
+            || self.websocket_connect_timeout_ms.is_some()
+            || self.wire_api.is_some()
+            || self.supports_websockets.is_some()
+    }
+}
+
+fn root_string_value(content: &str, key: &str) -> Option<String> {
+    content
+        .lines()
+        .take_while(|line| !line.trim_start().starts_with('['))
+        .find_map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') {
+                None
+            } else {
+                crate::residual::parse_root_string_value(trimmed, key)
+            }
+        })
+}
+
+fn provider_policy_truth_from_config(content: &str) -> Option<ProviderPolicyTruth> {
+    let source_provider = root_string_value(content, "model_provider")?;
+    if source_provider.trim().is_empty() {
+        return None;
+    }
+
+    let section = format!("model_providers.{source_provider}");
+    Some(ProviderPolicyTruth {
+        source_provider,
+        request_max_retries: snapshot_table_field_literal(
+            content,
+            &section,
+            "request_max_retries",
+        ),
+        stream_max_retries: snapshot_table_field_literal(
+            content,
+            &section,
+            "stream_max_retries",
+        ),
+        stream_idle_timeout_ms: snapshot_table_field_literal(
+            content,
+            &section,
+            "stream_idle_timeout_ms",
+        ),
+        websocket_connect_timeout_ms: snapshot_table_field_literal(
+            content,
+            &section,
+            "websocket_connect_timeout_ms",
+        ),
+        wire_api: snapshot_table_field_literal(content, &section, "wire_api"),
+        supports_websockets: snapshot_table_field_literal(
+            content,
+            &section,
+            "supports_websockets",
+        ),
+    })
+}
+
+fn log_provider_policy_truth(snapshot_config: Option<&str>) {
+    let Some(policy) = snapshot_config.and_then(provider_policy_truth_from_config) else {
+        return;
+    };
+    if !policy.has_provider_policy() {
+        return;
+    }
+
+    tracing::warn!(
+        target: "codex_integration::apply",
+        marker = "CAS-R94-1-PROVIDER-CONFIG-TRUTH",
+        source_provider = %policy.source_provider,
+        effective_provider = "openai",
+        request_max_retries = policy.request_max_retries.as_deref().unwrap_or("<unset>"),
+        stream_max_retries = policy.stream_max_retries.as_deref().unwrap_or("<unset>"),
+        stream_idle_timeout_ms = policy.stream_idle_timeout_ms.as_deref().unwrap_or("<unset>"),
+        websocket_connect_timeout_ms = policy
+            .websocket_connect_timeout_ms
+            .as_deref()
+            .unwrap_or("<unset>"),
+        wire_api = policy.wire_api.as_deref().unwrap_or("<unset>"),
+        supports_websockets = policy.supports_websockets.as_deref().unwrap_or("<unset>"),
+        carried_forward = false,
+        "source provider policy is preserved in user config but is not effective after built-in openai normalization"
+    );
+}
+
 pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResult, CodexError> {
     // CAS-AUTO-REVIEW-R24: restore our temporary shadow pointer first. Snapshot must see
     // the real user/Transfer source catalog, never the copy-on-write overlay.
@@ -147,6 +257,12 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         cfg.provider_name,
         &[proxy_port_from_url(cfg.base_url), 18080],
     )?;
+
+    // Read the post-sanitization snapshot once. It is the ownership boundary:
+    // user-authored values remain, while known stale Transfer signatures are
+    // stripped from the snapshot copy by snapshot_codex_state().
+    let snapshot_config = read_snapshot_config(paths);
+    log_provider_policy_truth(snapshot_config.as_deref());
 
     // 2. config.toml: openai_base_url
     if cfg.base_url.is_empty() {
@@ -281,7 +397,36 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     };
 
     if preserve_external_model_catalog {
-        // External catalog is authoritative: keep its path and model_context_window.
+        // CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY
+        //
+        // The external catalog owns per-model context metadata. Do not leave a
+        // Transfer-injected global 1M override above it. Restore only the
+        // snapshot-owned root value:
+        // - user explicitly had model_context_window -> preserve that literal;
+        // - user did not have it -> remove Transfer's stale override;
+        // - snapshot unexpectedly unreadable -> fail closed by leaving live
+        //   config untouched rather than guessing/deleting user state.
+        if let Some(snapshot_config) = snapshot_config.as_deref() {
+            let original_window =
+                snapshot_toml_value_literal(snapshot_config, "model_context_window");
+            sync_root_value(
+                &paths.config_toml,
+                "model_context_window",
+                original_window.as_deref(),
+            )?;
+            tracing::info!(
+                target: "codex_integration::apply",
+                marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
+                snapshot_window = original_window.as_deref().unwrap_or("<unset>"),
+                "external model catalog is authoritative; root context window restored from snapshot ownership"
+            );
+        } else {
+            tracing::warn!(
+                target: "codex_integration::apply",
+                marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
+                "snapshot config unavailable; leaving root model_context_window untouched to avoid destructive guessing"
+            );
+        }
     } else if models.is_empty() {
         // [MOC-234] responses passthrough provider 允许**留空默认模型**(UI 如此 ——
         // model 原样透传给原生上游),此时 catalog models 为空。**绝不写 `models:[]`
@@ -387,7 +532,9 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         config_toml_path: paths.config_toml.display().to_string(),
         auth_json_path: paths.auth_json.display().to_string(),
         snapshot_taken: snapshot_taken_now,
-        model_context_window_set: cfg.supports_1m && !models.is_empty(),
+        model_context_window_set: !preserve_external_model_catalog
+            && cfg.supports_1m
+            && !models.is_empty(),
         model_catalog_json_set: preserve_external_model_catalog || !models.is_empty(),
     })
 }
@@ -2384,4 +2531,123 @@ model = \"gpt-5.5\"
             "用户非 managed key 保留进快照: {snapshot}"
         );
     }
+    // ── CAS-R94.1 provider/config truth ───────────────────────────────
+
+    #[test]
+    fn r94_1_provider_policy_truth_reads_custom_provider_without_reactivating_it() {
+        let config = r#"model_provider = "OpenAi"
+model_context_window = 1000000
+
+[model_providers.OpenAi]
+name = "OpenAI"
+wire_api = "responses"
+stream_max_retries = 15
+request_max_retries = 7
+stream_idle_timeout_ms = 90000
+websocket_connect_timeout_ms = 12000
+supports_websockets = true
+"#;
+        let truth = provider_policy_truth_from_config(config).expect("custom provider truth");
+        assert_eq!(truth.source_provider, "OpenAi");
+        assert_eq!(truth.stream_max_retries.as_deref(), Some("15"));
+        assert_eq!(truth.request_max_retries.as_deref(), Some("7"));
+        assert_eq!(truth.stream_idle_timeout_ms.as_deref(), Some("90000"));
+        assert_eq!(
+            truth.websocket_connect_timeout_ms.as_deref(),
+            Some("12000")
+        );
+        assert_eq!(truth.wire_api.as_deref(), Some("\"responses\""));
+        assert_eq!(truth.supports_websockets.as_deref(), Some("true"));
+        assert!(truth.has_provider_policy());
+    }
+
+    #[test]
+    fn r94_1_external_catalog_removes_transfer_only_global_window() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"OpenAi\"\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nstream_max_retries = 15\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: true,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: true,
+        };
+
+        let first = apply_provider(&paths, &cfg).unwrap();
+        assert!(first.model_catalog_json_set);
+        assert!(!first.model_context_window_set);
+        // Simulate a stale global value left by an older Transfer session while
+        // the original snapshot still proves that the user never owned it.
+        sync_root_value(&paths.config_toml, "model_context_window", Some("1000000")).unwrap();
+        let second = apply_provider(&paths, &cfg).unwrap();
+        assert!(!second.model_context_window_set);
+
+        let toml = read_toml(&paths);
+        assert!(toml.contains("model_catalog_json = \"V:/user/catalog.json\""));
+        assert!(toml.contains("[model_providers.OpenAi]"));
+        assert!(toml.contains("stream_max_retries = 15"));
+        assert!(!toml.contains("model_provider ="));
+        assert!(
+            !toml.contains("model_context_window ="),
+            "external catalog must not inherit a Transfer-only global 1M override: {toml}"
+        );
+    }
+
+    #[test]
+    fn r94_1_external_catalog_preserves_user_owned_global_window() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_context_window = 300000\nmodel_catalog_json = \"V:/user/catalog.json\"\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: true,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: true,
+        };
+
+        apply_provider(&paths, &cfg).unwrap();
+        sync_root_value(&paths.config_toml, "model_context_window", Some("1000000")).unwrap();
+        let result = apply_provider(&paths, &cfg).unwrap();
+        assert!(!result.model_context_window_set);
+
+        let toml = read_toml(&paths);
+        assert!(
+            toml.contains("model_context_window = 300000"),
+            "user-owned root window must survive external-catalog authority: {toml}"
+        );
+        assert!(!toml.contains("model_context_window = 1000000"));
+    }
+
 }

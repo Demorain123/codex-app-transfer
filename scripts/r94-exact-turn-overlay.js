@@ -121,9 +121,9 @@
       pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
   }
 
-  function r94TimeRecordFromElement(node) {
+  function r94TimeRecordFromElement(node, allowUser) {
     if (!(node instanceof Element)) return null;
-    if (node.closest('[data-message-author-role="user"],[data-message-author="user"]')) return null;
+    if (!allowUser && node.closest('[data-message-author-role="user"],[data-message-author="user"]')) return null;
 
     const candidates = [
       node.getAttribute('datetime'),
@@ -165,6 +165,32 @@
           title: label + ' · exact: Codex native sent time',
           source: 'codex-native-sent-time',
         };
+      }
+    }
+    return null;
+  }
+
+  // R94_USER_PROMPT_TIMESTAMP_RUNTIME
+  function r94UserSurfaceForTurn(turn) {
+    if (!(turn instanceof Element)) return null;
+    const selector = '[data-message-author-role="user"],[data-message-author="user"],[data-testid*="user-message"]';
+    if (turn.matches(selector)) return turn;
+    const user = turn.querySelector(selector);
+    return user instanceof Element ? user : null;
+  }
+
+  function r94NativeUserExactForTurn(turn) {
+    const user = r94UserSurfaceForTurn(turn);
+    if (!(user instanceof Element)) return null;
+    const nodes = [];
+    if (user.matches(R94_NATIVE_TIME_SELECTOR)) nodes.push(user);
+    user.querySelectorAll(R94_NATIVE_TIME_SELECTOR).forEach(function(node) { nodes.push(node); });
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const record = r94TimeRecordFromElement(nodes[index], true);
+      if (record && Number.isFinite(record.epoch)) {
+        record.title = r94FullTimestampTitle(record.epoch, 'exact: Codex native user sent time');
+        record.source = 'codex-native-user-sent-time';
+        return { record, sourceElement: nodes[index], anchor: user };
       }
     }
     return null;

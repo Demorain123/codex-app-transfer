@@ -1170,8 +1170,17 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const expectedRevisionNumber = revisionNumber(META.transferRevision);
     const runtimeRevisionNumber = revisionNumber(runtime);
     const exactTurn = !!window.__casR94TurnCapability;
-    const statusInsideComposer = !!document.querySelector('[data-cas-status-inside-composer="true"]');
-    const statusBars = document.querySelectorAll('[data-cas-status-inside-composer="true"]').length;
+    const statusNodes = Array.from(document.querySelectorAll('[data-cas-status-inside-composer="true"]'));
+    const statusBars = statusNodes.length;
+    const statusEditorLeaks = statusNodes.filter((node) =>
+      node instanceof Element &&
+      !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
+    ).length;
+    const statusInsideComposer = statusNodes.some((node) =>
+      node instanceof Element &&
+      node.getAttribute('data-cas-status-owner') === 'r94-inline-safe' &&
+      !node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
+    );
     const composerCandidates = document.querySelectorAll(
       '[data-codex-composer-root],[data-thread-find-composer="true"],[data-codex-composer="true"],[data-testid*="composer"],.composer-surface-chrome,form'
     ).length;
@@ -1219,6 +1228,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       exactTurn,
       statusInsideComposer,
       statusBars,
+      statusEditorLeaks,
       composerCandidates,
       editables,
       timestampOverlay,
@@ -1270,6 +1280,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Composer cand=' + s.composerCandidates +
         ' · editables=' + s.editables +
         ' · statusBars=' + s.statusBars +
+        ' · editorLeak=' + s.statusEditorLeaks +
         ' · mount=' + escapeHtml(s.composerMountReason || 'none') +
         ' · surface=' + escapeHtml(s.composerMountSurface || '-') +
         ' · anchor=' + escapeHtml(s.composerMountAnchor || '-') +
@@ -1933,6 +1944,7 @@ mod tests {
         assert!(script.contains("__casR94ComposerStatusDiagnostics"));
         assert!(script.contains("mount="));
         assert!(script.contains("unsafe="));
+        assert!(script.contains("editorLeak="));
         assert!(script.contains("TS obs/vis/badge/cache"));
         assert!(script.contains("SEG stamp/badge/cache"));
         assert!(script.contains("launchMode"));

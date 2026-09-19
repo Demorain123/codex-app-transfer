@@ -32,9 +32,9 @@ use crate::codex_plugin_unlocker::current_cdp_url;
 // CAS-R94-RUNTIME-DEBUG-IDENTITY
 // Keep these explicit instead of deriving from the historical source baseline.
 // They are screenshot evidence for the r94 debug build, not protocol behavior.
-const RUNTIME_DEBUG_PROTOCOL: &str = "DBG94-1";
-const RUNTIME_DEBUG_TRANSFER_REVISION: &str = "r94";
-const RUNTIME_DEBUG_TRANSFER_VERSION: &str = "2.4.5+94";
+const RUNTIME_DEBUG_PROTOCOL: &str = "DBG94.1-1";
+const RUNTIME_DEBUG_TRANSFER_REVISION: &str = "r94.1";
+const RUNTIME_DEBUG_TRANSFER_VERSION: &str = "2.4.5+94.1";
 
 /// 主题列表 — 字符串 ID 跟 `src-tauri/resources/themes/<id>/` 目录名匹配。
 /// **不变量**:每条 ID 都对应一组 (bg, mascot?) 资源 + 中英显示名(`ThemeMeta.display_name_{zh,en}`,

@@ -1117,6 +1117,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
   const META = __CAS_DEBUG_META__;
   const ROOT_ID = 'cas-transfer-runtime-debug-banner';
   const STATE_KEY = '__casTransferRuntimeDebug';
+  let dragState = null;
 
   try {
     const previous = window[STATE_KEY];
@@ -1135,9 +1136,56 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
+  // CAS-R94-1-RUNTIME-DEBUG-DRAG
+  // Deliberately simple: the whole debug panel is the drag surface. Position is
+  // session-local only; reload/restart returns to the normal top-right default.
+  const installDrag = (root) => {
+    root.setAttribute('data-cas-runtime-debug-draggable', 'true');
+    root.style.pointerEvents = 'auto';
+    root.style.cursor = 'move';
+    root.style.userSelect = 'none';
+    root.style.touchAction = 'none';
+
+    root.onpointerdown = (event) => {
+      if (event.button !== 0) return;
+      const rect = root.getBoundingClientRect();
+      dragState = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+      };
+      root.style.right = 'auto';
+      root.style.left = rect.left + 'px';
+      root.style.top = rect.top + 'px';
+      try { root.setPointerCapture(event.pointerId); } catch {}
+      event.preventDefault();
+    };
+
+    root.onpointermove = (event) => {
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const maxX = Math.max(0, window.innerWidth - root.offsetWidth);
+      const maxY = Math.max(0, window.innerHeight - root.offsetHeight);
+      const x = Math.min(maxX, Math.max(0, event.clientX - dragState.offsetX));
+      const y = Math.min(maxY, Math.max(0, event.clientY - dragState.offsetY));
+      root.style.left = x + 'px';
+      root.style.top = y + 'px';
+    };
+
+    const stopDrag = (event) => {
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      try { root.releasePointerCapture(event.pointerId); } catch {}
+      dragState = null;
+    };
+    root.onpointerup = stopDrag;
+    root.onpointercancel = stopDrag;
+  };
+
   const ensureRoot = () => {
     let root = document.getElementById(ROOT_ID);
-    if (root) return root;
+    if (root) {
+      installDrag(root);
+      return root;
+    }
     root = document.createElement('aside');
     root.id = ROOT_ID;
     root.setAttribute('data-cas-runtime-debug', META.protocol);
@@ -1157,10 +1205,13 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       'box-shadow:0 10px 30px rgba(0,0,0,.28)',
       'font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
       'white-space:normal',
-      'pointer-events:none',
-      'user-select:text'
+      'pointer-events:auto',
+      'cursor:move',
+      'user-select:none',
+      'touch-action:none'
     ].join(';');
     (document.body || document.documentElement).appendChild(root);
+    installDrag(root);
     return root;
   };
 
@@ -2006,9 +2057,12 @@ mod tests {
     #[test]
     fn runtime_debug_script_embeds_build_identity_and_live_probes() {
         let script = build_runtime_debug_script("no-lagging");
-        assert!(script.contains("DBG94-1"));
-        assert!(script.contains("r94"));
-        assert!(script.contains("2.4.5+94"));
+        assert!(script.contains("DBG94.1-1"));
+        assert!(script.contains("\"transferRevision\":\"r94.1\""));
+        assert!(script.contains("\"transferVersion\":\"2.4.5+94.1\""));
+        assert!(script.contains("CAS-R94-1-RUNTIME-DEBUG-DRAG"));
+        assert!(script.contains("data-cas-runtime-debug-draggable"));
+        assert!(script.contains("setPointerCapture"));
         assert!(script.contains("__casOutputTelemetryRuntime"));
         assert!(script.contains("__casR94TurnCapability"));
         assert!(script.contains("data-cas-status-inside-composer"));

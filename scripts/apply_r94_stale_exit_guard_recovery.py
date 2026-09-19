@@ -32,7 +32,9 @@ if MARKER in text:
 
 required = (
     "CAS-R38-RECOVERY-PORT-CLASSIFICATION",
+    "CAS-R39-BINDER-TERMINOLOGY",
     "transfer_port_stale_owner",
+    "classification=unresolved_listener_residue",
     "CAS-R46-GENERIC-REPAIR-SAME-FAULT-GUARD",
 )
 for token in required:
@@ -42,7 +44,7 @@ for token in required:
 match_old = '''        "transfer_port_stale_owner" => {
             actions.push(RecoveryAction::skipped(
                 "preserve_stale_listener_evidence",
-                "Windows 仍报告 owner PID 已死亡的监听端点；已保留现场，不重复 bind、不自动重启 Windows，详情中可查看 owner PID",
+                "Windows 仍报告监听端点，但最初 binder PID 已不存在；已保留现场，不重复 bind、不自动重启 Windows，详情中可查看 binder 证据",
             ));
         }
 '''
@@ -58,7 +60,7 @@ if text.count(match_old) != 1:
 text = text.replace(match_old, match_new, 1)
 
 recommend_old = '''        "transfer_port_stale_owner" => out.push(
-            "Windows 报告死 PID 仍持有监听端点：保留现场并查看 listener owner 证据；恢复器不会连续重复 bind。".into(),
+            "Windows 报告监听端点仍在，而最初 binder PID 已不存在：保留现场并查看 binder/listener 证据；恢复器不会连续重复 bind。".into(),
         ),
 '''
 recommend_new = '''        "transfer_port_stale_owner" => out.push(

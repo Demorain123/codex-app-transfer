@@ -1064,6 +1064,8 @@
       liveSegmentsStamped: 0,
       liveSegmentBadges: 0,
       liveSegmentCache: 0,
+      semanticUnits: 0,
+      exactItemBindings: 0,
       lastSource: '',
       lastLiveSegmentSource: '',
       nativeTimestampSuppressed: 0,
@@ -1136,6 +1138,7 @@
       diagnostics.cacheSize = capability.size();
       diagnostics.liveSegmentBadges = visibleSegmentEntries.size;
       diagnostics.liveSegmentCache = segmentTimeByKey.size;
+      diagnostics.semanticUnits = segmentTimeByKey.size;
       diagnostics.timelineEntries = timelineEntries.size;
       diagnostics.timelineMarkers = timelineMarkers.size;
       diagnostics.timelineActiveKey = timelineActiveKey;
@@ -1511,6 +1514,7 @@
       if (!(segment instanceof Element) || !segment.isConnected || !key || !Number.isFinite(epoch)) return;
       let entry = segmentEntryByNode.get(segment);
       const isNew = !entry;
+      const wasExact = !!(entry && r94SegmentTimeIsExact(entry.source));
       if (!entry) {
         entry = { segment, turn, key, epoch, source, badge: null };
         segmentEntryByNode.set(segment, entry);
@@ -1530,6 +1534,9 @@
       }
       visibleSegmentEntries.add(entry);
       diagnostics.lastLiveSegmentSource = source;
+      if (r94SegmentTimeIsExact(source) && !wasExact) {
+        diagnostics.exactItemBindings = (diagnostics.exactItemBindings || 0) + 1;
+      }
       if (isNew || r94SegmentTimeIsExact(source)) {
         r94UpsertTimelineEntry(
           'segment:' + key,

@@ -70,8 +70,11 @@ foreach ($Check in @(
     @{ Text = $DesktopProcessText; Marker = 'r94_1_openai_policy_overlay_active()' },
     @{ Text = $DesktopProcessText; Marker = '请使用 No Lagging 启动 (B)' },
     @{ Text = $NoMicroLauncherText; Marker = 'CAS-R94-1-CODEX-APP-SERVER-RUNTIME-OVERLAY' },
+    @{ Text = $NoMicroLauncherText; Marker = 'CAS-R94-1-CODEX-APP-SERVER-RUNTIME-VERIFY' },
     @{ Text = $NoMicroLauncherText; Marker = 'return args.some((arg) => String(arg) === "app-server")' },
-    @{ Text = $NoMicroLauncherText; Marker = 'args[0] = r941RuntimeExe' }
+    @{ Text = $NoMicroLauncherText; Marker = 'args[0] = r941RuntimeExe' },
+    @{ Text = $NoMicroLauncherText; Marker = 'native-runtime-verified' },
+    @{ Text = $NoMicroLauncherText; Marker = 'waitForR941RuntimeOverlay' }
 )) {
     if (-not $Check.Text.Contains($Check.Marker)) {
         throw "r94.1 native runtime overlay integration missing: $($Check.Marker)"
@@ -149,5 +152,6 @@ if ($PreflightOnly) {
     Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
     Write-Host '  - No Lagging B has a side-by-side, version-matched Codex runtime for built-in openai provider-policy overlay'
     Write-Host '  - standard MSIX restart fails closed while an overlay is active, so stock Codex cannot silently fall back to /5'
+    Write-Host '  - No Lagging B launch itself must observe the codex app-server runtime swap before reporting success'
     Write-Host "  - patched runtime deployed: $DeployCodexRuntime"
 }

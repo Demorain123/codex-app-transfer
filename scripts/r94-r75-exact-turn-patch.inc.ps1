@@ -255,9 +255,7 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
 # replacement would accidentally delete the pane/status owner. Prefer the
 # injected pane-runtime marker when present, and fall back only for isolated
 # timestamp-owner preflights that do not include r89.
-$R94HadPaneRuntimePatch =
-    $PatchedR75.Contains('# R94_PANE_RUNTIME_PATCH') -or
-    $PatchedR75.Contains('# R89_PANE_RUNTIME_PATCH')
+$R94HadPaneRuntimePatch = $PatchedR75.Contains('# R94_PANE_RUNTIME_PATCH') -or $PatchedR75.Contains('# R89_PANE_RUNTIME_PATCH')
 $R94ProfileEndMarker = if ($PatchedR75.Contains('# R94_PANE_RUNTIME_PATCH')) {
     '# R94_PANE_RUNTIME_PATCH'
 } elseif ($PatchedR75.Contains('# R89_PANE_RUNTIME_PATCH')) {

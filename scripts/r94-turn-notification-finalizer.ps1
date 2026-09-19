@@ -18,6 +18,92 @@ $R94TurnHelpers = @'
     return Number.isFinite(value) ? value : null;
   }
 
+  // R94_NATIVE_ACTIVE_SINGLE_PANE_FALLBACK_RUNTIME
+  // Exact rollout JSONL remains authoritative. When that bridge has not produced
+  // an envelope yet, mirror only values that Codex itself is visibly presenting
+  // for the one active pane. Never synthesize latest-request in/out from Usage
+  // category totals, and never apply this fallback in split/multi-pane mode.
+  function r94ActiveDocumentThreadId() {
+    try {
+      const pathname = String(location && location.pathname || '');
+      const match =
+        pathname.match(/\/(?:local|thread|conversation)\/([^/?#]+)/) ||
+        pathname.match(/\/hotkey-window\/thread\/([^/?#]+)/);
+      if (match && match[1]) {
+        let value = match[1];
+        try { value = decodeURIComponent(value); } catch {}
+        value = r94NormalizePaneId(value);
+        if (value) return value;
+      }
+    } catch {}
+    try {
+      const row = document.querySelector('[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-active="true"]');
+      const value = r94NormalizePaneId(row && row.getAttribute('data-app-action-sidebar-thread-id'));
+      if (value) return value;
+    } catch {}
+    return '';
+  }
+
+  function r94NativeSinglePaneUsage(threadId, bar) {
+    const paneThread = r94NormalizePaneId(threadId);
+    if (!paneThread || !(bar instanceof Element)) return null;
+
+    const bars = Array.from(document.querySelectorAll(
+      '[data-cas-pane-statusbar="true"],[data-cas-status-inside-composer="true"]'
+    )).filter(function(node) {
+      return node instanceof Element && node.isConnected && (!node.getClientRects || node.getClientRects().length > 0);
+    });
+    if (bars.length !== 1 || bars[0] !== bar) return null;
+
+    const activeThread = r94ActiveDocumentThreadId();
+    if (activeThread && activeThread !== paneThread) return null;
+
+    let candidate = null;
+    try { candidate = typeof findNativeUsagePanel === 'function' ? findNativeUsagePanel() : null; } catch {}
+    if (!candidate || !(candidate.node instanceof Element) || !candidate.node.isConnected) return null;
+
+    const text = String(candidate.text || '').replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+
+    const compact = function(raw) {
+      try {
+        const value = typeof parseCompactNumber === 'function'
+          ? parseCompactNumber(String(raw || '').replace(/\s+/g, ''))
+          : Number(String(raw || '').replace(/[,\s]/g, ''));
+        return Number.isFinite(value) ? value : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const ctxMatch = text.match(/([\d.,]+\s*[KMB]?)\s*\/\s*([\d.,]+\s*[KMB]?)\s*[·•]?\s*([\d.]+)%/i);
+    const cacheMatch = text.match(/(?:缓存命中|cache\s*hit)\s*([\d.]+)%/i);
+    const totalMatch = text.match(/(?:累计|session\s*total|total)\s*([\d.,]+\s*[KMB]?)/i);
+    const speedMatch = text.match(/([\d.]+)\s*tokens?\s*\/\s*s|([\d.]+)\s*tokens?\/s/i);
+
+    const contextTokens = ctxMatch ? compact(ctxMatch[1]) : null;
+    const contextWindow = ctxMatch ? compact(ctxMatch[2]) : null;
+    const contextPercent = ctxMatch ? Number(ctxMatch[3]) : null;
+    const cacheHitPercent = cacheMatch ? Number(cacheMatch[1]) : null;
+    const sessionTotalTokens = totalMatch ? compact(totalMatch[1]) : null;
+    const nativeSpeed = speedMatch ? Number(speedMatch[1] || speedMatch[2]) : null;
+
+    if (![contextTokens, contextWindow, contextPercent, cacheHitPercent, sessionTotalTokens, nativeSpeed].some(Number.isFinite)) {
+      return null;
+    }
+
+    return {
+      threadId: paneThread,
+      source: 'native-active-single-pane',
+      contextTokens,
+      contextWindow,
+      contextPercent: Number.isFinite(contextPercent) ? contextPercent : null,
+      cacheHitPercent: Number.isFinite(cacheHitPercent) ? cacheHitPercent : null,
+      sessionTotalTokens,
+      nativeSpeed: Number.isFinite(nativeSpeed) ? nativeSpeed : null,
+    };
+  }
+
   // R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME
   function r94ExternalExactMap() {
     let map = state.metrics && state.metrics.r94ExternalExactByThread;
@@ -318,49 +404,79 @@ $R94StatusHtml = @'
     const turnRecord = r94LatestTurnCapability(threadId);
     const turnExact = r94TurnUsageSnapshot(turnRecord);
     const hasTurnIdentity = !!(turnRecord && turnRecord.turnId);
-    const exact = turnExact || (!hasTurnIdentity && ownership.owned ? ownership.exact : null);
-    const activity = (turnExact || ownership.owned)
+    const threadExact = !hasTurnIdentity && ownership.owned ? ownership.exact : null;
+    const nativeFallback = !turnExact && !threadExact ? r94NativeSinglePaneUsage(threadId, bar) : null;
+    const exact = turnExact || threadExact;
+    const displayUsage = exact || nativeFallback;
+    const hasOwnedUsage = !!(turnExact || threadExact || nativeFallback);
+    const activity = hasOwnedUsage
       ? paneActivityState(bar)
       : (ownership.awaiting ? 'waiting' : 'unowned');
-    const stateLabel = (turnExact || ownership.owned)
+    const stateLabel = hasOwnedUsage
       ? activity.toUpperCase()
       : (ownership.awaiting ? 'WAITING' : 'UNOWNED');
     const stateTitle = turnExact
       ? ('Exact turn-scoped capability for turn ' + String(turnRecord.turnId || '') +
          '. Usage is keyed by threadId + turnId; activity still requires pane-local UI evidence.')
-      : (ownership.owned
+      : (threadExact
         ? (activity === 'live'
           ? 'LIVE is backed by pane-scoped stop/busy UI evidence. Counts are the last exact thread snapshot while no exact turn capability is available.'
           : 'Exact thread snapshot fallback; no cross-pane/global Usage borrowing.')
-        : (ownership.awaiting
-          ? 'WAITING: current pane thread is known, but a same-turn exact usage capability is not available yet.'
-          : 'UNOWNED: no exact turn/thread usage can be safely attributed to this pane.'));
+        : (nativeFallback
+          ? 'Native active single-pane fallback: ctx/cache/tok-s/total mirror the currently visible Codex Usage panel. Latest-request in/out remain blank until exact JSONL ownership arrives.'
+          : (ownership.awaiting
+            ? 'WAITING: current pane thread is known, but exact JSONL usage is not available and no safe single-pane native fallback is eligible.'
+            : 'UNOWNED: no exact turn/thread usage can be safely attributed to this pane.')));
 
     if (bar instanceof Element) {
       if (turnRecord && turnRecord.turnId) bar.setAttribute('data-cas-turn-id', String(turnRecord.turnId));
       else bar.removeAttribute('data-cas-turn-id');
-      bar.setAttribute('data-cas-turn-source', turnExact ? 'exact-turn-capability' : (ownership.owned ? 'thread-snapshot-fallback' : 'unavailable'));
+      bar.setAttribute(
+        'data-cas-turn-source',
+        turnExact ? 'exact-turn-capability'
+          : (threadExact ? 'thread-snapshot-fallback'
+            : (nativeFallback ? 'native-active-single-pane' : 'unavailable'))
+      );
     }
 
-    const context = exact && Number.isFinite(exact.contextPercent) ? ('ctx ' + exact.contextPercent.toFixed(1) + '%') : 'ctx --';
+    const context = displayUsage && Number.isFinite(displayUsage.contextPercent) ? ('ctx ' + displayUsage.contextPercent.toFixed(1) + '%') : 'ctx --';
     const input = exact && Number.isFinite(exact.inputTokens) ? ('in ' + shortNumber(exact.inputTokens)) : 'in --';
     const output = exact && Number.isFinite(exact.outputTokens) ? ('out ' + shortNumber(exact.outputTokens)) : 'out --';
-    const cache = exact && Number.isFinite(exact.cacheHitPercent) ? ('cache ' + exact.cacheHitPercent.toFixed(1) + '%') : 'cache --';
-    const total = exact && Number.isFinite(exact.sessionTotalTokens) ? ('total ' + shortNumber(exact.sessionTotalTokens)) : 'total --';
+    const cache = displayUsage && Number.isFinite(displayUsage.cacheHitPercent) ? ('cache ' + displayUsage.cacheHitPercent.toFixed(1) + '%') : 'cache --';
+    const total = displayUsage && Number.isFinite(displayUsage.sessionTotalTokens) ? ('total ' + shortNumber(displayUsage.sessionTotalTokens)) : 'total --';
     const speedOwnership = turnExact
       ? Object.assign({}, ownership, { owned: true, awaiting: false, exact: turnExact })
       : ownership;
-    const speed = paneSpeedPresentation(speedOwnership, activity);
-    const exactSource = turnExact ? 'exact-turn-capability' : (ownership.owned ? 'exact-jsonl-fallback' : 'unowned');
-    const exactConfidence = exact ? (turnExact ? 'exact-turn' : 'exact-snapshot') : 'unavailable';
+    const speed = nativeFallback && Number.isFinite(nativeFallback.nativeSpeed)
+      ? {
+          text: nativeFallback.nativeSpeed.toFixed(1) + ' tok/s',
+          source: 'native-active-single-pane',
+          confidence: 'native-visible',
+          title: 'Visible Codex Usage tok/s mirrored only because exactly one active pane is present; exact pane-local JSONL timing remains preferred when available.',
+        }
+      : paneSpeedPresentation(speedOwnership, activity);
+    const exactSource = turnExact
+      ? 'exact-turn-capability'
+      : (threadExact ? 'exact-jsonl-fallback' : (nativeFallback ? 'native-active-single-pane' : 'unowned'));
+    const exactConfidence = exact
+      ? (turnExact ? 'exact-turn' : 'exact-snapshot')
+      : (nativeFallback ? 'native-visible' : 'unavailable');
     const exactTitle = turnExact
       ? 'Exact recent-turn usage keyed by threadId + turnId. total is cumulative session usage; ctx/in/out/cache are from this turn usage payload.'
-      : (ownership.owned
+      : (threadExact
         ? 'Exact thread snapshot fallback from local Codex session JSONL. It is used only when no newer turn identity is present.'
-        : 'Unavailable: no exact pane-owned usage source.');
+        : (nativeFallback
+          ? 'Visible Codex Usage fallback for the one active pane. ctx/cache/tok-s/total are native UI values; in/out intentionally stay unavailable until exact JSONL ownership arrives.'
+          : 'Unavailable: no exact pane-owned usage source.'));
 
     const metrics = [
-      metricChip(stateLabel, turnExact ? 'turn-lifecycle+pane-ui' : (ownership.owned ? 'pane-ui-evidence' : exactSource), turnExact ? 'turn-scoped' : (ownership.owned ? 'scoped' : 'unavailable'), stateTitle, 'cas-status-state'),
+      metricChip(
+        stateLabel,
+        turnExact ? 'turn-lifecycle+pane-ui' : (threadExact ? 'pane-ui-evidence' : (nativeFallback ? 'native-active-single-pane' : exactSource)),
+        turnExact ? 'turn-scoped' : (threadExact ? 'scoped' : (nativeFallback ? 'native-visible' : 'unavailable')),
+        stateTitle,
+        'cas-status-state'
+      ),
       metricChip(context, exactSource, exactConfidence, exactTitle, ''),
       metricChip(input, exactSource, exactConfidence, exactTitle, ''),
       metricChip(output, exactSource, exactConfidence, exactTitle, ''),
@@ -443,6 +559,8 @@ $Patched = Replace-BlockRequired $Patched '  function consumeText(text) {' '  fu
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
     'R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME',
+    'R94_NATIVE_ACTIVE_SINGLE_PANE_FALLBACK_RUNTIME',
+    'native-active-single-pane',
     'r94ExternalExactByThread',
     'r94StoreExternalExact(exact);',
     'r94OfferRolloutEnvelope(envelope, threadId, info);',

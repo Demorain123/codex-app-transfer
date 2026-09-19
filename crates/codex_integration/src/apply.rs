@@ -450,6 +450,26 @@ fn write_openai_policy_overlay(
     policy: &ProviderPolicyTruth,
     source_config: &str,
 ) -> Result<(), CodexError> {
+    // Re-apply is transactional with respect to the previous overlay. If the
+    // user edited an overlay target field while Transfer was active, do not
+    // overwrite that edit on the next apply.
+    if let Ok(bytes) = std::fs::read(&paths.openai_policy_overlay_json)
+        && let Ok(previous_manifest) =
+            serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes)
+    {
+        let live = std::fs::read_to_string(&paths.config_toml).unwrap_or_default();
+        for (field, expected_literal) in &previous_manifest.fields {
+            let live_literal =
+                snapshot_table_field_literal(&live, "model_providers.openai", field);
+            if live_literal.as_deref().map(str::trim) != Some(expected_literal.trim()) {
+                return Err(CodexError::Other(format!(
+                    "r94.1 detected a user edit to model_providers.openai.{field} while the provider-policy overlay was active; restart/re-apply Transfer to establish a fresh baseline"
+                )));
+            }
+        }
+        restore_openai_policy_overlay(paths)?;
+    }
+
     let source_section = format!("model_providers.{}", policy.source_provider);
     let target_section = "model_providers.openai";
     let target_before = match std::fs::read_to_string(&paths.config_toml) {

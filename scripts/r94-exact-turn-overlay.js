@@ -1258,11 +1258,58 @@
       entry.badge = null;
     }
 
+    function r94TimelineKindForSegment(segment) {
+      if (!(segment instanceof Element)) return 'assistant';
+      if (segment.matches('[data-testid*="agent"]') || segment.closest('[data-testid*="agent"]')) return 'agent';
+      if (segment.matches('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]') ||
+          segment.closest('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]')) return 'tool';
+      if (segment.matches('[role="status"]') || segment.closest('[role="status"]')) return 'status';
+      return 'assistant';
+    }
+
+    function r94RegisterTurnTimeline(turn, ids, exact) {
+      if (!(turn instanceof Element) || !ids) return;
+      const record = capability.getRecord(ids.threadId, ids.turnId);
+
+      const startedEpoch = r94EpochMillis(record && record.startedAt);
+      if (Number.isFinite(startedEpoch)) {
+        const userAnchor =
+          turn.querySelector('[data-message-author-role="user"],[data-message-author="user"]') ||
+          turn;
+        r94UpsertTimelineEntry(
+          'turn-start:' + ids.key,
+          startedEpoch,
+          userAnchor,
+          'user',
+          false,
+          normalizedText(userAnchor).slice(0,180)
+        );
+      }
+
+      let finalEpoch = exact && exact.record ? r94EpochMillis(exact.record.epoch) : null;
+      if (!Number.isFinite(finalEpoch)) finalEpoch = r94EpochMillis(record && record.completedAt);
+      if (Number.isFinite(finalEpoch)) {
+        const finalAnchor =
+          (exact && exact.sourceElement instanceof Element ? exact.sourceElement : null) ||
+          turn.querySelector(R94_FINAL_SELECTOR) ||
+          turn;
+        r94UpsertTimelineEntry(
+          'turn-final:' + ids.key,
+          finalEpoch,
+          finalAnchor,
+          'final',
+          false,
+          normalizedText(finalAnchor).slice(-180)
+        );
+      }
+    }
+
     function r94EnsureTurnBadge(turn) {
       if (!(turn instanceof Element) || !turn.isConnected) return;
       const ids = r94IdsForTurn(turn);
       if (!ids) return;
       const exact = capability.getForTurn(turn, ids);
+      r94RegisterTurnTimeline(turn, ids, exact);
       if (!exact || !exact.record || !exact.record.label) {
         r94RemoveTurnBadge(turn);
         return;
@@ -1424,6 +1471,14 @@
       }
       visibleSegmentEntries.add(entry);
       diagnostics.lastLiveSegmentSource = source;
+      r94UpsertTimelineEntry(
+        'segment:' + key,
+        epoch,
+        segment,
+        r94TimelineKindForSegment(segment),
+        true,
+        normalizedText(segment).slice(0,180)
+      );
     }
 
     function r94StampLiveSegments(turn) {

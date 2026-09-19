@@ -84,15 +84,17 @@ async fn r94_find_stale_exit_guard_child(dead_binder_pid: u32) -> Result<Vec<u32
     // Keep command-line inspection inside PowerShell and return PID(s) only.
     // This avoids ingesting unrelated process command lines into Transfer logs/state.
     let script = format!(
-        "$ErrorActionPreference='Stop';"
-            + "$parent={dead_binder_pid};"
-            + "$marker='\\.codex-app-transfer\\codex-no-micro\\mcp-exit-guard-r32.ps1';"
-            + "$rows=@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = ' + $parent) | "
-            + "Where-Object {{ "
-            + "($_.Name -ieq 'pwsh.exe' -or $_.Name -ieq 'powershell.exe') -and "
-            + "$_.CommandLine -and $_.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -ge 0 "
-            + "}});"
-            + "$rows | ForEach-Object {{ [string]$_.ProcessId }}"
+        concat!(
+            "$ErrorActionPreference='Stop';",
+            "$parent={dead_binder_pid};",
+            "$marker='\\.codex-app-transfer\\codex-no-micro\\mcp-exit-guard-r32.ps1';",
+            "$rows=@(Get-CimInstance Win32_Process -Filter ('ParentProcessId = ' + $parent) | ",
+            "Where-Object {{ ",
+            "($_.Name -ieq 'pwsh.exe' -or $_.Name -ieq 'powershell.exe') -and ",
+            "$_.CommandLine -and $_.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -ge 0 ",
+            "}});",
+            "$rows | ForEach-Object {{ [string]$_.ProcessId }}"
+        )
     );
     let result = run_command(
         "powershell.exe",
@@ -132,16 +134,18 @@ async fn r94_stop_exact_stale_exit_guard(dead_binder_pid: u32, guard_pid: u32) -
     // Re-check all identity fields in the same PowerShell invocation that performs
     // Stop-Process. PID reuse or parent/command drift therefore fails closed.
     let script = format!(
-        "$ErrorActionPreference='Stop';"
-            + "$parent={dead_binder_pid};$pid={guard_pid};"
-            + "$marker='\\.codex-app-transfer\\codex-no-micro\\mcp-exit-guard-r32.ps1';"
-            + "$p=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $pid);"
-            + "if(-not $p){{exit 41}};"
-            + "if([uint32]$p.ParentProcessId -ne [uint32]$parent){{exit 42}};"
-            + "if(-not ($p.Name -ieq 'pwsh.exe' -or $p.Name -ieq 'powershell.exe')){{exit 43}};"
-            + "if(-not $p.CommandLine -or $p.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){{exit 44}};"
-            + "Stop-Process -Id $pid -Force -ErrorAction Stop;"
-            + "Write-Output ('stopped=' + $pid)"
+        concat!(
+            "$ErrorActionPreference='Stop';",
+            "$parent={dead_binder_pid};$pid={guard_pid};",
+            "$marker='\\.codex-app-transfer\\codex-no-micro\\mcp-exit-guard-r32.ps1';",
+            "$p=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $pid);",
+            "if(-not $p){{exit 41}};",
+            "if([uint32]$p.ParentProcessId -ne [uint32]$parent){{exit 42}};",
+            "if(-not ($p.Name -ieq 'pwsh.exe' -or $p.Name -ieq 'powershell.exe')){{exit 43}};",
+            "if(-not $p.CommandLine -or $p.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){{exit 44}};",
+            "Stop-Process -Id $pid -Force -ErrorAction Stop;",
+            "Write-Output ('stopped=' + $pid)"
+        )
     );
     let result = run_command(
         "powershell.exe",

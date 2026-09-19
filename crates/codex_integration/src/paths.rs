@@ -11,6 +11,13 @@ pub struct CodexPaths {
     pub config_toml: PathBuf,
     pub auth_json: PathBuf,
     pub model_catalog_json: PathBuf,
+    /// r94.1 built-in-openai provider behavior overlay manifest.
+    ///
+    /// The manifest is Transfer-owned and intentionally lives outside ~/.codex.
+    /// No-Lagging B uses its presence to enable the matching patched Codex
+    /// runtime; it is removed on restore/clear so native Codex is never told
+    /// that an overlay is active after Transfer releases control.
+    pub openai_policy_overlay_json: PathBuf,
     /// Codex MCP OAuth 凭据的 file-store 落点(`~/.codex/.credentials.json`)。
     ///
     /// 当 `mcp_oauth_credentials_store = "file"` 时,Codex 把每个 MCP server 的
@@ -83,6 +90,7 @@ impl CodexPaths {
             config_toml: codex_home.join("config.toml"),
             auth_json: codex_home.join("auth.json"),
             model_catalog_json: app_home.join("config.json"),
+            openai_policy_overlay_json: app_home.join("r94.1-openai-provider-policy.json"),
             mcp_credentials: codex_home.join(".credentials.json"),
             mcp_credentials_mirror: app_home.join("mcp-credentials.json"),
             mcp_recovery_state: app_home.join("mcp-recovery.json"),
@@ -140,6 +148,10 @@ mod tests {
         assert_eq!(
             p.model_catalog_json,
             PathBuf::from("/x/.codex-app-transfer/config.json")
+        );
+        assert_eq!(
+            p.openai_policy_overlay_json,
+            PathBuf::from("/x/.codex-app-transfer/r94.1-openai-provider-policy.json")
         );
         assert_eq!(
             p.mcp_credentials,

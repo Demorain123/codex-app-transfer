@@ -3013,7 +3013,7 @@ supports_websockets = true
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\nrequest_max_retries = 7\nstream_idle_timeout_ms = 90000\nquery_params = { user_policy = \"keep\" }\n",
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nsupports_websockets = false\nstream_max_retries = 15\nrequest_max_retries = 7\nstream_idle_timeout_ms = 90000\nquery_params = { user_policy = \"keep\" }\nhttp_headers = { x_user_policy = \"keep-header\" }\n",
         )
         .unwrap();
 
@@ -3046,6 +3046,11 @@ supports_websockets = true
             "{toml}"
         );
         assert!(
+            toml.contains("http_headers = { x_user_policy = \"keep-header\" }"),
+            "{toml}"
+        );
+        assert!(toml.contains("supports_websockets = false"), "{toml}");
+        assert!(
             toml.contains("base_url = \"http://127.0.0.1:18080\""),
             "only the provider endpoint should be redirected to Transfer: {toml}"
         );
@@ -3064,6 +3069,11 @@ supports_websockets = true
             restored.contains("query_params = { user_policy = \"keep\" }"),
             "{restored}"
         );
+        assert!(
+            restored.contains("http_headers = { x_user_policy = \"keep-header\" }"),
+            "{restored}"
+        );
+        assert!(restored.contains("supports_websockets = false"), "{restored}");
         assert!(!restored.contains("openai_base_url ="), "{restored}");
     }
 

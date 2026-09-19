@@ -290,9 +290,28 @@ if ($Patched.Contains($R94BaseFallback)) {
     $Patched = $Patched.Replace($R94BaseFallback,$R94BaseFailClosed)
 }
 
+# Some inherited generated variants keep the same unsafe inner statement
+# while changing the surrounding whitespace/block shape, so the exact block
+# replacement above can legitimately miss. Rewrite the two dangerous leaf
+# statements themselves before asserting. The replacement still fails closed:
+# it removes the transient bar and exits the current render path.
+$R94ResidualPaneUnsafe = 'if (bar.parentElement !== parent || bar.nextSibling !== composer) parent.insertBefore(bar, composer);'
+$R94ResidualPaneSafe = 'if (bar.isConnected) bar.remove(); return;'
+if ($Patched.Contains($R94ResidualPaneUnsafe)) {
+    $Patched = $Patched.Replace($R94ResidualPaneUnsafe,$R94ResidualPaneSafe)
+}
+
+$R94ResidualBaseUnsafe = 'composer.parentElement.insertBefore(bar, composer);'
+$R94ResidualBaseSafe = 'if (bar.isConnected) bar.remove(); return null;'
+if ($Patched.Contains($R94ResidualBaseUnsafe)) {
+    $Patched = $Patched.Replace($R94ResidualBaseUnsafe,$R94ResidualBaseSafe)
+}
+
+Write-Host 'R94_RESIDUAL_UNSAFE_MOUNT_REWRITE_PASS' -ForegroundColor Green
+
 foreach ($UnsafeRuntimeMount in @(
-    'if (bar.parentElement !== parent || bar.nextSibling !== composer) parent.insertBefore(bar, composer);',
-    'composer.parentElement.insertBefore(bar, composer);'
+    $R94ResidualPaneUnsafe,
+    $R94ResidualBaseUnsafe
 )) {
     if ($Patched.Contains($UnsafeRuntimeMount)) {
         throw "r94 unsafe status fallback survived final materialization: $UnsafeRuntimeMount"

@@ -532,7 +532,9 @@
     marker.className = R94_TIMELINE_MARKER_CLASS;
     marker.setAttribute('data-cas-r94-timeline-marker','true');
     marker.setAttribute('aria-label', entry.fullLabel + ' · ' + entry.kind + ' · click to jump');
-    marker.title = entry.fullLabel + ' · ' + entry.kind + (entry.approx ? ' · first observed locally' : '');
+    marker.title = entry.fullLabel + ' · ' + entry.kind +
+      (entry.approx ? ' · first observed locally' : '') +
+      (entry.preview ? (' · ' + entry.preview) : '');
     marker.style.cssText = [
       'position:absolute',
       'left:0',
@@ -1599,6 +1601,7 @@
           ? ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,0)')
           : ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,-100%)');
       }
+      r94PositionTimelineRail();
       r94SyncDiagnostics();
     }
 
@@ -1671,7 +1674,9 @@
     function r94ScheduleScan(root) {
       if (disposed || !root || document.visibilityState === 'hidden') return;
       const element = root instanceof Element ? root : root.parentElement;
-      if (!(element instanceof Element) || element.closest('#' + R94_OVERLAY_ID)) return;
+      if (!(element instanceof Element) ||
+          element.closest('#' + R94_OVERLAY_ID) ||
+          element.closest('#' + R94_TIMELINE_RAIL_ID)) return;
 
       for (const existing of Array.from(pendingRoots)) {
         if (existing === element || existing.contains(element)) return;
@@ -1694,13 +1699,18 @@
           ? record.target
           : record.target && record.target.parentElement;
         if (mutationTarget instanceof Element &&
-            (mutationTarget.id === R94_OVERLAY_ID || mutationTarget.closest('#' + R94_OVERLAY_ID))) {
+            (mutationTarget.id === R94_OVERLAY_ID ||
+             mutationTarget.id === R94_TIMELINE_RAIL_ID ||
+             mutationTarget.closest('#' + R94_OVERLAY_ID) ||
+             mutationTarget.closest('#' + R94_TIMELINE_RAIL_ID))) {
           continue;
         }
         if (record.removedNodes && record.removedNodes.length) removed = true;
         for (const added of record.addedNodes || []) {
           const element = added instanceof Element ? added : added && added.parentElement;
-          if (!(element instanceof Element) || element.closest('#' + R94_OVERLAY_ID)) continue;
+          if (!(element instanceof Element) ||
+              element.closest('#' + R94_OVERLAY_ID) ||
+              element.closest('#' + R94_TIMELINE_RAIL_ID)) continue;
           const owner = r94CanonicalTurn(element);
           if (owner) {
             r94ScheduleScan(owner);
@@ -1761,6 +1771,7 @@
     function r94HandleVisibility() {
       if (document.visibilityState === 'hidden') {
         overlayRoot.hidden = true;
+        timelineRail.hidden = true;
         r94StopMutationObservation();
         if (intersectionObserver) intersectionObserver.disconnect();
         if (resizeObserver) resizeObserver.disconnect();
@@ -1775,6 +1786,7 @@
       }
 
       overlayRoot.hidden = false;
+      timelineRail.hidden = false;
       r94StartMutationObservation();
       if (intersectionObserver) {
         for (const turn of Array.from(observedTurns)) {
@@ -1809,8 +1821,12 @@
       visibleSegmentEntries.clear();
       segmentTimeByKey.clear();
       baselineSegmentKeys.clear();
+      timelineEntries.clear();
+      timelineMarkers.clear();
+      timelineActiveKey = '';
       capability.clear();
       if (overlayRoot.isConnected) overlayRoot.remove();
+      if (timelineRail.isConnected) timelineRail.remove();
       if (window.__casR94TimestampDiagnostics === diagnostics) delete window.__casR94TimestampDiagnostics;
       if (window.__casR94TurnCapability === capability) delete window.__casR94TurnCapability;
     }

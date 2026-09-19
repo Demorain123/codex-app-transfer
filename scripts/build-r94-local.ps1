@@ -135,6 +135,10 @@ foreach ($Marker in @(
     'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',
     'R94_STREAMING_SEGMENT_THROTTLE_RUNTIME',
     'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
+    'R94_MULTI_PANE_THREAD_OWNERSHIP_RUNTIME',
+    'R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME',
+    'function r94ThreadIdForNode(node) {',
+    'const latestObservedTurnByThread = new Map();',
     'R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME',
     'window.setTimeout(r94FlushSegmentTurns, 220)',
     'R94_SEMANTIC_OUTPUT_UNIT_RUNTIME',
@@ -293,6 +297,10 @@ Write-Host '  - failed/unknown mount discovery removes the bar and retries later
 Write-Host '  - runtime Debug MATCH requires an r94-inline-safe bar and editorLeak=0'
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
+    'R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME',
+    'R94_MULTI_PANE_USAGE_OWNERSHIP_PASS',
+    'r94ExternalExactByThread',
+    'r94StoreExternalExact(exact);',
     'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS',
     'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS',
     'R94_LOCAL_ROLLOUT_TURN_BRIDGE_PASS',
@@ -366,6 +374,9 @@ Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
     'CAS-R94-ACTIVE-THREAD-FALLBACK',
+    'CAS-R94-MULTI-PANE-THREAD-COLLECTOR',
+    'Array.isArray(threadValue)',
+    'for (const threadId of threadIds)',
     'R94_USAGE_LOOKUP_MISS_TTL_MS = 10000',
     'data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]',
     'localUsageMissCache.set(normalized, Date.now());',
@@ -405,6 +416,7 @@ foreach ($Forbidden in @(
 }
 Write-Host 'R94_R76_TURN_AWARE_ROLLOUT_BRIDGE_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_R76_ACTIVE_THREAD_FALLBACK_AND_MISS_CACHE_PASS' -ForegroundColor Green
+Write-Host 'R94_MULTI_PANE_SUBAGENT_TELEMETRY_PREFLIGHT_PASS' -ForegroundColor Green
 
 
 try {

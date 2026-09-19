@@ -226,6 +226,8 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
         'R94_LEGACY_TIMESTAMP_STAMP_DISABLED',
         'function installOutputObserver() {',
         'function r94CollectVisualSegments(node, root, depth) {',
+        'function r94AssistantMessageSurface(node) {',
+        'function r94IsUserSurface(node) {',
         'host-first-observed-live-output',
         'r94BaselineCurrentSegments();',
         'new IntersectionObserver(function(entries) {',

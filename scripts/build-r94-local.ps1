@@ -585,8 +585,9 @@ foreach ($Forbidden in @(
         throw "r94.1 must not fake provider policy by moving it to unsupported root keys: $Forbidden"
     }
 }
-if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocation.MyCommand.Path)).Contains('94.1.1')) {
-    throw 'r94.1 build source contains a double-suffixed preview identity (94.1.1)'
+$DoubleSuffix = '94.1' + '.1'
+if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocation.MyCommand.Path)).Contains($DoubleSuffix)) {
+    throw ("r94.1 build source contains a double-suffixed preview identity: " + $DoubleSuffix)
 }
 Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 

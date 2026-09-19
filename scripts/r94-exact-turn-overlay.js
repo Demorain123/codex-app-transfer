@@ -17,6 +17,7 @@
   const R94_TIMELINE_RAIL_ID = 'cas-r94-timeline-rail';
   const R94_TIMELINE_MARKER_CLASS = 'cas-r94-timeline-marker';
   const R94_TIMELINE_LIMIT = 256;
+  const r94TurnThreadIdCache = new WeakMap();
 
   function r94Decode(value) {
     const text = String(value || '').trim();
@@ -136,7 +137,11 @@
       '';
     const turnId = r94NormalizeTurnId(rawTurn);
     if (!turnId) return null;
-    const threadId = r94ThreadIdForNode(turn);
+    let threadId = r94TurnThreadIdCache.get(turn) || '';
+    if (!threadId) {
+      threadId = r94ThreadIdForNode(turn);
+      if (threadId) r94TurnThreadIdCache.set(turn, threadId);
+    }
     return {
       threadId: threadId || null,
       turnId,
@@ -1220,6 +1225,7 @@
     let timelineScroller = null;
     let timelineActiveKey = '';
     let latestObservedTurn = null;
+    const latestObservedTurnByThread = new Map();
     const generationUiCache = new WeakMap();
 
     let disposed = false;
@@ -1647,6 +1653,14 @@
       for (const turn of candidates.slice(-12)) r94BaselineTurnSegments(turn);
     }
 
+    function r94RememberLatestObservedTurn(turn) {
+      if (!(turn instanceof Element) || !turn.isConnected) return;
+      r94RememberLatestObservedTurn(turn);
+      const ids = r94IdsForTurn(turn);
+      const threadId = String(ids && ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      if (threadId) latestObservedTurnByThread.set(threadId, turn);
+    }
+
     function r94TurnIsLatest(turn) {
       const ids = r94IdsForTurn(turn);
       if (!ids) return false;
@@ -1657,14 +1671,18 @@
         const latestStatus = String(latest.status || '').toLowerCase();
         if (/inprogress|in_progress|running|started|pending/.test(latestStatus)) return false;
       }
-      // R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME
-      // Mutation/capability events already tell us which turn is changing.
-      // Reuse that owner instead of querySelectorAll() over the transcript on
-      // every streaming batch.
+
+      // R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME
+      // Parent and sub-agent panes can stream concurrently. Keep one mutation
+      // owner per thread instead of letting the last mutation in either pane
+      // steal "latest turn" ownership from the other pane.
+      const threadId = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+      const scoped = threadId ? latestObservedTurnByThread.get(threadId) : null;
+      const candidate = scoped instanceof Element ? scoped : latestObservedTurn;
       return !!(
-        latestObservedTurn instanceof Element &&
-        latestObservedTurn.isConnected &&
-        (latestObservedTurn === turn || latestObservedTurn.contains(turn) || turn.contains(latestObservedTurn))
+        candidate instanceof Element &&
+        candidate.isConnected &&
+        (candidate === turn || candidate.contains(turn) || turn.contains(candidate))
       );
     }
 
@@ -1685,13 +1703,26 @@
       if (/inprogress|in_progress|running|started|pending/.test(status)) return true;
       if (/completed|failed|interrupted|cancelled|canceled/.test(status)) return false;
 
-      const externalThread = String(state.metrics && state.metrics.externalThreadId || '').replace(/^local:/i, '').trim().toLowerCase();
       const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
-      if (externalThread && idsThread && externalThread !== idsThread) return false;
-      const updated = Number(state.metrics && state.metrics.externalUpdatedAt);
-      if (Number.isFinite(updated) && updated > 0) {
-        const age = r94HostEpochNow() - updated;
+      const exactByThread = state.metrics && state.metrics.r94ExternalExactByThread;
+      const scopedExact = idsThread && exactByThread instanceof Map ? exactByThread.get(idsThread) : null;
+      const scopedUpdated = Number(scopedExact && scopedExact.updatedAt);
+      if (Number.isFinite(scopedUpdated) && scopedUpdated > 0) {
+        const age = r94HostEpochNow() - scopedUpdated;
         if (age >= -5000 && age <= 90000) return true;
+      }
+
+      // Backward-compatible single-pane fallback only. In split view the last
+      // envelope may belong to a sub-agent, so a process-global externalThreadId
+      // must never suppress or activate another pane.
+      if (r94KnownPaneThreadIds().length <= 1) {
+        const externalThread = String(state.metrics && state.metrics.externalThreadId || '').replace(/^local:/i, '').trim().toLowerCase();
+        if (externalThread && idsThread && externalThread !== idsThread) return false;
+        const updated = Number(state.metrics && state.metrics.externalUpdatedAt);
+        if (Number.isFinite(updated) && updated > 0) {
+          const age = r94HostEpochNow() - updated;
+          if (age >= -5000 && age <= 90000) return true;
+        }
       }
 
       // DOM-wide control/busy scans are the expensive fallback. Cache them so
@@ -1801,6 +1832,7 @@
       segmentTimerId = 0;
       const turns = Array.from(pendingSegmentTurns);
       pendingSegmentTurns.clear();
+      latestObservedTurnByThread.clear();
       for (const turn of turns) {
         if (turn instanceof Element && turn.isConnected) r94StampLiveSegments(turn);
       }
@@ -2001,7 +2033,7 @@
               element.closest('#' + R94_TIMELINE_RAIL_ID)) continue;
           const owner = r94CanonicalTurn(element);
           if (owner) {
-            latestObservedTurn = owner;
+            r94RememberLatestObservedTurn(owner);
             r94ScheduleScan(owner);
             r94ScheduleSegmentTurn(owner);
             if (!intersectionObserver || visibleTurns.has(owner)) r94RefreshTurn(owner);
@@ -2052,7 +2084,7 @@
         if (!ids || ids.turnId !== turnId) continue;
         const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
         if (threadId && idsThread && threadId !== idsThread) continue;
-        latestObservedTurn = turn;
+        r94RememberLatestObservedTurn(turn);
         r94RefreshTurn(turn);
         r94ScheduleSegmentTurn(turn);
       }

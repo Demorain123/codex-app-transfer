@@ -174,6 +174,8 @@ Write-Host '  - current r28 bind/recovery anchors required by the selective r39 
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
     'R94_EXACT_TURN_CAPABILITY_RUNTIME',
+    'R94_NATIVE_TIMESTAMP_VISIBILITY_GATE_RUNTIME',
+    'r94NativeTimestampVisible(exact.sourceElement)',
     'window.__casR94TurnCapability = capability;',
     'function r94CreateCapability() {',
     'function latestForThread(threadId) {',
@@ -381,6 +383,8 @@ foreach ($Marker in @(
     'R94_LOCAL_ROLLOUT_TURN_BRIDGE_PASS',
     'R94_TURN_SCOPED_STATUS_PASS',
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
+    'R94_NATIVE_ACTIVE_SINGLE_PANE_FALLBACK_RUNTIME',
+    'native-active-single-pane',
     'r94NormalizePaneId',
     'R94_TURN_STATUS_PANE_OWNER_PASS',
     'R94_PANE_STATUS_OWNER_REQUIRED',
@@ -429,6 +433,8 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'SEGMode=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'Timeline=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'Collector tick=' },
+    @{ Text = $ThemeInjectorRsText; Marker = '__casR94LocalUsageCollectorDiagnostics' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TL meta=' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
@@ -461,6 +467,11 @@ foreach ($Marker in @(
     'recentItems: Array.from(itemMeta.values()).slice(-96)',
     'safeEnvelope.recentItems = Array.isArray(envelope.recentItems)',
     'R94_USAGE_LOOKUP_MISS_TTL_MS = 10000',
+    'CAS-R94-LOCAL-USAGE-COLLECTOR-DIAGNOSTICS',
+    '__casR94LocalUsageCollectorDiagnostics',
+    "stage: 'file-miss'",
+    "stage: 'envelope-miss'",
+    "stage: pushed ? 'push-ok' : 'push-failed'",
     'data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]',
     'localUsageMissCache.set(normalized, Date.now());',
     'localUsageSnapshotCache.set(filePath, { size: stat.size, envelope: fallbackEnvelope });',
@@ -501,6 +512,9 @@ Write-Host 'R94_R76_TURN_AWARE_ROLLOUT_BRIDGE_PREFLIGHT_PASS' -ForegroundColor G
 Write-Host 'R94_R76_ACTIVE_THREAD_FALLBACK_AND_MISS_CACHE_PASS' -ForegroundColor Green
 Write-Host 'R94_MULTI_PANE_SUBAGENT_TELEMETRY_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_R77_ACTIVE_THREAD_RESOLVER_COMPAT_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_TIMESTAMP_VISIBLE_NATIVE_GATE_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_NATIVE_SINGLE_PANE_USAGE_FALLBACK_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_LOCAL_USAGE_COLLECTOR_DIAGNOSTICS_PREFLIGHT_PASS' -ForegroundColor Green
 
 
 try {

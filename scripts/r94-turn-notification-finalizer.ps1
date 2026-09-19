@@ -416,7 +416,14 @@ $R94StatusHtml = @'
     const turnRecord = r94LatestTurnCapability(threadId);
     const turnExact = r94TurnUsageSnapshot(turnRecord);
     const hasTurnIdentity = !!(turnRecord && turnRecord.turnId);
-    const threadExact = !hasTurnIdentity && ownership.owned ? ownership.exact : null;
+    // R94_MULTI_PANE_LAST_THREAD_SNAPSHOT_FALLBACK_RUNTIME
+    // A fresh parent/sub-agent turn can be known from lifecycle before Codex
+    // emits that turn's first tokenUsage update. Do not blank an otherwise
+    // exact pane-owned thread snapshot merely because the newer turn identity
+    // exists. The fallback is explicitly labelled as thread-scoped below so it
+    // is never mistaken for current-turn in/out.
+    const threadExact = !turnExact && ownership.owned ? ownership.exact : null;
+    const threadExactBehindTurn = !!(threadExact && hasTurnIdentity);
     const nativeFallback = !turnExact && !threadExact ? r94NativeSinglePaneUsage(threadId, bar) : null;
     const exact = turnExact || threadExact;
     const displayUsage = exact || nativeFallback;
@@ -449,7 +456,7 @@ $R94StatusHtml = @'
       bar.setAttribute(
         'data-cas-turn-source',
         turnExact ? 'exact-turn-capability'
-          : (threadExact ? 'thread-snapshot-fallback'
+          : (threadExact ? (threadExactBehindTurn ? 'thread-snapshot-before-turn-usage' : 'thread-snapshot-fallback')
             : (nativeFallback ? 'native-active-single-pane' : 'unavailable'))
       );
     }
@@ -475,14 +482,18 @@ $R94StatusHtml = @'
       : paneSpeedPresentation(speedOwnership, activity);
     const exactSource = turnExact
       ? 'exact-turn-capability'
-      : (threadExact ? 'exact-jsonl-fallback' : (nativeFallback ? 'native-active-single-pane' : 'unowned'));
+      : (threadExact
+        ? (threadExactBehindTurn ? 'exact-thread-snapshot-before-turn-usage' : 'exact-jsonl-fallback')
+        : (nativeFallback ? 'native-active-single-pane' : 'unowned'));
     const exactConfidence = exact
-      ? (turnExact ? 'exact-turn' : 'exact-snapshot')
+      ? (turnExact ? 'exact-turn' : (threadExactBehindTurn ? 'exact-thread-stale-for-active-turn' : 'exact-snapshot'))
       : (nativeFallback ? 'native-visible' : 'unavailable');
     const exactTitle = turnExact
       ? 'Exact Codex-reported snapshot keyed by threadId + turnId: ctx uses last_token_usage.total_tokens / model_context_window; in/out are the latest model request; cache is cached_input/input; session is cumulative total_token_usage.total_tokens.'
       : (threadExact
-        ? 'Exact Codex rollout snapshot for this thread. ctx is current last_token_usage.total_tokens; in/out are the latest model request, not whole-turn totals; session is cumulative and can greatly exceed the context window.'
+        ? (threadExactBehindTurn
+          ? 'A newer pane turn is active/known but has not emitted token usage yet. Showing the last exact snapshot for this same thread only; in/out therefore describe the latest completed/reported model request, not the new turn.'
+          : 'Exact Codex rollout snapshot for this thread. ctx is current last_token_usage.total_tokens; in/out are the latest model request, not whole-turn totals; session is cumulative and can greatly exceed the context window.')
         : (nativeFallback
           ? 'Visible Codex Usage fallback for exactly one active pane. ctx/cache/session mirror native UI snapshots; in/out and pane tok/s intentionally remain unavailable rather than being guessed.'
           : 'Unavailable: no exact pane-owned usage source.'));
@@ -582,6 +593,9 @@ foreach ($Marker in @(
     'R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME',
     'R94_STATUS_TRUTH_SEMANTICS_RUNTIME',
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
+    'R94_MULTI_PANE_LAST_THREAD_SNAPSHOT_FALLBACK_RUNTIME',
+    'thread-snapshot-before-turn-usage',
+    'exact-thread-snapshot-before-turn-usage',
     'state.ingestExternalUsage = ingestExternalUsage',
     'contextTokens',
     "('session ' + shortNumber(displayUsage.sessionTotalTokens))",

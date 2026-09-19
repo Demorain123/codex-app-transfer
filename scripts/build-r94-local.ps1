@@ -367,7 +367,7 @@ foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
     'CAS-R94-ACTIVE-THREAD-FALLBACK',
     'R94_USAGE_LOOKUP_MISS_TTL_MS = 30000',
-    "document.querySelector('[data-cas-pane-statusbar=\\\"true\\\"][data-cas-pane-thread-id]')",
+    'data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]',
     'localUsageMissCache.set(normalized, Date.now());',
     'localUsageSnapshotCache.set(filePath, { size: stat.size, envelope: fallbackEnvelope });',
     'terminalTurn',

@@ -150,6 +150,12 @@ foreach ($Forbidden in @(
 )) {
     if ($OverlayJs.Contains($Forbidden)) { throw "r94 turn overlay retained forbidden hot path: $Forbidden" }
 }
+Write-Host 'R94_PER_OUTPUT_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
+Write-Host '  - nested assistant message groups are timestamp units; explicit tool/agent/status surfaces remain independent'
+Write-Host '  - user-only wrappers are excluded from assistant timestamping'
+Write-Host '  - existing/remounted history is baselined and cannot receive a fresh host-now timestamp'
+Write-Host '  - native final sent-time wins; Transfer removes its final segment badge instead of duplicating Codex'
+Write-Host '  - all Transfer timestamp badges live in the overlay root with pointer-events:none'
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_GENERATION_PATCH',
     'R94_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS',

@@ -569,7 +569,10 @@ foreach ($Marker in @(
     'model_context_window_set: !preserve_external_model_catalog',
     'r94_1_provider_policy_truth_reads_custom_provider_without_reactivating_it',
     'r94_1_external_catalog_removes_transfer_only_global_window',
-    'r94_1_external_catalog_preserves_user_owned_global_window'
+    'r94_1_external_catalog_preserves_ambiguous_post_snapshot_live_window',
+    'r94_1_external_catalog_preserves_user_owned_global_window',
+    'action = "remove-proven-transfer-root-window"',
+    'action = "preserve-ambiguous-live-root-window"'
 )) {
     if (-not $R941ApplyRsText.Contains($Marker)) {
         throw "r94.1 provider/config truth contract missing: $Marker"
@@ -594,7 +597,7 @@ Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - custom-provider retry/timeout policy is diagnosed, never silently claimed as built-in openai policy'
 Write-Host '  - inactive custom provider tables remain preserved for old-thread compatibility'
-Write-Host '  - external catalog restores root model_context_window from snapshot ownership instead of retaining Transfer-only 1M'
+Write-Host '  - external catalog removes only a proven Transfer-owned root window, restores explicit snapshot-owned values, and preserves ambiguous live edits'
 Write-Host '  - unrelated user config keys are not auto-deleted'
 
 foreach ($Marker in @(
@@ -807,7 +810,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - optional Runtime Debug (DBG94.1-1) exposes package/runtime/PID evidence in Transfer and the live Codex renderer'
         Write-Host 'R94_1_PROVIDER_CONFIG_TRUTH_RUNTIME_PASS' -ForegroundColor Green
         Write-Host '  - provider identity remains built-in openai; custom retry/timeout policy is source diagnostics only'
-        Write-Host '  - external model catalog owns per-model context unless the snapshot proves a user-owned root override'
+        Write-Host '  - external model catalog owns per-model context; user-owned/ambiguous live root overrides are never silently deleted'
         Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     }
 }

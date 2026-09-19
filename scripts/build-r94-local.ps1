@@ -122,8 +122,11 @@ foreach ($Marker in @(
     '[data-content-search-assistant-turn-key]',
     '[data-chatgpt-conversation-turn="true"]',
     'function r94NativeTimestampVisible(node) {',
+    'function r94NativeUserExactForTurn(turn) {',
+    'function r94EnsureUserBadge(turn, ids) {'
     'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
     'R94_FULL_DATE_TIMESTAMP_RUNTIME',
+    'R94_USER_PROMPT_TIMESTAMP_RUNTIME',
     'function r94LocalDateTimeStamp(epoch) {',
     'R94_NATIVE_RAIL_PRESERVE_RUNTIME',
     'R94_NATIVE_RAIL_METADATA_ONLY_RUNTIME',

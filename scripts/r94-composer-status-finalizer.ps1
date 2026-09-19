@@ -40,9 +40,11 @@ $R94ComposerSurfaceCompat = @'
     const current = window.__casR94ComposerStatusDiagnostics;
     if (current && typeof current === 'object') return current;
     const created = {
-      protocol: 'R94_COMPOSER_MOUNT_V3',
+      protocol: 'R94_COMPOSER_MOUNT_V4',
+      calls: 0,
       attempts: 0,
       mounted: 0,
+      fastReuses: 0,
       unsafeRejects: 0,
       lastReason: 'init',
       surface: '',
@@ -192,8 +194,30 @@ $R94ComposerMountCompat = @'
   function r93MountStatusBar(bar, composer) {
     // R94_COMPOSER_INLINE_MOUNT_RUNTIME
     // R94_COMPOSER_FAIL_CLOSED_MOUNT_RUNTIME
+    // R94_COMPOSER_FAST_REUSE_RUNTIME
     if (!(bar instanceof Element)) return false;
     const diagnostics = r94ComposerStatusDiagnostics();
+    diagnostics.calls += 1;
+
+    // Fast path: once the bar is safely mounted, reuse the verified shell
+    // without rescanning the document/ancestor tree on every UI refresh.
+    if (bar.isConnected &&
+        bar.getAttribute('data-cas-status-owner') === 'r94-inline-safe' &&
+        bar.parentElement instanceof Element) {
+      const fastSurface = bar.parentElement;
+      const fastEditable = fastSurface.querySelector(
+        '.ProseMirror[contenteditable="true"],[role="textbox"][contenteditable="true"],textarea'
+      );
+      const leaked = !!bar.closest(
+        '.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]'
+      );
+      if (fastEditable instanceof Element && fastEditable.isConnected && !leaked) {
+        diagnostics.fastReuses += 1;
+        diagnostics.lastReason = 'mounted-safe-cached';
+        return true;
+      }
+    }
+
     diagnostics.attempts += 1;
     r94RemoveUnsafeStatusNodes();
 
@@ -350,7 +374,8 @@ foreach ($Marker in @(
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
     'R94_CURRENT_COMPOSER_ROOT_RUNTIME',
     'R94_COMPOSER_INLINE_MOUNT_RUNTIME',
-    'R94_COMPOSER_MOUNT_V3',
+    'R94_COMPOSER_MOUNT_V4',
+    'R94_COMPOSER_FAST_REUSE_RUNTIME',
     'R94_EDITOR_BOUNDARY_GUARD_RUNTIME',
     'R94_COMPOSER_FAIL_CLOSED_MOUNT_RUNTIME',
     "bar.setAttribute('data-cas-status-owner','r94-inline-safe');",
@@ -374,7 +399,7 @@ foreach ($Forbidden in @(
 }
 
 Write-Host 'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS' -ForegroundColor Green
-Write-Host 'R94_COMPOSER_INLINE_MOUNT_V3_EDITOR_SAFE_PASS' -ForegroundColor Green
+Write-Host 'R94_COMPOSER_INLINE_MOUNT_V4_FAST_SAFE_PASS' -ForegroundColor Green
 Write-Host 'R94_STATUS_NEVER_ENTERS_EDITABLE_PASS' -ForegroundColor Green
 Write-Host 'R94_NATIVE_USAGE_SCAN_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS' -ForegroundColor Green

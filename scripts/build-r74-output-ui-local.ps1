@@ -31,6 +31,19 @@ function Replace-Required([string]$Text, [string]$Old, [string]$New, [string]$La
     return $Text.Replace($Old, $New)
 }
 
+# CAS-VISIBLE-IDENTITY-OVERRIDE
+# Preview wrappers may keep the historical rXX build pipeline/markers while
+# asking the final visible package identity to use a dotted revision such as
+# r94.1. Environment variables are inherited by all nested generated builders,
+# so this hook reaches the actual visible-identity owner without renaming the
+# r75-r94 runtime chain.
+$VisibleRevisionOverride = $env:CAS_TRANSFER_VISIBLE_REVISION
+$VisibleVersionOverride = $env:CAS_TRANSFER_VISIBLE_VERSION
+if ([string]::IsNullOrWhiteSpace($VisibleRevisionOverride) -xor
+    [string]::IsNullOrWhiteSpace($VisibleVersionOverride)) {
+    throw 'visible identity override requires both CAS_TRANSFER_VISIBLE_REVISION and CAS_TRANSFER_VISIBLE_VERSION'
+}
+
 # The r74 renderer runtime is deliberately injected only through the existing No-Lagging B path.
 # It does not patch app.asar, session JSONL, prompts, responses, auth or provider traffic.
 $NewTelemetryFunction = @'
@@ -851,17 +864,60 @@ try {
     $Tauri = $Original[$TauriPath]
     $Tauri = Replace-Required $Tauri '"version": "2.4.5+73"' '"version": "2.4.5+74"' 'Tauri version'
     $Tauri = Replace-Required $Tauri 'Codex App Transfer — Sub2API Grok Compat r73 — v2.4.5+73' 'Codex App Transfer — Sub2API Grok Compat r74 — v2.4.5+74' 'Windows title'
-    Write-Utf8NoBom $TauriPath $Tauri
 
     $AppLayout = $Original[$AppLayoutPath].Replace('Sub2API Grok Compat r73 — v2.4.5+73', 'Sub2API Grok Compat r74 — v2.4.5+74')
-    Write-Utf8NoBom $AppLayoutPath $AppLayout
-
     $TopTab = $Original[$TopTabPath].Replace('Sub2API Grok Compat r73 · v2.4.5+73', 'Sub2API Grok Compat r74 · v2.4.5+74')
-    Write-Utf8NoBom $TopTabPath $TopTab
 
     $Builder = $Original[$BaseBuilderPath]
     $Builder = $Builder.Replace('[r73]', '[r74]').Replace('R73_LOCAL_BUILD_PASS', 'R74_LOCAL_BUILD_PASS').Replace('R73_DEPLOY_PASS', 'R74_DEPLOY_PASS')
     $Builder = $Builder.Replace('Sub2API Grok Compat r73 / v2.4.5+73', 'Sub2API Grok Compat r74 / v2.4.5+74')
+
+    $VisibleIdentity = 'Sub2API Grok Compat r74 / v2.4.5+74'
+    if (-not [string]::IsNullOrWhiteSpace($VisibleRevisionOverride)) {
+        $Tauri = [regex]::Replace(
+            $Tauri,
+            '"version"\s*:\s*"2\.4\.5\+\d+(?:\.\d+)?"',
+            ('"version": "' + $VisibleVersionOverride + '"')
+        )
+        $Tauri = [regex]::Replace(
+            $Tauri,
+            'Codex App Transfer — Sub2API Grok Compat r\d+(?:\.\d+)? — v2\.4\.5\+\d+(?:\.\d+)?',
+            ('Codex App Transfer — Sub2API Grok Compat ' + $VisibleRevisionOverride + ' — v' + $VisibleVersionOverride)
+        )
+        $AppLayout = [regex]::Replace(
+            $AppLayout,
+            'Sub2API Grok Compat r\d+(?:\.\d+)? — v2\.4\.5\+\d+(?:\.\d+)?',
+            ('Sub2API Grok Compat ' + $VisibleRevisionOverride + ' — v' + $VisibleVersionOverride)
+        )
+        $TopTab = [regex]::Replace(
+            $TopTab,
+            'Sub2API Grok Compat r\d+(?:\.\d+)? · v2\.4\.5\+\d+(?:\.\d+)?',
+            ('Sub2API Grok Compat ' + $VisibleRevisionOverride + ' · v' + $VisibleVersionOverride)
+        )
+        $Builder = [regex]::Replace(
+            $Builder,
+            'Sub2API Grok Compat r\d+(?:\.\d+)? / v2\.4\.5\+\d+(?:\.\d+)?',
+            ('Sub2API Grok Compat ' + $VisibleRevisionOverride + ' / v' + $VisibleVersionOverride)
+        )
+        $VisibleIdentity = 'Sub2API Grok Compat ' + $VisibleRevisionOverride + ' / v' + $VisibleVersionOverride
+
+        foreach ($Check in @(
+            @{ Text = $Tauri; Marker = ('"version": "' + $VisibleVersionOverride + '"') },
+            @{ Text = $Tauri; Marker = ('Codex App Transfer — Sub2API Grok Compat ' + $VisibleRevisionOverride + ' — v' + $VisibleVersionOverride) },
+            @{ Text = $AppLayout; Marker = ('Sub2API Grok Compat ' + $VisibleRevisionOverride + ' — v' + $VisibleVersionOverride) },
+            @{ Text = $TopTab; Marker = ('Sub2API Grok Compat ' + $VisibleRevisionOverride + ' · v' + $VisibleVersionOverride) },
+            @{ Text = $Builder; Marker = $VisibleIdentity }
+        )) {
+            if (-not $Check.Text.Contains($Check.Marker)) {
+                throw "visible identity override failed to materialize: $($Check.Marker)"
+            }
+        }
+        Write-Host ("R74_VISIBLE_IDENTITY_OVERRIDE_PASS: {0}" -f $VisibleIdentity) -ForegroundColor Green
+    }
+
+    Write-Utf8NoBom $TauriPath $Tauri
+    Write-Utf8NoBom $AppLayoutPath $AppLayout
+    Write-Utf8NoBom $TopTabPath $TopTab
     Write-Utf8NoBom $BaseBuilderPath $Builder
 
     # --- Replace only the renderer telemetry runtime, keep the proven No-Lagging guard ---
@@ -892,7 +948,7 @@ try {
 
     Write-Host ''
     Write-Host 'R74_OUTPUT_UI_LOCAL_PASS'
-    Write-Host 'Expected identity: Sub2API Grok Compat r74 / v2.4.5+74'
+    Write-Host ("Expected identity: {0}" -f $VisibleIdentity)
     Write-Host 'Expected B-path UI:'
     Write-Host '  - live progress/model-output blocks receive one timestamp when first emitted'
     Write-Host '  - final answer receives only one timestamp for the whole final-answer surface'

@@ -988,6 +988,22 @@
       const segments = r94TopLevelSegments(turn);
       for (const segment of segments) {
         if (!(segment instanceof Element) || !segment.isConnected || r94SegmentIsNativeFinal(segment, turn)) continue;
+
+        // DOM wrappers can be reparented while a block streams. A concrete node
+        // that already has a first-observed record keeps that original time even
+        // if its structural path changes later in the same turn.
+        const existingEntry = segmentEntryByNode.get(segment);
+        if (existingEntry && Number.isFinite(existingEntry.epoch)) {
+          r94EnsureSegmentEntry(
+            segment,
+            turn,
+            existingEntry.key || r94SegmentKey(segment, turn),
+            existingEntry.epoch,
+            existingEntry.source || 'host-first-observed-live-node'
+          );
+          continue;
+        }
+
         const key = r94SegmentKey(segment, turn);
         if (!key) continue;
 

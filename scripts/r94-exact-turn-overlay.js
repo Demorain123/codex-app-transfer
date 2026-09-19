@@ -801,13 +801,22 @@
   function r94NativeTimestampVisible(node) {
     if (!r94AnchorUsable(node)) return false;
     try {
-      const style = getComputedStyle(node);
-      if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
-      const opacity = Number(style.opacity);
-      if (Number.isFinite(opacity) && opacity <= 0.05) return false;
+      // R94_NATIVE_TIMESTAMP_ANCESTOR_VISIBILITY_RUNTIME
+      // Hover/action rows often keep the <time> node mounted while an ancestor
+      // is opacity:0. Inspect the bounded ancestor chain as well as the node;
+      // connected DOM is not equivalent to a user-visible native timestamp.
+      let current = node;
+      for (let depth = 0; depth < 8 && current instanceof Element; depth += 1) {
+        const style = getComputedStyle(current);
+        if (!style || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+        const opacity = Number(style.opacity);
+        if (Number.isFinite(opacity) && opacity <= 0.05) return false;
+        if (current.getAttribute('aria-hidden') === 'true') return false;
+        current = current.parentElement;
+      }
       return !!r94CleanTimeText(node.textContent || node.getAttribute('aria-label') || node.getAttribute('title'));
     } catch {
-      return true;
+      return false;
     }
   }
 

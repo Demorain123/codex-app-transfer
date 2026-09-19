@@ -175,6 +175,7 @@ foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
     'R94_EXACT_TURN_CAPABILITY_RUNTIME',
     'R94_NATIVE_TIMESTAMP_VISIBILITY_GATE_RUNTIME',
+    'R94_NATIVE_TIMESTAMP_ANCESTOR_VISIBILITY_RUNTIME',
     'r94NativeTimestampVisible(exact.sourceElement)',
     'window.__casR94TurnCapability = capability;',
     'function r94CreateCapability() {',

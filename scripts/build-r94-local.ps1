@@ -499,7 +499,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - r90 pane ownership / WAITING / truth-first telemetry remains inherited'
         Write-Host '  - legacy per-segment timestamp stamping is disabled at the final r86/r78 owner'
         Write-Host '  - native final/user timestamps remain authoritative; live assistant/progress/tool blocks get host first-observed ≈ YYYY-MM-DD HH:mm:ss timestamps'
-        Write-Host '  - a separate left timeline rail exposes dated navigation nodes and click-to-jump without mutating Codex React DOM'
+        Write-Host '  - Codex official conversation rail/minimap is preserved unchanged; Transfer does not paint a second left rail'
         Write-Host '  - native Codex turn/action-row DOM is read-only; labels live in a Transfer-owned overlay root'
         Write-Host '  - mutation observation is childList-only; visible-turn work is IntersectionObserver bounded'
         Write-Host '  - historical/remounted blocks never receive host-now estimates; live segment discovery stays childList-only with no periodic timestamp sweep'
@@ -515,7 +515,7 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host ''
         Write-Host 'R94_EXACT_TURN_RUNTIME_PASS' -ForegroundColor Green
         Write-Host '  - hybrid timestamp overlay keeps native final/user times and adds ≈ YYYY-MM-DD HH:mm:ss first-observed time to each live output block'
-        Write-Host '  - left timeline rail adds U/A/T/G/S/F dated nodes, hover labels and click-to-jump navigation'
+        Write-Host '  - timeline metadata stays internal for diagnostics; visible navigation remains Codex-native to avoid duplicate UI and hot scroll work'
         Write-Host '  - legacy r74-r90 stamp path is inert'
         Write-Host '  - composer status is mounted in the rounded composer shell but outside the editable tree; telemetry can never become prompt text'
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'

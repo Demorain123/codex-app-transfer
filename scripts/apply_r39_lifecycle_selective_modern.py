@@ -45,6 +45,9 @@ run_leaf("scripts/apply_r38_recovery_async_stop.py")
 #    one dedicated OS thread. Stop signals it, joins it, then verifies same-port
 #    bindability before another generation may publish.
 run_leaf("scripts/apply_r39_proxy_owner_thread.py")
+# r94 Windows fixed-port hardening: prevent long-lived descendants from
+# inheriting the listener handle and keeping the original binder PID's row alive.
+run_leaf("scripts/apply_r94_windows_listener_noinherit.py")
 run_leaf("scripts/apply_r39_r25_replay_marker_prep.py")
 run_leaf("scripts/apply_r39_owner_thread_state_guard.py")
 
@@ -77,6 +80,9 @@ for marker in (
     "listener_residue_detected",
     "finished_owner_generation_detected",
     "proxy_lifecycle_r39_owner_thread_join_rebind_100_generations",
+    "CAS-R94-WINDOWS-LISTENER-NOINHERIT",
+    "listener_inherit_guard_verified",
+    "harden_listener_handle_inheritance(&listener)",
 ):
     if marker not in proxy_runner:
         raise SystemExit(f"modern r39 lifecycle proxy_runner invariant missing: {marker}")
@@ -149,5 +155,7 @@ print("MODERN_R39_LIFECYCLE_SELECTIVE_CARRY_FORWARD_PASS")
 print("- dedicated owner-thread listener lifecycle restored without recursive historical replay")
 print("- stop joins owner and verifies same-port release before rebind")
 print("- Windows binder PID evidence restored for occupied/residual listeners")
+print("- Windows listener HANDLE_FLAG_INHERIT is explicitly cleared/read-back verified")
+print("- fixed port remains fixed; no port hopping, process killing, or SO_REUSEADDR")
 print("- 10048/address-in-use is single-attempt nonretryable; no blind retry loop")
 print("- recovery preserves live/stale owner evidence instead of hammering bind")

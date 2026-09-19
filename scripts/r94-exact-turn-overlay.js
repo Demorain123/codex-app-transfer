@@ -142,6 +142,10 @@
       threadId = r94ThreadIdForNode(turn);
       if (threadId) r94TurnThreadIdCache.set(turn, threadId);
     }
+    // R94_MULTI_PANE_FAIL_CLOSED_RUNTIME
+    // In split view, an unowned turn must remain unstamped instead of borrowing
+    // the parent route/thread identity and producing believable but wrong time.
+    if (!threadId && r94KnownPaneThreadIds().length > 1) return null;
     return {
       threadId: threadId || null,
       turnId,

@@ -79,16 +79,14 @@ $R94TurnHelpers = @'
     const ctxMatch = text.match(/([\d.,]+\s*[KMB]?)\s*\/\s*([\d.,]+\s*[KMB]?)\s*[·•]?\s*([\d.]+)%/i);
     const cacheMatch = text.match(/(?:缓存命中|cache\s*hit)\s*([\d.]+)%/i);
     const totalMatch = text.match(/(?:累计|session\s*total|total)\s*([\d.,]+\s*[KMB]?)/i);
-    const speedMatch = text.match(/([\d.]+)\s*tokens?\s*\/\s*s|([\d.]+)\s*tokens?\/s/i);
 
     const contextTokens = ctxMatch ? compact(ctxMatch[1]) : null;
     const contextWindow = ctxMatch ? compact(ctxMatch[2]) : null;
     const contextPercent = ctxMatch ? Number(ctxMatch[3]) : null;
     const cacheHitPercent = cacheMatch ? Number(cacheMatch[1]) : null;
     const sessionTotalTokens = totalMatch ? compact(totalMatch[1]) : null;
-    const nativeSpeed = speedMatch ? Number(speedMatch[1] || speedMatch[2]) : null;
 
-    if (![contextTokens, contextWindow, contextPercent, cacheHitPercent, sessionTotalTokens, nativeSpeed].some(Number.isFinite)) {
+    if (![contextTokens, contextWindow, contextPercent, cacheHitPercent, sessionTotalTokens].some(Number.isFinite)) {
       return null;
     }
 
@@ -100,7 +98,6 @@ $R94TurnHelpers = @'
       contextPercent: Number.isFinite(contextPercent) ? contextPercent : null,
       cacheHitPercent: Number.isFinite(cacheHitPercent) ? cacheHitPercent : null,
       sessionTotalTokens,
-      nativeSpeed: Number.isFinite(nativeSpeed) ? nativeSpeed : null,
     };
   }
 
@@ -288,6 +285,7 @@ $R94TurnHelpers = @'
     const cachedInputTokens = r94Number(last,'cachedInputTokens','cached_input_tokens');
     const outputTokens = r94Number(last,'outputTokens','output_tokens');
     const reasoningTokens = r94Number(last,'reasoningOutputTokens','reasoning_output_tokens');
+    const contextTokens = r94Number(last,'totalTokens','total_tokens');
     const contextWindow = Number(usage.modelContextWindow ?? usage.model_context_window);
     const sessionTotalTokens = r94Number(total,'totalTokens','total_tokens');
     return {
@@ -297,10 +295,11 @@ $R94TurnHelpers = @'
       cachedInputTokens,
       outputTokens,
       reasoningTokens,
+      contextTokens,
       contextWindow: Number.isFinite(contextWindow) ? contextWindow : null,
       sessionTotalTokens,
-      contextPercent: Number.isFinite(inputTokens) && Number.isFinite(contextWindow) && contextWindow > 0
-        ? Math.max(0, Math.min(100, (inputTokens / contextWindow) * 100))
+      contextPercent: Number.isFinite(contextTokens) && Number.isFinite(contextWindow) && contextWindow > 0
+        ? Math.max(0, Math.min(100, (contextTokens / contextWindow) * 100))
         : null,
       cacheHitPercent: Number.isFinite(cachedInputTokens) && Number.isFinite(inputTokens) && inputTokens > 0
         ? Math.max(0, Math.min(100, (cachedInputTokens / inputTokens) * 100))
@@ -326,8 +325,12 @@ $R94ExternalIngest = @'
       return true;
     }
 
-    const hit = consumeValue(info, 0);
-    if (!hit) return false;
+    // R94_EXACT_USAGE_DIRECT_DECODE_RUNTIME
+    // The rollout token_count fields are authoritative for exact pane usage.
+    // Legacy consumeValue feeds older mirrors/charts only; it must never gate
+    // the exact per-thread map.
+    let legacyHit = false;
+    try { legacyHit = !!consumeValue(info, 0); } catch {}
 
     const last = info.last_token_usage && typeof info.last_token_usage === 'object'
       ? info.last_token_usage
@@ -346,20 +349,21 @@ $R94ExternalIngest = @'
       cachedInputTokens: numberAt(last, [['cached_input_tokens'], ['cachedInputTokens'], ['cached_tokens'], ['cachedTokens']]),
       outputTokens: numberAt(last, [['output_tokens'], ['outputTokens'], ['completion_tokens'], ['completionTokens']]),
       reasoningTokens: numberAt(last, [['reasoning_output_tokens'], ['reasoningTokens']]),
+      contextTokens: numberAt(last, [['total_tokens'], ['totalTokens']]),
       contextWindow: numberAt(info, [['model_context_window'], ['modelContextWindow']]),
       sessionTotalTokens: total ? numberAt(total, [['total_tokens'], ['totalTokens']]) : null,
     } : null;
 
     if (exact) {
-      exact.contextPercent = Number.isFinite(exact.inputTokens) && Number.isFinite(exact.contextWindow) && exact.contextWindow > 0
-        ? Math.max(0, Math.min(100, (exact.inputTokens / exact.contextWindow) * 100))
+      exact.contextPercent = Number.isFinite(exact.contextTokens) && Number.isFinite(exact.contextWindow) && exact.contextWindow > 0
+        ? Math.max(0, Math.min(100, (exact.contextTokens / exact.contextWindow) * 100))
         : null;
       exact.cacheHitPercent = Number.isFinite(exact.cachedInputTokens) && Number.isFinite(exact.inputTokens) && exact.inputTokens > 0
         ? Math.max(0, Math.min(100, (exact.cachedInputTokens / exact.inputTokens) * 100))
         : null;
       const fingerprint = [
         exact.threadId, exact.turnId, exact.inputTokens, exact.cachedInputTokens, exact.outputTokens,
-        exact.reasoningTokens, exact.contextWindow, exact.sessionTotalTokens,
+        exact.reasoningTokens, exact.contextTokens, exact.contextWindow, exact.sessionTotalTokens,
       ].join('|');
       if (state.metrics.externalExactFingerprint !== fingerprint) {
         state.metrics.externalExactChangedAt = Date.now();
@@ -376,10 +380,18 @@ $R94ExternalIngest = @'
     state.metrics.externalUpdatedAt = updatedAt;
 
     try { refreshUi(); } catch {}
-    return true;
+    return !!exact || legacyHit;
   }
 '@
 $Patched = Replace-BlockRequired $Patched '  function ingestExternalUsage(envelope) {' '  state.refresh = refreshUi;' $R94ExternalIngest 'r94 turn-aware local JSONL ingestion'
+
+$R94IngestExport = @'
+  state.ingestExternalUsage = ingestExternalUsage; // R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME
+  state.refresh = refreshUi;
+'@
+if (-not $Patched.Contains('R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME')) {
+    $Patched = Replace-Required $Patched '  state.refresh = refreshUi;' $R94IngestExport 'r94 exact usage ingest runtime export'
+}
 
 $R94PaneOwnership = @'
   function paneTelemetryOwnership(threadId) {
@@ -412,18 +424,21 @@ $R94StatusHtml = @'
     const activity = hasOwnedUsage
       ? paneActivityState(bar)
       : (ownership.awaiting ? 'waiting' : 'unowned');
+    // R94_STATUS_TRUTH_SEMANTICS_RUNTIME
+    // "BUSY" means pane-local task activity (stop/busy UI evidence), not proof
+    // that the model is decoding tokens at this instant.
     const stateLabel = hasOwnedUsage
-      ? activity.toUpperCase()
+      ? (activity === 'live' ? 'BUSY' : activity.toUpperCase())
       : (ownership.awaiting ? 'WAITING' : 'UNOWNED');
     const stateTitle = turnExact
       ? ('Exact turn-scoped capability for turn ' + String(turnRecord.turnId || '') +
          '. Usage is keyed by threadId + turnId; activity still requires pane-local UI evidence.')
       : (threadExact
         ? (activity === 'live'
-          ? 'LIVE is backed by pane-scoped stop/busy UI evidence. Counts are the last exact thread snapshot while no exact turn capability is available.'
+          ? 'BUSY means the pane has active task UI evidence (stop/busy). It does not claim the model is currently decoding. Counts are the last exact thread snapshot while no exact turn capability is available.'
           : 'Exact thread snapshot fallback; no cross-pane/global Usage borrowing.')
         : (nativeFallback
-          ? 'Native active single-pane fallback: ctx/cache/tok-s/total mirror the currently visible Codex Usage panel. Latest-request in/out remain blank until exact JSONL ownership arrives.'
+          ? 'Native active single-pane fallback: ctx/cache/session mirror the currently visible Codex Usage panel. Latest-request in/out and pane tok/s remain unavailable until stronger ownership/timing evidence arrives.'
           : (ownership.awaiting
             ? 'WAITING: current pane thread is known, but exact JSONL usage is not available and no safe single-pane native fallback is eligible.'
             : 'UNOWNED: no exact turn/thread usage can be safely attributed to this pane.')));
@@ -443,16 +458,19 @@ $R94StatusHtml = @'
     const input = exact && Number.isFinite(exact.inputTokens) ? ('in ' + shortNumber(exact.inputTokens)) : 'in --';
     const output = exact && Number.isFinite(exact.outputTokens) ? ('out ' + shortNumber(exact.outputTokens)) : 'out --';
     const cache = displayUsage && Number.isFinite(displayUsage.cacheHitPercent) ? ('cache ' + displayUsage.cacheHitPercent.toFixed(1) + '%') : 'cache --';
-    const total = displayUsage && Number.isFinite(displayUsage.sessionTotalTokens) ? ('total ' + shortNumber(displayUsage.sessionTotalTokens)) : 'total --';
+    const session = displayUsage && Number.isFinite(displayUsage.sessionTotalTokens) ? ('session ' + shortNumber(displayUsage.sessionTotalTokens)) : 'session --';
     const speedOwnership = turnExact
       ? Object.assign({}, ownership, { owned: true, awaiting: false, exact: turnExact })
       : ownership;
-    const speed = nativeFallback && Number.isFinite(nativeFallback.nativeSpeed)
+    // R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME
+    // Codex native tok/s may be global, stale between polls, or cover a
+    // different model-response interval. Never relabel it as pane-local speed.
+    const speed = nativeFallback
       ? {
-          text: nativeFallback.nativeSpeed.toFixed(1) + ' tok/s',
-          source: 'native-active-single-pane',
-          confidence: 'native-visible',
-          title: 'Visible Codex Usage tok/s mirrored only because exactly one active pane is present; exact pane-local JSONL timing remains preferred when available.',
+          text: '-- tok/s',
+          source: 'timing-unavailable',
+          confidence: 'unavailable',
+          title: 'Unavailable: visible native Codex tok/s is intentionally not re-attributed to this pane. A pane-local rate needs a matched response token delta and model-only timing interval.',
         }
       : paneSpeedPresentation(speedOwnership, activity);
     const exactSource = turnExact
@@ -462,11 +480,11 @@ $R94StatusHtml = @'
       ? (turnExact ? 'exact-turn' : 'exact-snapshot')
       : (nativeFallback ? 'native-visible' : 'unavailable');
     const exactTitle = turnExact
-      ? 'Exact recent-turn usage keyed by threadId + turnId. total is cumulative session usage; ctx/in/out/cache are from this turn usage payload.'
+      ? 'Exact Codex-reported snapshot keyed by threadId + turnId: ctx uses last_token_usage.total_tokens / model_context_window; in/out are the latest model request; cache is cached_input/input; session is cumulative total_token_usage.total_tokens.'
       : (threadExact
-        ? 'Exact thread snapshot fallback from local Codex session JSONL. It is used only when no newer turn identity is present.'
+        ? 'Exact Codex rollout snapshot for this thread. ctx is current last_token_usage.total_tokens; in/out are the latest model request, not whole-turn totals; session is cumulative and can greatly exceed the context window.'
         : (nativeFallback
-          ? 'Visible Codex Usage fallback for the one active pane. ctx/cache/tok-s/total are native UI values; in/out intentionally stay unavailable until exact JSONL ownership arrives.'
+          ? 'Visible Codex Usage fallback for exactly one active pane. ctx/cache/session mirror native UI snapshots; in/out and pane tok/s intentionally remain unavailable rather than being guessed.'
           : 'Unavailable: no exact pane-owned usage source.'));
 
     const metrics = [
@@ -482,7 +500,7 @@ $R94StatusHtml = @'
       metricChip(output, exactSource, exactConfidence, exactTitle, ''),
       metricChip(cache, exactSource, exactConfidence, exactTitle, 'cas-status-secondary'),
       metricChip(speed.text, speed.source, speed.confidence, speed.title, ''),
-      metricChip(total, exactSource, exactConfidence, exactTitle, 'cas-status-tertiary'),
+      metricChip(session, exactSource, exactConfidence, exactTitle, 'cas-status-tertiary'),
     ].join('');
 
     return '<div class="cas-status-metrics-row" data-cas-pane-live-state="' + stateLabel.toLowerCase() + '">' + metrics + '</div>' +
@@ -560,6 +578,13 @@ foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
     'R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME',
     'R94_NATIVE_ACTIVE_SINGLE_PANE_FALLBACK_RUNTIME',
+    'R94_EXACT_USAGE_DIRECT_DECODE_RUNTIME',
+    'R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME',
+    'R94_STATUS_TRUTH_SEMANTICS_RUNTIME',
+    'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
+    'state.ingestExternalUsage = ingestExternalUsage',
+    'contextTokens',
+    "('session ' + shortNumber(displayUsage.sessionTotalTokens))",
     'native-active-single-pane',
     'r94ExternalExactByThread',
     'r94StoreExternalExact(exact);',

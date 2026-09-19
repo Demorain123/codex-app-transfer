@@ -321,13 +321,14 @@ $R94ConsumeText = @'
       if (!line || line === '[DONE]') continue;
       const isToken = /token_count|last_token_usage|total_token_usage|model_context_window|thread\/tokenUsage\/updated|thread_token_usage_updated|usage/i.test(line);
       const isLifecycle = /turn\/(?:started|completed)|turn_(?:started|completed)|task_(?:started|complete)/i.test(line);
-      if (!isToken && !isLifecycle) continue;
+      const isItemLifecycle = /item\/(?:started|completed)|item_(?:started|completed)/i.test(line);
+      if (!isToken && !isLifecycle && !isItemLifecycle) continue;
 
       let parsed = null;
       try { parsed = JSON.parse(line); } catch { parsed = null; }
       if (!parsed) continue;
 
-      if (isLifecycle || /thread\/tokenUsage\/updated|thread_token_usage_updated/i.test(line)) {
+      if (isLifecycle || isItemLifecycle || /thread\/tokenUsage\/updated|thread_token_usage_updated/i.test(line)) {
         try {
           const capability = window.__casR94TurnCapability;
           if (capability && typeof capability.ingestNotification === 'function') {
@@ -354,6 +355,7 @@ foreach ($Marker in @(
     "typeof capability.ingestNotification !== 'function'",
     'thread\/tokenUsage\/updated',
     'turn\/(?:started|completed)',
+    'item\/(?:started|completed)',
     'task_(?:started|complete)'
 )) {
     if (-not $Patched.Contains($Marker)) {
@@ -374,6 +376,7 @@ if ($R94TurnStatusOwner -eq 'pane') {
     throw 'r94 pane turn-status owner was not resolved'
 }
 
+Write-Host 'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS' -ForegroundColor Green
 Write-Host 'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS' -ForegroundColor Green
 Write-Host 'R94_LOCAL_ROLLOUT_TURN_BRIDGE_PASS' -ForegroundColor Green
 Write-Host 'R94_TURN_SCOPED_STATUS_PASS' -ForegroundColor Green

@@ -322,8 +322,10 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'unsafe=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'editorLeak=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEGMode=' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'Timeline=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'TL entries/markers=' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
 )
 foreach ($Contract in $RuntimeDebugContracts) {

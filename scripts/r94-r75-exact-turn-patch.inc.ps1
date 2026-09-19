@@ -234,10 +234,10 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
         'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',
         'R94_LEGACY_TIMESTAMP_STAMP_DISABLED',
         'function installOutputObserver() {',
-        'function r94CollectVisualSegments(node, root, depth) {',
+        'R94_SEMANTIC_OUTPUT_UNIT_RUNTIME',
         'function r94AssistantMessageSurface(node) {',
         'function r94IsUserSurface(node) {',
-        'host-first-observed-live-output',
+        'R94_ITEM_EXACT_TIMESTAMP_RUNTIME',
         'r94BaselineCurrentSegments();',
         'new IntersectionObserver(function(entries) {',
         'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
@@ -365,7 +365,7 @@ foreach ($Marker in @(
     'window.__casR94TurnCapability = capability;',
     'function r94AssistantMessageSurface(node) {',
     'function r94IsUserSurface(node) {',
-    'host-first-observed-live-output',
+    'R94_ITEM_EXACT_TIMESTAMP_RUNTIME',
     'r94BaselineCurrentSegments();'
 )) {
     if (-not $R94FinalObserverProbe.Contains($Marker)) {

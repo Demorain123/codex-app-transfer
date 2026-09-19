@@ -569,6 +569,8 @@ foreach ($Marker in @(
     'custom-provider-policy-preserved',
     'built-in-openai-id-collision',
     'provider-id-requires-quoted-toml-key',
+    'nested-provider-policy-not-portable',
+    'CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY',
     'wire-api-not-responses',
     'relay-auth-path-not-openai-auth',
     'endpoint-coupled-provider-policy',
@@ -581,6 +583,7 @@ foreach ($Marker in @(
     'r94_1_provider_policy_truth_reads_custom_provider_fields',
     'r94_1_provider_policy_reader_accepts_plain_header_comment',
     'r94_1_quoted_provider_table_fails_closed_before_mutation',
+    'r94_1_nested_provider_policy_fails_closed_before_mutation',
     'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
     'r94_1_restore_preserves_post_apply_user_endpoint_edit',
     'r94_1_policy_with_non_openai_auth_fails_before_routing_mutation',
@@ -631,7 +634,8 @@ Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_PREFLIGHT_PASS' -ForegroundColor
 Write-Host '  - provider behavior fields remain on the active source provider; Transfer rewrites only the provider endpoint needed for relay routing'
 Write-Host '  - identity-only providers still normalize to built-in openai, preserving the common r94 Desktop/history path'
 Write-Host '  - provider id matching is case-sensitive: custom OpenAi is preserved, exact built-in openai collision fails closed'
-Write-Host '  - quoted provider table rewrites and endpoint-coupled auth policies fail before routing mutation instead of generating duplicate TOML'
+Write-Host '  - quoted/nested provider tables and endpoint-coupled auth policies fail before routing mutation instead of claiming partial semantic preservation'
+Write-Host '  - ChatGPT-auth + custom-provider preview emits an explicit first-turn relay canary requirement; config success alone is not treated as transport proof'
 Write-Host '  - provider endpoint restore is symmetric and only reverts an endpoint still proven to be Transfer-owned'
 Write-Host '  - post-apply user endpoint edits win over snapshot restoration'
 Write-Host '  - provider policy is never faked by moving values to unsupported TOML root keys'

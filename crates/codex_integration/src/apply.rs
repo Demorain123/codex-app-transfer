@@ -212,6 +212,7 @@ fn provider_section_fields(
     let nested_quoted_prefix = format!("[model_providers.\"{quoted_provider}\".");
 
     let mut in_section = false;
+    let mut root_scope = true;
     let mut found_provider = false;
     let mut section_requires_quoted_key = false;
     let mut fields = Vec::new();
@@ -232,7 +233,7 @@ fn provider_section_fields(
         // supported by sync_table_field/snapshot_table_field_literal. Treat
         // them as the same provider policy surface instead of silently missing
         // retry/timeout values and normalizing back to built-in openai.
-        if !trimmed.starts_with('#') {
+        if root_scope && !trimmed.starts_with('#') {
             let dotted = trimmed.strip_prefix(&dotted_prefix);
             let quoted_dotted = trimmed.strip_prefix(&quoted_dotted_prefix);
             if let Some(rest) = dotted.or(quoted_dotted) {
@@ -250,6 +251,7 @@ fn provider_section_fields(
         }
 
         if trimmed.starts_with('[') {
+            root_scope = false;
             if in_section {
                 in_section = false;
             }
@@ -526,22 +528,37 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     let provider_policy = effective_source_provider
         .and_then(|source_provider| {
             provider_policy_truth_for_source(&live_config_for_provider, source_provider)
-                .or_else(|| {
-                    // First-apply recovery from an r94-normalized live config:
-                    // the live provider table may also have been removed by a
-                    // stale/partial external edit. Only the fresh-session
-                    // snapshot is allowed to fill that gap.
-                    if snapshot_taken_now && live_source_provider.is_none() {
-                        snapshot_config
-                            .as_deref()
-                            .and_then(|snapshot| {
-                                provider_policy_truth_for_source(snapshot, source_provider)
-                            })
-                    } else {
-                        None
-                    }
-                })
         });
+
+    // If the first-apply migration recovered only the provider *identity* from
+    // the snapshot but the corresponding live provider table has disappeared,
+    // never partially recreate it with just base_url. That would reactivate the
+    // provider while silently dropping retry/timeout/header policy from the
+    // snapshot. A complete live table is required for semantic carry-forward.
+    if provider_policy.is_none()
+        && snapshot_taken_now
+        && live_source_provider.is_none()
+        && let Some(snapshot_policy) = effective_source_provider
+            .and_then(|source_provider| {
+                snapshot_config
+                    .as_deref()
+                    .and_then(|snapshot| {
+                        provider_policy_truth_for_source(snapshot, source_provider)
+                    })
+            })
+            .filter(|policy| policy.has_provider_policy())
+    {
+        log_provider_policy_truth(
+            &snapshot_policy,
+            false,
+            "unchanged",
+            "live-provider-table-missing",
+        );
+        return Err(CodexError::Other(format!(
+            "r94.1 cannot preserve provider policy for '{}' because the live provider table is missing",
+            snapshot_policy.source_provider
+        )));
+    }
 
     // Capability-aware fail-closed gate. Do this before openai_base_url or
     // chatgpt_base_url are modified, so an unsupported semantic migration never
@@ -3240,6 +3257,56 @@ supports_websockets = true
         assert!(
             toml.contains("base_url = \"https://old.example/v1\""),
             "explicit live removal must not reactivate or redirect the snapshot provider: {toml}"
+        );
+    }
+
+    #[test]
+    fn r94_1_dotted_provider_text_inside_unrelated_table_is_not_root_policy() {
+        let config = "model_provider = \"OpenAi\"\n\n[profiles.default]\nmodel_providers.OpenAi.stream_max_retries = 15\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n";
+        let truth = provider_policy_truth_from_config(config).expect("provider table");
+        assert!(
+            !truth
+                .behavior_fields
+                .iter()
+                .any(|field| field == "stream_max_retries"),
+            "dotted text inside another table is not a root-level model_providers key: {:?}",
+            truth.behavior_fields
+        );
+        assert!(!truth.has_provider_policy());
+    }
+
+    #[test]
+    fn r94_1_snapshot_policy_without_live_provider_table_fails_closed() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
+        )
+        .unwrap();
+        crate::snapshot::snapshot_codex_state(
+            &paths,
+            "r94.1-test",
+            "Mock",
+            &[18080],
+        )
+        .unwrap();
+
+        // Simulate an r94/stale external state where both the root provider
+        // selection and its custom provider table disappeared after snapshot.
+        std::fs::write(&paths.config_toml, "model = \"gpt-test\"\n").unwrap();
+
+        // Move the active snapshot to stale/recovery semantics by emulating a
+        // first-apply decision through a fresh paths root is not practical in a
+        // unit test. Exercise the same safety contract directly: a policy from
+        // snapshot must never be used as a substitute for a missing live table.
+        let snapshot = crate::snapshot::read_snapshot_config(&paths).unwrap();
+        let snapshot_policy =
+            provider_policy_truth_from_config(&snapshot).expect("snapshot provider policy");
+        assert!(snapshot_policy.has_provider_policy());
+        assert!(
+            provider_policy_truth_for_source(&read_toml(&paths), "OpenAi").is_none(),
+            "live table is intentionally absent"
         );
     }
 

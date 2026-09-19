@@ -1111,7 +1111,7 @@
         }
       }
       if (!Number.isFinite(target) && Number.isFinite(entry.ratio)) {
-        target = entry.ratio * Math.max(0, metrics.scrollHeight - metrics.clientHeight);
+        target = entry.ratio * metrics.scrollHeight - Math.max(12, metrics.clientHeight * 0.18);
       }
       if (!Number.isFinite(target)) return;
       target = Math.max(0, Math.min(Math.max(0, metrics.scrollHeight - metrics.clientHeight), target));

@@ -255,6 +255,9 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
 # replacement would accidentally delete the pane/status owner. Prefer the
 # injected pane-runtime marker when present, and fall back only for isolated
 # timestamp-owner preflights that do not include r89.
+$R94HadPaneRuntimePatch =
+    $PatchedR75.Contains('# R94_PANE_RUNTIME_PATCH') -or
+    $PatchedR75.Contains('# R89_PANE_RUNTIME_PATCH')
 $R94ProfileEndMarker = if ($PatchedR75.Contains('# R94_PANE_RUNTIME_PATCH')) {
     '# R94_PANE_RUNTIME_PATCH'
 } elseif ($PatchedR75.Contains('# R89_PANE_RUNTIME_PATCH')) {
@@ -263,10 +266,12 @@ $R94ProfileEndMarker = if ($PatchedR75.Contains('# R94_PANE_RUNTIME_PATCH')) {
     '# r75 is deliberately a tiny local finalizer layered on r74.'
 }
 $PatchedR75 = Replace-R94BlockRequired $PatchedR75 'function Assert-GeneratedTimestampProfile([string]$Text) {' $R94ProfileEndMarker $R94ProfileFunction 'replace r75 timestamp profile validator without deleting pane runtime owner'
-if (-not $PatchedR75.Contains('PANE_RUNTIME_PATCH')) {
+if ($R94HadPaneRuntimePatch -and -not $PatchedR75.Contains('PANE_RUNTIME_PATCH')) {
     throw 'r94 exact timestamp owner replacement lost the inherited pane runtime patch'
 }
-Write-Host 'R94_PANE_RUNTIME_PRESERVED_ACROSS_EXACT_OWNER_PASS' -ForegroundColor Green
+if ($R94HadPaneRuntimePatch) {
+    Write-Host 'R94_PANE_RUNTIME_PRESERVED_ACROSS_EXACT_OWNER_PASS' -ForegroundColor Green
+}
 
 # Replace r75 fallback materialization sources as well. The real r86/r78 owner
 # is already replaced above; this also makes -PreflightOnly simulate the same

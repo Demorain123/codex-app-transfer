@@ -415,13 +415,13 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     if preserve_external_model_catalog {
         // CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY
         //
-        // The external catalog owns per-model context metadata. Do not leave a
-        // Transfer-injected global 1M override above it. Restore only the
-        // snapshot-owned root value:
-        // - user explicitly had model_context_window -> preserve that literal;
-        // - user did not have it -> remove Transfer's stale override;
-        // - snapshot unexpectedly unreadable -> fail closed by leaving live
-        //   config untouched rather than guessing/deleting user state.
+        // The external catalog owns per-model context metadata, but r94.1
+        // must not infer ownership from "snapshot value missing" alone:
+        // - snapshot explicitly owns model_context_window -> restore it;
+        // - current migration has high-precision Transfer bundle evidence ->
+        //   remove the proven Transfer-owned root override;
+        // - otherwise preserve the live value (it may be a post-snapshot user
+        //   edit). Snapshot/read ambiguity always fails closed, never deletes.
         if let Some(snapshot_config) = snapshot_config.as_deref() {
             let original_window =
                 snapshot_toml_value_literal(snapshot_config, "model_context_window");

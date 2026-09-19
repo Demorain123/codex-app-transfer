@@ -1920,6 +1920,7 @@
       window.removeEventListener('scroll', r94SchedulePosition, true);
       document.removeEventListener('visibilitychange', r94HandleVisibility);
       window.removeEventListener('cas-r94-turn-capability-update', r94HandleCapabilityUpdate);
+      window.removeEventListener('cas-r94-item-capability-update', r94HandleCapabilityUpdate);
       pendingRoots.clear();
       pendingSegmentTurns.clear();
       observedTurns.clear();
@@ -1947,6 +1948,7 @@
     window.addEventListener('scroll', r94SchedulePosition, { passive: true, capture: true });
     document.addEventListener('visibilitychange', r94HandleVisibility);
     window.addEventListener('cas-r94-turn-capability-update', r94HandleCapabilityUpdate);
+    window.addEventListener('cas-r94-item-capability-update', r94HandleCapabilityUpdate);
 
     r94BaselineCurrentSegments();
     r94StartMutationObservation();

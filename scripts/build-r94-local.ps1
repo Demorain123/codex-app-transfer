@@ -177,6 +177,8 @@ foreach ($Marker in @(
     'stale_listener_identity_changed',
     'fixed_port_released',
     'mcp-exit-guard-r32.ps1',
+    '$targetPid={guard_pid}',
+    'concat!(',
     '保持原端口不变'
 )) {
     if (-not $R94StaleExitGuardRecoveryText.Contains($Marker)) {
@@ -187,7 +189,8 @@ foreach ($Forbidden in @(
     'taskkill /T',
     'taskkill /IM',
     'Stop-Process -Name',
-    'Get-Process | Stop-Process'
+    'Get-Process | Stop-Process',
+    '$pid={guard_pid}'
 )) {
     if ($R94StaleExitGuardRecoveryText.Contains($Forbidden)) {
         throw "r94 stale Exit Guard repair source contains forbidden broad cleanup: $Forbidden"

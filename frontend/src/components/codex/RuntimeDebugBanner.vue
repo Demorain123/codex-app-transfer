@@ -9,9 +9,9 @@ import { useSettingsStore } from '@/stores/settings'
 // Visible only when settings.runtimeDebugMode=true. The goal is screenshot-grade
 // identity evidence: Transfer package revision + current Codex PID relationship +
 // the last No Lagging renderer runtime that was actually armed.
-const DEBUG_PROTOCOL = 'DBG94-1'
-const EXPECTED_TRANSFER_REVISION = 'r94'
-const EXPECTED_TRANSFER_VERSION = '2.4.5+94'
+const DEBUG_PROTOCOL = 'DBG94.1-1'
+const EXPECTED_TRANSFER_REVISION = 'r94.1'
+const EXPECTED_TRANSFER_VERSION = '2.4.5+94.1'
 
 const store = useSettingsStore()
 const backendVersion = ref('')
@@ -137,7 +137,7 @@ onBeforeUnmount(stopPolling)
     v-if="enabled"
     class="runtime-debug-banner"
     :data-state="debugState"
-    data-cas-runtime-debug="DBG94-1"
+    data-cas-runtime-debug="DBG94.1-1"
   >
     <div class="runtime-debug-banner__headline">
       <strong>DEBUG · {{ headline }}</strong>

@@ -236,6 +236,7 @@ foreach ($Forbidden in @(
 }
 
 Write-Host 'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS' -ForegroundColor Green
+Write-Host 'R94_COMPOSER_INLINE_MOUNT_V2_PASS' -ForegroundColor Green
 Write-Host 'R94_NATIVE_USAGE_SCAN_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_NO_STATUS_VIEWPORT_TRACKING_PASS' -ForegroundColor Green

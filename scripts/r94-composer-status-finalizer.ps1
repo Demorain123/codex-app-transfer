@@ -40,9 +40,10 @@ $R94ComposerSurfaceCompat = @'
     const current = window.__casR94ComposerStatusDiagnostics;
     if (current && typeof current === 'object') return current;
     const created = {
-      protocol: 'R94_COMPOSER_MOUNT_V2',
+      protocol: 'R94_COMPOSER_MOUNT_V3',
       attempts: 0,
       mounted: 0,
+      unsafeRejects: 0,
       lastReason: 'init',
       surface: '',
       anchor: '',
@@ -63,40 +64,99 @@ $R94ComposerSurfaceCompat = @'
     return null;
   }
 
-  function r94NearestComposerSurface(editable) {
-    if (!(editable instanceof Element)) return null;
-    // Do not use [data-thread-find-composer] as the final rounded surface: on
-    // current Codex it can be a larger locator wrapper around the real input.
-    const selector = '.composer-surface-chrome,[data-codex-composer="true"],[data-codex-composer-root],[data-testid*="composer"],form';
-    const nearest = editable.closest(selector);
-    if (nearest instanceof Element && isVisible(nearest)) return nearest;
+  function r94DirectChildOf(parent, node) {
+    if (!(parent instanceof Element) || !(node instanceof Element) || !parent.contains(node) || parent === node) return null;
+    let current = node;
+    while (current.parentElement instanceof Element && current.parentElement !== parent) {
+      current = current.parentElement;
+    }
+    return current.parentElement === parent ? current : null;
+  }
 
+  function r94UnsafeEditorBoundary(node) {
+    if (!(node instanceof Element)) return true;
+    const editorSelector = '.ProseMirror,[contenteditable="true"],[role="textbox"],textarea,input';
+    if (node.matches(editorSelector)) return true;
+    return !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]');
+  }
+
+  function r94VisibleControlOutsideEditor(surface, editable) {
+    if (!(surface instanceof Element)) return false;
+    const selector = '.composer-footer,[data-codex-intelligence-trigger="true"],button,[role="button"],[aria-haspopup]';
+    for (const node of surface.querySelectorAll(selector)) {
+      if (!(node instanceof Element) || !isVisible(node)) continue;
+      if (editable instanceof Element && (node === editable || editable.contains(node))) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function r94SafeComposerSurface(editable) {
+    // R94_EDITOR_BOUNDARY_GUARD_RUNTIME
+    // Never use the ProseMirror/contenteditable tree itself as a mount host.
+    // Walk outward until a small composer shell is found that contains both the
+    // editor and independent composer controls/footer evidence.
+    if (!(editable instanceof Element) || !editable.isConnected) return null;
+    const stableSelector = '.composer-surface-chrome,[data-codex-composer="true"],[data-codex-composer-root],[data-testid*="composer"],form';
+    const candidates = [];
     let current = editable.parentElement;
-    for (let depth = 0; depth < 6 && current; depth += 1) {
-      if (isVisible(current)) {
-        const rect = current.getBoundingClientRect();
-        if (rect.width >= 260 && rect.height >= 48 && rect.height <= 360) return current;
+    for (let depth = 0; depth < 10 && current && current !== document.body; depth += 1) {
+      if (!(current instanceof Element)) break;
+      if (!current.contains(editable) || r94UnsafeEditorBoundary(current)) {
+        current = current.parentElement;
+        continue;
+      }
+      let rect = null;
+      try { rect = current.getBoundingClientRect(); } catch {}
+      if (!rect || rect.width < 260 || rect.height < 48 || rect.height > Math.min(560, innerHeight * 0.65)) {
+        current = current.parentElement;
+        continue;
+      }
+      const before = r94DirectChildOf(current, editable);
+      if (!(before instanceof Element)) {
+        current = current.parentElement;
+        continue;
+      }
+      const semantic = current.matches(stableSelector);
+      const controls = r94VisibleControlOutsideEditor(current, editable);
+      const footer = !!current.querySelector('.composer-footer');
+      const modelTrigger = !!current.querySelector('[data-codex-intelligence-trigger="true"]');
+      const score = (semantic ? 8 : 0) + (footer ? 8 : 0) + (modelTrigger ? 6 : 0) + (controls ? 4 : 0) - depth * 0.1;
+      if (semantic || controls || footer || modelTrigger) {
+        candidates.push({ node: current, before, score });
       }
       current = current.parentElement;
     }
-    return editable.parentElement instanceof Element ? editable.parentElement : null;
+    if (!candidates.length) return null;
+    candidates.sort(function(a,b) { return b.score - a.score; });
+    return candidates[0];
+  }
+
+  function r94DescribeMountNode(node) {
+    if (!(node instanceof Element)) return '';
+    const className = typeof node.className === 'string'
+      ? node.className.trim().split(/\s+/).slice(0,2).join('.')
+      : '';
+    return String(node.tagName || '').toLowerCase() +
+      (node.id ? ('#' + node.id) : '') +
+      (node.getAttribute('data-testid') ? ('[data-testid=' + node.getAttribute('data-testid') + ']') : '') +
+      (className ? ('.' + className) : '');
+  }
+
+  function r94RemoveUnsafeStatusNodes() {
+    document.querySelectorAll('#' + STATUS_ID + ',[' + PANE_STATUS_ATTR + '=true]').forEach(function(node) {
+      if (!(node instanceof Element)) return;
+      const editor = node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]');
+      if (editor instanceof Element) node.remove();
+    });
   }
 
   function r93ComposerSurfaceFor(composer) {
     // R94_COMPOSER_SURFACE_COMPAT_RUNTIME
-    // Prefer the visible editor and its nearest semantic ancestor. This mirrors
-    // the robust inline-mount strategy used by current Codex UI extensions:
-    // discover from a stable interactive child instead of trusting the first
-    // globally-matched composer-ish wrapper.
     const scopedEditable = r94VisibleComposerEditable(composer instanceof Element ? composer : null);
-    const globalEditable = scopedEditable || r94VisibleComposerEditable(null);
-    const fromEditable = r94NearestComposerSurface(globalEditable);
-    if (fromEditable instanceof Element) return fromEditable;
-
-    if (!(composer instanceof Element)) return null;
-    const nested = composer.querySelector('.composer-surface-chrome,[data-codex-composer="true"],[data-codex-composer-root],[data-testid*="composer"],form');
-    if (nested instanceof Element && isVisible(nested)) return nested;
-    return isVisible(composer) ? composer : null;
+    const editable = scopedEditable || r94VisibleComposerEditable(null);
+    const mount = r94SafeComposerSurface(editable);
+    return mount && mount.node instanceof Element ? mount.node : null;
   }
 
 '@
@@ -131,57 +191,104 @@ if ($Patched.Contains('  function paneForComposer(composer) {')) {
 $R94ComposerMountCompat = @'
   function r93MountStatusBar(bar, composer) {
     // R94_COMPOSER_INLINE_MOUNT_RUNTIME
+    // R94_COMPOSER_FAIL_CLOSED_MOUNT_RUNTIME
     if (!(bar instanceof Element)) return false;
     const diagnostics = r94ComposerStatusDiagnostics();
     diagnostics.attempts += 1;
+    r94RemoveUnsafeStatusNodes();
 
-    const surface = r93ComposerSurfaceFor(composer);
-    if (!(surface instanceof Element) || !surface.isConnected) {
-      diagnostics.lastReason = 'no-surface';
+    const editable = r94VisibleComposerEditable(composer instanceof Element ? composer : null) ||
+      r94VisibleComposerEditable(null);
+    const mount = r94SafeComposerSurface(editable);
+    const surface = mount && mount.node instanceof Element ? mount.node : null;
+    const before = mount && mount.before instanceof Element ? mount.before : null;
+
+    if (!(editable instanceof Element) || !(surface instanceof Element) || !(before instanceof Element) ||
+        !surface.isConnected || !surface.contains(editable) || r94UnsafeEditorBoundary(surface)) {
+      diagnostics.unsafeRejects += 1;
+      diagnostics.lastReason = 'no-safe-surface';
+      diagnostics.surface = r94DescribeMountNode(surface);
+      diagnostics.anchor = r94DescribeMountNode(before);
+      if (bar.isConnected) bar.remove();
       return false;
     }
 
-    const editable = r94VisibleComposerEditable(surface) || r94VisibleComposerEditable(null);
-    let before = null;
-    if (editable instanceof Element && surface.contains(editable)) {
-      before = editable;
-      while (before.parentElement instanceof Element && before.parentElement !== surface) {
-        before = before.parentElement;
-      }
-      if (before.parentElement !== surface) before = null;
-    }
-    if (!(before instanceof Element)) {
-      before =
-        surface.querySelector('.composer-input-wrap') ||
-        surface.querySelector('.ProseMirror,[role="textbox"],textarea')?.parentElement ||
-        surface.firstElementChild;
+    // The bar must be a sibling of the editor branch, never a child of the
+    // ProseMirror/contenteditable subtree. This is the hard guard that prevents
+    // telemetry HTML from becoming draft/prompt text.
+    if (editable === surface || editable.contains(surface) || editable.contains(before) ||
+        before === surface || before.parentElement !== surface) {
+      diagnostics.unsafeRejects += 1;
+      diagnostics.lastReason = 'unsafe-editor-branch';
+      diagnostics.surface = r94DescribeMountNode(surface);
+      diagnostics.anchor = r94DescribeMountNode(before);
+      if (bar.isConnected) bar.remove();
+      return false;
     }
 
     try {
-      if (before instanceof Element) {
-        if (bar.parentElement !== surface || bar.nextElementSibling !== before) {
-          surface.insertBefore(bar, before);
-        }
-      } else if (bar.parentElement !== surface) {
-        surface.prepend(bar);
+      bar.setAttribute('contenteditable','false');
+      bar.setAttribute('data-cas-status-inside-composer','true');
+      bar.setAttribute('data-cas-status-owner','r94-inline-safe');
+      if (bar.parentElement !== surface || bar.nextElementSibling !== before) {
+        surface.insertBefore(bar, before);
       }
     } catch {
       diagnostics.lastReason = 'insert-failed';
+      if (bar.isConnected) bar.remove();
       return false;
     }
 
-    bar.setAttribute('data-cas-status-inside-composer','true');
-    bar.setAttribute('data-cas-status-owner','r94-inline');
+    const escapedIntoEditor = bar.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]');
+    if (escapedIntoEditor instanceof Element) {
+      diagnostics.unsafeRejects += 1;
+      diagnostics.lastReason = 'post-insert-editor-boundary';
+      bar.remove();
+      return false;
+    }
+
     diagnostics.mounted += 1;
-    diagnostics.lastReason = 'mounted';
-    diagnostics.surface = String(surface.tagName || '').toLowerCase() +
-      (surface.id ? ('#' + surface.id) : '') +
-      (surface.getAttribute('data-testid') ? ('[data-testid=' + surface.getAttribute('data-testid') + ']') : '');
-    diagnostics.anchor = before instanceof Element ? String(before.tagName || '').toLowerCase() : 'prepend';
+    diagnostics.lastReason = 'mounted-safe';
+    diagnostics.surface = r94DescribeMountNode(surface);
+    diagnostics.anchor = r94DescribeMountNode(before);
     return true;
   }
 '@
-$Patched = Replace-BlockRequired $Patched '  function r93MountStatusBar(bar, composer) {' '  function r93IntegratedStatusStyle() {' $R94ComposerMountCompat 'r94 current Codex inline status mount'
+$Patched = Replace-BlockRequired $Patched '  function r93MountStatusBar(bar, composer) {' '  function r93IntegratedStatusStyle() {' $R94ComposerMountCompat 'r94 safe current Codex inline status mount'
+
+# The inherited r93 fallback mounted a failed inline bar beside the composer.
+# r94 must fail closed instead: an unsafe/no-surface result means no bar.
+$R94PaneFallback = @'
+      if (!r93MountStatusBar(bar, composer)) {
+        if (bar.parentElement !== parent || bar.nextSibling !== composer) parent.insertBefore(bar, composer);
+      }
+'@
+$R94PaneFailClosed = @'
+      if (!r93MountStatusBar(bar, composer)) {
+        if (bar.isConnected) bar.remove();
+        return;
+      }
+'@
+if ($Patched.Contains($R94PaneFallback)) {
+    $Patched = $Patched.Replace($R94PaneFallback,$R94PaneFailClosed)
+}
+
+$R94BaseFallback = @'
+    if (!r93MountStatusBar(bar, composer) && composer.parentElement) {
+      if (bar.parentElement !== composer.parentElement || bar.nextSibling !== composer) {
+        composer.parentElement.insertBefore(bar, composer);
+      }
+    }
+'@
+$R94BaseFailClosed = @'
+    if (!r93MountStatusBar(bar, composer)) {
+      if (bar.isConnected) bar.remove();
+      return null;
+    }
+'@
+if ($Patched.Contains($R94BaseFallback)) {
+    $Patched = $Patched.Replace($R94BaseFallback,$R94BaseFailClosed)
+}
 
 $R94NoNativeUsage = @'
   function readNativeUsage() {
@@ -214,8 +321,10 @@ foreach ($Marker in @(
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
     'R94_CURRENT_COMPOSER_ROOT_RUNTIME',
     'R94_COMPOSER_INLINE_MOUNT_RUNTIME',
-    'R94_COMPOSER_MOUNT_V2',
-    "bar.setAttribute('data-cas-status-owner','r94-inline');",
+    'R94_COMPOSER_MOUNT_V3',
+    'R94_EDITOR_BOUNDARY_GUARD_RUNTIME',
+    'R94_COMPOSER_FAIL_CLOSED_MOUNT_RUNTIME',
+    "bar.setAttribute('data-cas-status-owner','r94-inline-safe');",
     '[data-testid*="composer"]',
     'R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_RUNTIME'
@@ -236,7 +345,7 @@ foreach ($Forbidden in @(
 }
 
 Write-Host 'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS' -ForegroundColor Green
-Write-Host 'R94_COMPOSER_INLINE_MOUNT_V2_PASS' -ForegroundColor Green
+Write-Host 'R94_COMPOSER_INLINE_MOUNT_V3_EDITOR_SAFE_PASS' -ForegroundColor Green
 Write-Host 'R94_NATIVE_USAGE_SCAN_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_NO_STATUS_VIEWPORT_TRACKING_PASS' -ForegroundColor Green

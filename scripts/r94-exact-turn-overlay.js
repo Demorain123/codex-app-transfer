@@ -50,7 +50,7 @@
   function r94KnownPaneThreadIds() {
     const ids = [];
     const seen = new Set();
-    document.querySelectorAll('[data-cas-pane-statusbar="true"][data-cas-pane-thread-id]').forEach(function(bar) {
+    document.querySelectorAll('[data-cas-pane-statusbar="true"][data-cas-pane-thread-id],[data-cas-status-inside-composer="true"][data-cas-pane-thread-id]').forEach(function(bar) {
       const id = String(bar.getAttribute('data-cas-pane-thread-id') || '').replace(/^local:/i, '').trim().toLowerCase();
       if (!id || seen.has(id)) return;
       seen.add(id);
@@ -82,7 +82,7 @@
       if (typeof paneForNode === 'function') {
         const pane = paneForNode(element);
         if (pane instanceof Element) {
-          const bar = pane.querySelector('[data-cas-pane-statusbar="true"][data-cas-pane-thread-id]');
+          const bar = pane.querySelector('[data-cas-pane-statusbar="true"][data-cas-pane-thread-id],[data-cas-status-inside-composer="true"][data-cas-pane-thread-id]');
           const barId = String(bar && bar.getAttribute('data-cas-pane-thread-id') || '').replace(/^local:/i, '').trim().toLowerCase();
           if (barId) return barId;
 

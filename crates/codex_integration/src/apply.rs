@@ -250,12 +250,28 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     crate::auto_review_overlay::restore_source_if_overlay_active(paths)?;
 
     // 1. snapshot(幂等;已有快照不会覆盖)
+    // Capture the pre-apply residual ownership evidence before openai_base_url
+    // is rewritten below. r94.1 uses this only to distinguish a known Transfer
+    // bundle from an ambiguous/user-edited live context-window value.
     let snapshot_taken_now = !has_snapshot(paths);
+    let proxy_ports = [proxy_port_from_url(cfg.base_url), 18080];
+    let pre_apply_transfer_fields: std::collections::HashSet<String> =
+        match std::fs::read_to_string(&paths.config_toml) {
+            Ok(content) => crate::residual::signature_fields_to_strip(
+                &content,
+                &paths.model_catalog_json,
+                &proxy_ports,
+            )
+            .into_iter()
+            .collect(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
+            Err(e) => return Err(e.into()),
+        };
     snapshot_codex_state(
         paths,
         cfg.app_version,
         cfg.provider_name,
-        &[proxy_port_from_url(cfg.base_url), 18080],
+        &proxy_ports,
     )?;
 
     // Read the post-sanitization snapshot once. It is the ownership boundary:
@@ -409,21 +425,52 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         if let Some(snapshot_config) = snapshot_config.as_deref() {
             let original_window =
                 snapshot_toml_value_literal(snapshot_config, "model_context_window");
-            sync_root_value(
-                &paths.config_toml,
-                "model_context_window",
-                original_window.as_deref(),
-            )?;
-            tracing::info!(
-                target: "codex_integration::apply",
-                marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
-                snapshot_window = original_window.as_deref().unwrap_or("<unset>"),
-                "external model catalog is authoritative; root context window restored from snapshot ownership"
-            );
+            if let Some(original_window) = original_window.as_deref() {
+                // Explicit user-owned baseline wins.
+                sync_root_value(
+                    &paths.config_toml,
+                    "model_context_window",
+                    Some(original_window),
+                )?;
+                tracing::info!(
+                    target: "codex_integration::apply",
+                    marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
+                    snapshot_window = original_window,
+                    action = "restore-user-owned-root-window",
+                    "external catalog remains authoritative within the user's explicit root override"
+                );
+            } else if snapshot_taken_now
+                && pre_apply_transfer_fields.contains("model_context_window")
+            {
+                // The current apply just captured a live config that matched the
+                // existing high-precision Transfer proxy signature. Snapshot
+                // sanitization removed the bundle from the baseline, so the root
+                // context window is provably Transfer-owned for this migration.
+                sync_root_value(&paths.config_toml, "model_context_window", None)?;
+                tracing::info!(
+                    target: "codex_integration::apply",
+                    marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
+                    snapshot_window = "<unset>",
+                    action = "remove-proven-transfer-root-window",
+                    "external model catalog owns per-model context; proven Transfer root override removed"
+                );
+            } else {
+                // Snapshot absence by itself is not proof of ownership. A user
+                // may have edited the live config after the snapshot was taken.
+                // Preserve ambiguous live state instead of deleting it.
+                tracing::warn!(
+                    target: "codex_integration::apply",
+                    marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
+                    snapshot_window = "<unset>",
+                    action = "preserve-ambiguous-live-root-window",
+                    "root model_context_window ownership is ambiguous; leaving live value untouched"
+                );
+            }
         } else {
             tracing::warn!(
                 target: "codex_integration::apply",
                 marker = "CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY",
+                action = "preserve-ambiguous-live-root-window",
                 "snapshot config unavailable; leaving root model_context_window untouched to avoid destructive guessing"
             );
         }
@@ -2567,7 +2614,7 @@ supports_websockets = true
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\nopenai_base_url = \"http://127.0.0.1:18080\"\nmodel_context_window = 1000000\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nstream_max_retries = 15\n",
         )
         .unwrap();
 
@@ -2592,12 +2639,6 @@ supports_websockets = true
         let first = apply_provider(&paths, &cfg).unwrap();
         assert!(first.model_catalog_json_set);
         assert!(!first.model_context_window_set);
-        // Simulate a stale global value left by an older Transfer session while
-        // the original snapshot still proves that the user never owned it.
-        sync_root_value(&paths.config_toml, "model_context_window", Some("1000000")).unwrap();
-        let second = apply_provider(&paths, &cfg).unwrap();
-        assert!(!second.model_context_window_set);
-
         let toml = read_toml(&paths);
         assert!(toml.contains("model_catalog_json = \"V:/user/catalog.json\""));
         assert!(toml.contains("[model_providers.OpenAi]"));
@@ -2606,6 +2647,49 @@ supports_websockets = true
         assert!(
             !toml.contains("model_context_window ="),
             "external catalog must not inherit a Transfer-only global 1M override: {toml}"
+        );
+    }
+
+    #[test]
+    fn r94_1_external_catalog_preserves_ambiguous_post_snapshot_live_window() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_catalog_json = \"V:/user/catalog.json\"\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: true,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: true,
+        };
+
+        apply_provider(&paths, &cfg).unwrap();
+        // A user edit made while Transfer owns the session is not present in the
+        // original snapshot. Snapshot absence must not be treated as permission
+        // to delete this later live value.
+        sync_root_value(&paths.config_toml, "model_context_window", Some("300000")).unwrap();
+        let result = apply_provider(&paths, &cfg).unwrap();
+        assert!(!result.model_context_window_set);
+
+        let toml = read_toml(&paths);
+        assert!(
+            toml.contains("model_context_window = 300000"),
+            "ambiguous post-snapshot user edit must survive: {toml}"
         );
     }
 

@@ -1958,14 +1958,17 @@ mod tests {
         assert!(script.contains("__casR94TurnCapability"));
         assert!(script.contains("data-cas-status-inside-composer"));
         assert!(script.contains("cas-r94-timestamp-overlay"));
+        assert!(script.contains("cas-r94-timeline-rail"));
         assert!(script.contains("__casR94TimestampDiagnostics"));
         assert!(script.contains("__casR94ComposerStatusDiagnostics"));
         assert!(script.contains("mount="));
         assert!(script.contains("unsafe="));
         assert!(script.contains("editorLeak="));
         assert!(script.contains("SEGMode="));
+        assert!(script.contains("Timeline="));
         assert!(script.contains("TS obs/vis/badge/cache"));
         assert!(script.contains("SEG stamp/badge/cache"));
+        assert!(script.contains("TL entries/markers="));
         assert!(script.contains("launchMode"));
         assert!(!script.contains("__CAS_DEBUG_META__"));
     }

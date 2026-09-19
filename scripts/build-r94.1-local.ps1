@@ -14,11 +14,14 @@ $DebugBanner = Join-Path $RepoRoot 'frontend\src\components\codex\RuntimeDebugBa
 $ThemeInjector = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
 $OutputUiBuilder = Join-Path $PSScriptRoot 'build-r74-output-ui-local.ps1'
 $CodexRuntimeBuilder = Join-Path $PSScriptRoot 'build-r94.1-codex-runtime.ps1'
+$NoMicroRs = Join-Path $RepoRoot 'src-tauri\src\admin\services\desktop\no_micro.rs'
+$DesktopProcessRs = Join-Path $RepoRoot 'src-tauri\src\admin\services\desktop\process.rs'
+$NoMicroLauncher = Join-Path $RepoRoot 'src-tauri\resources\codex_no_micro_launcher.mjs'
 $CodexRuntimeExe = Join-Path $RepoRoot 'target\release\codex-r94.1-runtime.exe'
 $DeployDir = 'V:\Codex App Transfer'
 $DeployCodexRuntime = Join-Path $DeployDir 'codex-r94.1-runtime.exe'
 
-foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder,$CodexRuntimeBuilder)) {
+foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder,$CodexRuntimeBuilder,$NoMicroRs,$DesktopProcessRs,$NoMicroLauncher)) {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "r94.1 required source missing: $Path"
     }
@@ -29,6 +32,10 @@ $LockText = [System.IO.File]::ReadAllText($CargoLock)
 $DebugText = [System.IO.File]::ReadAllText($DebugBanner)
 $ThemeText = [System.IO.File]::ReadAllText($ThemeInjector)
 $OutputUiText = [System.IO.File]::ReadAllText($OutputUiBuilder)
+$CodexRuntimeBuilderText = [System.IO.File]::ReadAllText($CodexRuntimeBuilder)
+$NoMicroText = [System.IO.File]::ReadAllText($NoMicroRs)
+$DesktopProcessText = [System.IO.File]::ReadAllText($DesktopProcessRs)
+$NoMicroLauncherText = [System.IO.File]::ReadAllText($NoMicroLauncher)
 
 foreach ($Check in @(
     @{ Text = $CargoText; Marker = 'version = "2.4.5+94.1"' },
@@ -49,6 +56,33 @@ foreach ($Check in @(
 }
 
 Write-Host 'R94_1_PREVIEW_WRAPPER_IDENTITY_PASS' -ForegroundColor Green
+
+foreach ($Check in @(
+    @{ Text = $CodexRuntimeBuilderText; Marker = 'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY' },
+    @{ Text = $CodexRuntimeBuilderText; Marker = 'built_in_provider.stream_max_retries = provider.stream_max_retries' },
+    @{ Text = $CodexRuntimeBuilderText; Marker = 'built_in_provider.request_max_retries = provider.request_max_retries' },
+    @{ Text = $CodexRuntimeBuilderText; Marker = 'built_in_provider.stream_idle_timeout_ms = provider.stream_idle_timeout_ms' },
+    @{ Text = $CodexRuntimeBuilderText; Marker = 'built_in_provider.websocket_connect_timeout_ms' },
+    @{ Text = $NoMicroText; Marker = 'R94_1_CODEX_RUNTIME_FILE' },
+    @{ Text = $NoMicroText; Marker = 'r94_1_openai_policy_overlay_active' },
+    @{ Text = $NoMicroText; Marker = 'CAS_R94_1_CODEX_RUNTIME_EXE' },
+    @{ Text = $NoMicroText; Marker = 'CAS_R94_1_OPENAI_POLICY_OVERLAY' },
+    @{ Text = $DesktopProcessText; Marker = 'r94_1_openai_policy_overlay_active()' },
+    @{ Text = $DesktopProcessText; Marker = '请使用 No Lagging 启动 (B)' },
+    @{ Text = $NoMicroLauncherText; Marker = 'CAS-R94-1-CODEX-APP-SERVER-RUNTIME-OVERLAY' },
+    @{ Text = $NoMicroLauncherText; Marker = 'return args.some((arg) => String(arg) === "app-server")' },
+    @{ Text = $NoMicroLauncherText; Marker = 'args[0] = r941RuntimeExe' }
+)) {
+    if (-not $Check.Text.Contains($Check.Marker)) {
+        throw "r94.1 native runtime overlay integration missing: $($Check.Marker)"
+    }
+}
+if ($CodexRuntimeBuilderText.Contains('built_in_provider.base_url') -or
+    $CodexRuntimeBuilderText.Contains('built_in_provider.requires_openai_auth') -or
+    $CodexRuntimeBuilderText.Contains('built_in_provider.name =')) {
+    throw 'r94.1 patched runtime must not replace built-in openai identity/routing/auth'
+}
+Write-Host 'R94_1_BUILTIN_OPENAI_RUNTIME_CHAIN_PREFLIGHT_PASS' -ForegroundColor Green
 
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $CodexRuntimeBuilder -PreflightOnly
 if ($LASTEXITCODE -ne 0) {
@@ -114,5 +148,6 @@ if ($PreflightOnly) {
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
     Write-Host '  - No Lagging B has a side-by-side, version-matched Codex runtime for built-in openai provider-policy overlay'
+    Write-Host '  - standard MSIX restart fails closed while an overlay is active, so stock Codex cannot silently fall back to /5'
     Write-Host "  - patched runtime deployed: $DeployCodexRuntime"
 }

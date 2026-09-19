@@ -73,15 +73,26 @@ $MainProcessCollector = @'
   // are copied into the renderer.
   let localUsageCollectorArmed = false;
   const localUsageFileCache = new Map();
+  const localUsageMissCache = new Map();
   const localUsageSnapshotCache = new Map();
+  const R94_USAGE_LOOKUP_MISS_TTL_MS = 30000;
 
   const normalizeUsageThreadId = (value) => String(value || '')
     .replace(/^local:/i, '')
     .trim()
     .toLowerCase();
 
+  // CAS-R94-ACTIVE-THREAD-FALLBACK
+  // Current Codex builds do not always expose the selected sidebar row with the
+  // old active attributes. Reuse the already-resolved pane thread id first,
+  // then route identity, then legacy sidebar/conversation attributes.
   const activeThreadExpression = "(() => {" +
     "const a=(e,n)=>e&&e.getAttribute?e.getAttribute(n):null;" +
+    "const b=document.querySelector('[data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]');" +
+    "const bt=a(b,'data-cas-pane-thread-id');if(bt)return bt;" +
+    "const p=String(location&&location.pathname||'');" +
+    "const m=p.match(/\\/(?:local|thread|conversation)\\/([^/?#]+)/)||p.match(/\\/hotkey-window\\/thread\\/([^/?#]+)/);" +
+    "if(m&&m[1]){try{return decodeURIComponent(m[1]);}catch{return m[1];}}" +
     "const r=document.querySelector('[data-app-action-sidebar-thread-row][data-app-action-sidebar-thread-active=\"true\"]')||" +
       "document.querySelector('[data-app-action-sidebar-thread-row][aria-current=\"page\"]')||" +
       "document.querySelector('[data-app-action-sidebar-thread-active=\"true\"]')||" +
@@ -114,6 +125,9 @@ $MainProcessCollector = @'
       }
     }
 
+    const missedAt = Number(localUsageMissCache.get(normalized));
+    if (Number.isFinite(missedAt) && Date.now() - missedAt < R94_USAGE_LOOKUP_MISS_TTL_MS) return null;
+
     const fs = process.getBuiltinModule('fs').promises;
     const path = process.getBuiltinModule('path');
     const walk = async (dir) => {
@@ -142,11 +156,13 @@ $MainProcessCollector = @'
       for (const leaf of ['sessions', 'archived_sessions']) {
         const hit = await walk(path.join(home, leaf));
         if (hit) {
+          localUsageMissCache.delete(normalized);
           localUsageFileCache.set(normalized, hit);
           return hit;
         }
       }
     }
+    localUsageMissCache.set(normalized, Date.now());
     return null;
   };
 
@@ -303,7 +319,9 @@ $MainProcessCollector = @'
         return envelope;
       }
 
-      return previous?.envelope || null;
+      const fallbackEnvelope = previous?.envelope || null;
+      localUsageSnapshotCache.set(filePath, { size: stat.size, envelope: fallbackEnvelope });
+      return fallbackEnvelope;
     } catch {
       return null;
     } finally {

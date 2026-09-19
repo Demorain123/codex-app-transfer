@@ -134,6 +134,7 @@ for rel in (
     "scripts/apply_r46_failure_boundary_fork_hotfix.py",
     "scripts/apply_r46_chain_health_recovery_hint.py",
     "scripts/apply_r46_generic_repair_loop_guard.py",
+    "scripts/apply_r94_stale_exit_guard_recovery.py",
 ):
     run_leaf("r46", rel)
 
@@ -198,6 +199,10 @@ require(
     "src-tauri/src/admin/handlers/chain_health.rs",
     "CAS-R43-REWRITE-HEALTH-MCP",
     "CAS-R46-OLD-THREAD-RECOVERY-HINT",
+    "CAS-R46-GENERIC-REPAIR-SAME-FAULT-GUARD",
+    "CAS-R94-STALE-EXIT-GUARD-RECOVERY",
+    "recover_stale_exit_guard_listener_r94",
+    "fixed_port_released",
     "CAS-R47-AGENT-LOOP-RECOVERY",
 )
 require(
@@ -294,6 +299,7 @@ print("R82_R70_MASKED_HISTORY_PRESERVED_PASS")
 print("R82_R43_R65_SELECTIVE_MATERIALIZATION_PASS")
 print("- no historical recursive apply_rXX_unified.py driver was executed")
 print("- r38/r39 fixed-port lifecycle was restored only through reviewed leaf transforms; unrelated r24-r41 behavior was not replayed")
+print("- r94 Try repair can recover the proven dead-binder -> exact r32 Exit Guard leak while preserving the configured fixed port")
 print("- r42 leaf was used only as a required prerequisite when absent")
 print("- r44 terminal semantics is represented by the verified r45 semantic-terminal invariant")
 print("- r66-r69 Hook A/B experiment markers are absent from runtime sources")

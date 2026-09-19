@@ -662,12 +662,17 @@
   const R94_SEGMENT_CACHE_LIMIT = 384;
 
   function r94HostEpochNow() {
+    // User-facing wall-clock labels follow the current host system clock.
+    // performance.timeOrigin is only a defensive fallback because it is
+    // monotonic-ish and may not reflect a later OS clock/timezone adjustment.
+    const systemEpoch = new Date().getTime();
+    if (Number.isFinite(systemEpoch) && systemEpoch > 0) return systemEpoch;
     try {
       const origin = Number(performance && performance.timeOrigin);
       const offset = Number(performance && typeof performance.now === 'function' ? performance.now() : NaN);
       if (Number.isFinite(origin) && Number.isFinite(offset) && origin > 0) return origin + offset;
     } catch {}
-    return new Date().getTime();
+    return 0;
   }
 
   function r94IsUserSurface(node) {

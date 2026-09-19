@@ -1180,6 +1180,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const ts = window.__casR94TimestampDiagnostics && typeof window.__casR94TimestampDiagnostics === 'object'
       ? window.__casR94TimestampDiagnostics
       : {};
+    const composerDiag = window.__casR94ComposerStatusDiagnostics && typeof window.__casR94ComposerStatusDiagnostics === 'object'
+      ? window.__casR94ComposerStatusDiagnostics
+      : {};
     const noLagging = META.launchMode === 'no-lagging';
 
     let state = noLagging ? 'missing' : 'baseline';
@@ -1225,6 +1228,11 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       tsCache: Number(ts.cacheSize) || 0,
       tsSuppressed: Number(ts.nativeTimestampSuppressed) || 0,
       tsSource: String(ts.lastSource || ''),
+      composerMountReason: String(composerDiag.lastReason || ''),
+      composerMountSurface: String(composerDiag.surface || ''),
+      composerMountAnchor: String(composerDiag.anchor || ''),
+      composerMountAttempts: Number(composerDiag.attempts) || 0,
+      composerMountCount: Number(composerDiag.mounted) || 0,
     };
   };
 
@@ -1257,7 +1265,11 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Composer cand=' + s.composerCandidates +
         ' · editables=' + s.editables +
         ' · statusBars=' + s.statusBars +
-        ' · TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
+        ' · mount=' + escapeHtml(s.composerMountReason || 'none') +
+        ' · surface=' + escapeHtml(s.composerMountSurface || '-') +
+        ' · anchor=' + escapeHtml(s.composerMountAnchor || '-') +
+        ' · attempts=' + s.composerMountAttempts + '/' + s.composerMountCount + '</div>',
+      '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
         ' · nativeSupp=' + s.tsSuppressed +
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
       (s.state === 'legacy' || s.state === 'mismatch' || s.state === 'missing')
@@ -1910,6 +1922,8 @@ mod tests {
         assert!(script.contains("data-cas-status-inside-composer"));
         assert!(script.contains("cas-r94-timestamp-overlay"));
         assert!(script.contains("__casR94TimestampDiagnostics"));
+        assert!(script.contains("__casR94ComposerStatusDiagnostics"));
+        assert!(script.contains("mount="));
         assert!(script.contains("TS obs/vis/badge/cache"));
         assert!(script.contains("launchMode"));
         assert!(!script.contains("__CAS_DEBUG_META__"));

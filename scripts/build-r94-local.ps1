@@ -135,6 +135,7 @@ foreach ($Marker in @(
     'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',
     'R94_STREAMING_SEGMENT_THROTTLE_RUNTIME',
     'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
+    'R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME',
     'window.setTimeout(r94FlushSegmentTurns, 220)',
     'R94_SEMANTIC_OUTPUT_UNIT_RUNTIME',
     'function r94CollectSemanticOutputSurfaces(turn) {',

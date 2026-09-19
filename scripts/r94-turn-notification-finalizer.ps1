@@ -18,6 +18,37 @@ $R94TurnHelpers = @'
     return Number.isFinite(value) ? value : null;
   }
 
+  // R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME
+  function r94ExternalExactMap() {
+    let map = state.metrics && state.metrics.r94ExternalExactByThread;
+    if (!(map instanceof Map)) {
+      map = new Map();
+      if (state.metrics) state.metrics.r94ExternalExactByThread = map;
+    }
+    return map;
+  }
+
+  function r94StoreExternalExact(exact) {
+    if (!exact || typeof exact !== 'object') return;
+    const threadId = r94NormalizePaneId(exact.threadId);
+    if (!threadId) return;
+    const map = r94ExternalExactMap();
+    map.delete(threadId);
+    map.set(threadId, exact);
+    while (map.size > 64) {
+      const oldest = map.keys().next().value;
+      if (!oldest) break;
+      map.delete(oldest);
+    }
+  }
+
+  function r94ExternalExactForThread(threadId) {
+    const normalized = r94NormalizePaneId(threadId);
+    if (!normalized) return null;
+    const exact = r94ExternalExactMap().get(normalized);
+    return exact && typeof exact === 'object' ? exact : null;
+  }
+
   function r94OfficialUsageFromInfo(info) {
     if (!info || typeof info !== 'object') return null;
     const last = info.last_token_usage && typeof info.last_token_usage === 'object'
@@ -206,6 +237,7 @@ $R94ExternalIngest = @'
       }
       exact.changedAt = Number(state.metrics.externalExactChangedAt) || Date.now();
       state.metrics.externalExact = exact;
+      r94StoreExternalExact(exact);
     }
 
     state.metrics.externalUsageSource = turnId ? 'local-session-jsonl-turn' : 'local-session-jsonl';
@@ -219,6 +251,23 @@ $R94ExternalIngest = @'
   }
 '@
 $Patched = Replace-BlockRequired $Patched '  function ingestExternalUsage(envelope) {' '  state.refresh = refreshUi;' $R94ExternalIngest 'r94 turn-aware local JSONL ingestion'
+
+$R94PaneOwnership = @'
+  function paneTelemetryOwnership(threadId) {
+    const paneThread = r94NormalizePaneId(threadId);
+    const exact = r94ExternalExactForThread(paneThread);
+    const sourceThread = r94NormalizePaneId(exact && exact.threadId);
+    const owned = !!paneThread && !!sourceThread && paneThread === sourceThread;
+    return {
+      owned,
+      awaiting: !!paneThread && !owned,
+      paneThread,
+      sourceThread,
+      exact: owned ? exact : null,
+    };
+  }
+'@
+$Patched = Replace-BlockRequired $Patched '  function paneTelemetryOwnership(threadId) {' '  function paneActivityState(bar) {' $R94PaneOwnership 'r94 multi-pane exact usage ownership'
 
 $R94StatusHtml = @'
   function statusHtmlForPane(sessionId, threadId, agentId, bar) {
@@ -350,6 +399,9 @@ $Patched = Replace-BlockRequired $Patched '  function consumeText(text) {' '  fu
 
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_BRIDGE_RUNTIME',
+    'R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME',
+    'r94ExternalExactByThread',
+    'r94StoreExternalExact(exact);',
     'r94OfferRolloutEnvelope(envelope, threadId, info);',
     'window.__casR94TurnCapability',
     "typeof capability.ingestNotification !== 'function'",
@@ -376,6 +428,7 @@ if ($R94TurnStatusOwner -eq 'pane') {
     throw 'r94 pane turn-status owner was not resolved'
 }
 
+Write-Host 'R94_MULTI_PANE_USAGE_OWNERSHIP_PASS' -ForegroundColor Green
 Write-Host 'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS' -ForegroundColor Green
 Write-Host 'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS' -ForegroundColor Green
 Write-Host 'R94_LOCAL_ROLLOUT_TURN_BRIDGE_PASS' -ForegroundColor Green

@@ -212,6 +212,8 @@ foreach ($Marker in @(
     'R94_R77_TELEMETRY_PRESERVED_TIMESTAMP_SUPERSEDED_PASS',
     'R94_R77_MODEL_COLLECTOR_COMPAT_SOURCE_PASS',
     'R94_R77_BOUNDED_MODEL_LOOKUP_SUPERSEDED_PASS',
+    'R94_R77_ACTIVE_THREAD_RESOLVER_COMPAT_SOURCE_PASS',
+    'R94_R77_ACTIVE_THREAD_RESOLVER_SUPERSEDED_PASS',
     'R94_COMPOSER_STATUS_INSIDE_FINALIZER_BOUND_TO_R75_PASS',
     "'.r94-timestamp-observer.generated.js'",
     'R94_FINAL_TIMESTAMP_MATERIALIZATION_PREFLIGHT_PASS',
@@ -387,6 +389,9 @@ foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
     'CAS-R94-ACTIVE-THREAD-FALLBACK',
     'CAS-R94-MULTI-PANE-THREAD-COLLECTOR',
+    'const out=[];const seen=new Set();',
+    'if(out.length)return out;',
+    'data-above-composer-conversation-id',
     'Array.isArray(threadValue)',
     'for (const threadId of threadIds)',
     'item_started|item_completed',
@@ -432,6 +437,7 @@ foreach ($Forbidden in @(
 Write-Host 'R94_R76_TURN_AWARE_ROLLOUT_BRIDGE_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_R76_ACTIVE_THREAD_FALLBACK_AND_MISS_CACHE_PASS' -ForegroundColor Green
 Write-Host 'R94_MULTI_PANE_SUBAGENT_TELEMETRY_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host 'R94_R77_ACTIVE_THREAD_RESOLVER_COMPAT_PREFLIGHT_PASS' -ForegroundColor Green
 
 
 try {

@@ -299,11 +299,20 @@ fn provider_policy_carry_forward_block_reason(
     if !policy.has_provider_policy() {
         return Some("no-user-provider-policy");
     }
-    if policy.source_provider.eq_ignore_ascii_case("openai") {
-        // Codex 0.144.x does not generally allow user model_providers.openai
-        // to override the built-in provider, so keeping this id would still
-        // make retry/timeout values ineffective.
+    if policy.source_provider == "openai" {
+        // Provider ids are case-sensitive. Only the exact built-in id collides;
+        // a user provider such as "OpenAi" is a distinct custom provider and is
+        // precisely the migration r94.1 must preserve.
         return Some("built-in-openai-id-collision");
+    }
+    if !policy
+        .source_provider
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        // sync_table_field currently targets standard bare TOML table keys.
+        // Do not guess how to rewrite quoted/dotted provider ids.
+        return Some("provider-id-requires-quoted-toml-key");
     }
     if policy
         .wire_api
@@ -389,27 +398,21 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     // block so user edits made after the snapshot (including future Codex
     // provider fields) are preserved too. If the live block disappeared, do not
     // resurrect it from an old snapshot.
-    let provider_policy = snapshot_config
+    let provider_policy = if let Some(snapshot_policy) = snapshot_config
         .as_deref()
         .and_then(provider_policy_truth_from_config)
-        .and_then(|snapshot_policy| {
-            match std::fs::read_to_string(&paths.config_toml) {
-                Ok(live) => provider_policy_truth_for_source(
-                    &live,
-                    &snapshot_policy.source_provider,
-                ),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "codex_integration::apply",
-                        marker = "CAS-R94-1-PROVIDER-CONFIG-TRUTH",
-                        error = %e,
-                        "could not inspect live provider block; refusing to infer carry-forward from stale snapshot state"
-                    );
-                    None
-                }
-            }
-        });
+    {
+        match std::fs::read_to_string(&paths.config_toml) {
+            Ok(live) => provider_policy_truth_for_source(
+                &live,
+                &snapshot_policy.source_provider,
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        None
+    };
 
     // Capability-aware fail-closed gate. Do this before openai_base_url or
     // chatgpt_base_url are modified, so an unsupported semantic migration never
@@ -975,6 +978,49 @@ fn restore_from_snapshot_values(
         .into_iter()
         .collect();
 
+    // CAS-R94-1-PROVIDER-ENDPOINT-RESTORE-SYMMETRY
+    //
+    // Semantic carry-forward temporarily redirects the user's active custom
+    // provider base_url to the same relay URL written as openai_base_url. Before
+    // restoring root keys, capture a high-precision ownership fingerprint:
+    //   snapshot model_provider == live model_provider
+    //   AND live provider base_url == live openai_base_url.
+    // Only that exact bundle is treated as Transfer-owned. If the user edited
+    // the provider endpoint while Transfer was active, the values differ and we
+    // deliberately leave the live edit untouched.
+    let live_config_before_restore = match std::fs::read_to_string(&paths.config_toml) {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let snapshot_source_provider = root_string_value(snapshot_config, "model_provider");
+    let live_source_provider = root_string_value(&live_config_before_restore, "model_provider");
+    let live_openai_base =
+        snapshot_toml_value_literal(&live_config_before_restore, "openai_base_url");
+    let provider_endpoint_owned_by_transfer = snapshot_source_provider
+        .as_deref()
+        .zip(live_source_provider.as_deref())
+        .filter(|(snapshot_id, live_id)| snapshot_id == live_id)
+        .and_then(|(source_provider, _)| {
+            if !source_provider
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return None;
+            }
+            let section = format!("model_providers.{source_provider}");
+            let live_provider_base =
+                snapshot_table_field_literal(&live_config_before_restore, &section, "base_url");
+            match (live_provider_base.as_deref(), live_openai_base.as_deref()) {
+                (Some(provider_base), Some(openai_base))
+                    if provider_base.trim() == openai_base.trim() =>
+                {
+                    Some((source_provider.to_string(), section))
+                }
+                _ => None,
+            }
+        });
+
     for key in MANAGED_TOML_KEYS {
         let literal_from_snapshot = snapshot_toml_value_literal(snapshot_config, key);
         let literal = if polluted_fields.contains(*key) {
@@ -994,6 +1040,24 @@ fn restore_from_snapshot_values(
     for (section, key) in MANAGED_TOML_TABLE_FIELDS {
         let literal = snapshot_table_field_literal(snapshot_config, section, key);
         sync_table_field(&paths.config_toml, section, key, literal.as_deref())?;
+    }
+
+    if let Some((source_provider, section)) = provider_endpoint_owned_by_transfer {
+        let original_base_url =
+            snapshot_table_field_literal(snapshot_config, &section, "base_url");
+        sync_table_field(
+            &paths.config_toml,
+            &section,
+            "base_url",
+            original_base_url.as_deref(),
+        )?;
+        tracing::info!(
+            target: "codex_integration::apply",
+            marker = "CAS-R94-1-PROVIDER-ENDPOINT-RESTORE-SYMMETRY",
+            source_provider = %source_provider,
+            restored_base_url = original_base_url.as_deref().unwrap_or("<unset>"),
+            "restored only the provider endpoint proven to have been redirected by Transfer"
+        );
     }
 
     // 2. auth.json
@@ -2835,6 +2899,66 @@ supports_websockets = true
             "only the provider endpoint should be redirected to Transfer: {toml}"
         );
         assert!(!toml.contains("https://old.example/v1"), "{toml}");
+
+        assert!(restore_codex_state(&paths).unwrap());
+        let restored = read_toml(&paths);
+        assert!(restored.contains("model_provider = \"OpenAi\""), "{restored}");
+        assert!(
+            restored.contains("base_url = \"https://old.example/v1\""),
+            "provider endpoint must be restored after Transfer releases the config: {restored}"
+        );
+        assert!(restored.contains("stream_max_retries = 15"), "{restored}");
+        assert!(restored.contains("request_max_retries = 7"), "{restored}");
+        assert!(
+            restored.contains("query_params = { user_policy = \"keep\" }"),
+            "{restored}"
+        );
+        assert!(!restored.contains("openai_base_url ="), "{restored}");
+    }
+
+    #[test]
+    fn r94_1_restore_preserves_post_apply_user_endpoint_edit() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        apply_provider(&paths, &cfg).unwrap();
+        sync_table_field(
+            &paths.config_toml,
+            "model_providers.OpenAi",
+            "base_url",
+            Some("\"https://user-edited.example/v1\""),
+        )
+        .unwrap();
+
+        assert!(restore_codex_state(&paths).unwrap());
+        let restored = read_toml(&paths);
+        assert!(
+            restored.contains("base_url = \"https://user-edited.example/v1\""),
+            "post-apply user endpoint edit must win over snapshot restoration: {restored}"
+        );
     }
 
     #[test]

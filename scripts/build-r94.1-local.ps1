@@ -12,8 +12,9 @@ $CargoToml = Join-Path $RepoRoot 'src-tauri\Cargo.toml'
 $CargoLock = Join-Path $RepoRoot 'Cargo.lock'
 $DebugBanner = Join-Path $RepoRoot 'frontend\src\components\codex\RuntimeDebugBanner.vue'
 $ThemeInjector = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
+$OutputUiBuilder = Join-Path $PSScriptRoot 'build-r74-output-ui-local.ps1'
 
-foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector)) {
+foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder)) {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "r94.1 required source missing: $Path"
     }
@@ -23,6 +24,7 @@ $CargoText = [System.IO.File]::ReadAllText($CargoToml)
 $LockText = [System.IO.File]::ReadAllText($CargoLock)
 $DebugText = [System.IO.File]::ReadAllText($DebugBanner)
 $ThemeText = [System.IO.File]::ReadAllText($ThemeInjector)
+$OutputUiText = [System.IO.File]::ReadAllText($OutputUiBuilder)
 
 foreach ($Check in @(
     @{ Text = $CargoText; Marker = 'version = "2.4.5+94.1"' },
@@ -32,7 +34,10 @@ foreach ($Check in @(
     @{ Text = $DebugText; Marker = 'DBG94.1-1' },
     @{ Text = $ThemeText; Marker = 'RUNTIME_DEBUG_TRANSFER_REVISION: &str = "r94.1"' },
     @{ Text = $ThemeText; Marker = 'RUNTIME_DEBUG_TRANSFER_VERSION: &str = "2.4.5+94.1"' },
-    @{ Text = $ThemeText; Marker = 'RUNTIME_DEBUG_PROTOCOL: &str = "DBG94.1-1"' }
+    @{ Text = $ThemeText; Marker = 'RUNTIME_DEBUG_PROTOCOL: &str = "DBG94.1-1"' },
+    @{ Text = $OutputUiText; Marker = 'CAS-VISIBLE-IDENTITY-OVERRIDE' },
+    @{ Text = $OutputUiText; Marker = 'CAS_TRANSFER_VISIBLE_REVISION' },
+    @{ Text = $OutputUiText; Marker = 'R74_VISIBLE_IDENTITY_OVERRIDE_PASS' }
 )) {
     if (-not $Check.Text.Contains($Check.Marker)) {
         throw "r94.1 preview identity guard missing: $($Check.Marker)"
@@ -52,9 +57,28 @@ $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner)
 if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
 if ($PreflightOnly) { $Args += '-PreflightOnly' }
 
-& pwsh @Args
-if ($LASTEXITCODE -ne 0) {
-    throw "r94.1 delegated build failed with exit code $LASTEXITCODE"
+$OldVisibleRevision = $env:CAS_TRANSFER_VISIBLE_REVISION
+$OldVisibleVersion = $env:CAS_TRANSFER_VISIBLE_VERSION
+try {
+    $env:CAS_TRANSFER_VISIBLE_REVISION = 'r94.1'
+    $env:CAS_TRANSFER_VISIBLE_VERSION = '2.4.5+94.1'
+
+    & pwsh @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "r94.1 delegated build failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    if ($null -eq $OldVisibleRevision) {
+        Remove-Item Env:CAS_TRANSFER_VISIBLE_REVISION -ErrorAction SilentlyContinue
+    } else {
+        $env:CAS_TRANSFER_VISIBLE_REVISION = $OldVisibleRevision
+    }
+    if ($null -eq $OldVisibleVersion) {
+        Remove-Item Env:CAS_TRANSFER_VISIBLE_VERSION -ErrorAction SilentlyContinue
+    } else {
+        $env:CAS_TRANSFER_VISIBLE_VERSION = $OldVisibleVersion
+    }
 }
 
 if ($PreflightOnly) {
@@ -63,4 +87,5 @@ if ($PreflightOnly) {
 } else {
     Write-Host 'R94_1_PREVIEW_WRAPPER_RUNTIME_PASS' -ForegroundColor Green
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
+    Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
 }

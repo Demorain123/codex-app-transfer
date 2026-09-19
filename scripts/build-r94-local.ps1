@@ -125,11 +125,14 @@ foreach ($Marker in @(
     'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
     'R94_FULL_DATE_TIMESTAMP_RUNTIME',
     'function r94LocalDateTimeStamp(epoch) {',
-    'R94_TIMELINE_NAV_RUNTIME',
-    "const R94_TIMELINE_RAIL_ID = 'cas-r94-timeline-rail';",
+    'R94_NATIVE_RAIL_PRESERVE_RUNTIME',
+    'R94_NATIVE_RAIL_METADATA_ONLY_RUNTIME',
+    'R94_NATIVE_RAIL_NO_CUSTOM_PAINT_RUNTIME',
+    'const timelineRail = null;',
     'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',
-    'function r94JumpTimelineEntry(key) {',
-    "window.matchMedia('(prefers-reduced-motion: reduce)')",
+    'R94_STREAMING_SEGMENT_THROTTLE_RUNTIME',
+    'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
+    'window.setTimeout(r94FlushSegmentTurns, 220)',
     'function r94CollectVisualSegments(node, root, depth) {',
     'function r94TopLevelSegments(turn) {',
     'function r94AssistantMessageSurface(node) {',
@@ -167,11 +170,16 @@ Write-Host '  - all Transfer timestamp badges live in the overlay root with poin
 Write-Host 'R94_FULL_DATE_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - Transfer-owned timestamp labels use the current host system wall clock as YYYY-MM-DD HH:mm:ss; tooltip also carries the short local timezone'
 Write-Host '  - ambiguous native time-only history is never assigned a guessed date'
-Write-Host 'R94_TIMELINE_NAV_CONTRACT_PASS' -ForegroundColor Green
-Write-Host '  - a separate Transfer-owned left rail exposes dated U/A/T/G/S/F time nodes without mutating Codex React DOM'
-Write-Host '  - rail hover/focus expands time labels; click performs bounded smooth jump and respects prefers-reduced-motion'
-Write-Host '  - disconnected/virtualized anchors retain a bounded normalized position fallback instead of inventing history timestamps'
-Write-Host '  - rail DOM is excluded from timestamp MutationObserver scans and removed during runtime cleanup'
+if ($OverlayJs.Contains('const timelineRail = r94EnsureTimelineRailRoot();') -or
+    $OverlayJs.Contains('r94CreateTimelineMarker(timelineRail, entry)')) {
+    throw 'r94 custom timeline rail paint path survived; Codex native rail must remain untouched'
+}
+Write-Host 'R94_NATIVE_RAIL_NO_CUSTOM_DOM_PASS' -ForegroundColor Green
+Write-Host 'R94_NATIVE_RAIL_PRESERVE_CONTRACT_PASS' -ForegroundColor Green
+Write-Host '  - Codex official conversation rail/minimap remains the only visible navigation rail'
+Write-Host '  - Transfer keeps bounded timestamp metadata only; it creates no custom rail/tick/marker DOM'
+Write-Host '  - per-output timestamp badges stay in the separate pointer-events:none overlay'
+Write-Host '  - streaming timestamp scans are throttled and reuse cached active-turn/composer ownership'
 foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_GENERATION_PATCH',
     'R94_FINAL_TIMESTAMP_OWNERS_REPLACED_PASS',
@@ -237,7 +245,7 @@ Write-Host 'R93_STATUS_FINALIZER_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Marker in @(
     'R94_COMPOSER_STATUS_INSIDE_FINALIZER',
     'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS',
-    'R94_COMPOSER_INLINE_MOUNT_V3_EDITOR_SAFE_PASS',
+    'R94_COMPOSER_INLINE_MOUNT_V4_FAST_SAFE_PASS',
     'R94_STATUS_NEVER_ENTERS_EDITABLE_PASS',
     'R94_RESIDUAL_UNSAFE_MOUNT_REWRITE_PASS',
     'R94_UNSAFE_EDITOR_MOUNT_FALLBACKS_ABSENT_PASS',
@@ -247,7 +255,7 @@ foreach ($Marker in @(
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
     'R94_CURRENT_COMPOSER_ROOT_RUNTIME',
     'R94_COMPOSER_INLINE_MOUNT_RUNTIME',
-    'R94_COMPOSER_MOUNT_V3',
+    'R94_COMPOSER_MOUNT_V4',
     'R94_EDITOR_BOUNDARY_GUARD_RUNTIME',
     'R94_COMPOSER_FAIL_CLOSED_MOUNT_RUNTIME',
     "bar.setAttribute('data-cas-status-owner','r94-inline-safe');",
@@ -327,7 +335,7 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'Timeline=' },
     @{ Text = $ThemeInjectorRsText; Marker = 'TS obs/vis/badge/cache' },
     @{ Text = $ThemeInjectorRsText; Marker = 'SEG stamp/badge/cache' },
-    @{ Text = $ThemeInjectorRsText; Marker = 'TL entries/markers=' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'TL meta=' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" }
 )
 foreach ($Contract in $RuntimeDebugContracts) {

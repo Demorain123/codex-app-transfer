@@ -13,8 +13,12 @@ $CargoLock = Join-Path $RepoRoot 'Cargo.lock'
 $DebugBanner = Join-Path $RepoRoot 'frontend\src\components\codex\RuntimeDebugBanner.vue'
 $ThemeInjector = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
 $OutputUiBuilder = Join-Path $PSScriptRoot 'build-r74-output-ui-local.ps1'
+$CodexRuntimeBuilder = Join-Path $PSScriptRoot 'build-r94.1-codex-runtime.ps1'
+$CodexRuntimeExe = Join-Path $RepoRoot 'target\release\codex-r94.1-runtime.exe'
+$DeployDir = 'V:\Codex App Transfer'
+$DeployCodexRuntime = Join-Path $DeployDir 'codex-r94.1-runtime.exe'
 
-foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder)) {
+foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder,$CodexRuntimeBuilder)) {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "r94.1 required source missing: $Path"
     }
@@ -46,12 +50,27 @@ foreach ($Check in @(
 
 Write-Host 'R94_1_PREVIEW_WRAPPER_IDENTITY_PASS' -ForegroundColor Green
 
+& pwsh -NoProfile -ExecutionPolicy Bypass -File $CodexRuntimeBuilder -PreflightOnly
+if ($LASTEXITCODE -ne 0) {
+    throw "r94.1 Codex runtime patch preflight failed with exit code $LASTEXITCODE"
+}
+
 $WorkspaceCargo = Join-Path $RepoRoot 'Cargo.toml'
 & cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration --lib r94_1_
 if ($LASTEXITCODE -ne 0) {
     throw "r94.1 provider policy semantic carry-forward focused tests failed with exit code $LASTEXITCODE"
 }
 Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_FOCUSED_TESTS_PASS' -ForegroundColor Green
+
+if (-not $PreflightOnly) {
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $CodexRuntimeBuilder -OutputPath $CodexRuntimeExe
+    if ($LASTEXITCODE -ne 0) {
+        throw "r94.1 patched Codex runtime build failed with exit code $LASTEXITCODE"
+    }
+    if (-not (Test-Path -LiteralPath $CodexRuntimeExe)) {
+        throw "r94.1 patched Codex runtime missing after build: $CodexRuntimeExe"
+    }
+}
 
 $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner)
 if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
@@ -85,7 +104,15 @@ if ($PreflightOnly) {
     Write-Host 'R94_1_PREVIEW_WRAPPER_PREFLIGHT_PASS' -ForegroundColor Green
     Write-Host '  - focused r94.1 Rust tests + inherited r94 generated-chain preflight completed; release build was not started'
 } else {
+    if (-not (Test-Path -LiteralPath $DeployDir)) {
+        New-Item -ItemType Directory -Force -Path $DeployDir | Out-Null
+    }
+    Copy-Item -LiteralPath $CodexRuntimeExe -Destination $DeployCodexRuntime -Force
+    Copy-Item -LiteralPath "$CodexRuntimeExe.json" -Destination "$DeployCodexRuntime.json" -Force
+
     Write-Host 'R94_1_PREVIEW_WRAPPER_RUNTIME_PASS' -ForegroundColor Green
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
+    Write-Host '  - No Lagging B has a side-by-side, version-matched Codex runtime for built-in openai provider-policy overlay'
+    Write-Host "  - patched runtime deployed: $DeployCodexRuntime"
 }

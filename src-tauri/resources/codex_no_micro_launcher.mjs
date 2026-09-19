@@ -10,6 +10,8 @@ const OUTPUT_TELEMETRY_RUNTIME = "r73.1";
 const fixDirectory = path.dirname(fileURLToPath(import.meta.url));
 const statusPath = process.env.CAS_NO_MICRO_STATUS_PATH || path.join(fixDirectory, "last-launch.json");
 const packageVersion = process.env.CAS_NO_MICRO_PACKAGE_VERSION || "unknown";
+const r941PolicyOverlayRequested = process.env.CAS_R94_1_OPENAI_POLICY_OVERLAY === "1";
+const r941PatchedRuntime = process.env.CAS_R94_1_CODEX_RUNTIME_EXE || "";
 const executable = process.argv[2];
 const extraArguments = process.argv.slice(3);
 
@@ -69,6 +71,13 @@ try {
       timestampMode: "per-assistant-output",
       metricMode: "best-effort-live-stream",
     },
+    openaiPolicyOverlay: r941PolicyOverlayRequested
+      ? {
+          status: "native-runtime-armed",
+          effectiveProvider: "openai",
+          runtime: r941PatchedRuntime,
+        }
+      : { status: "not-required" },
     cleanup: "not-needed",
     statusFile: { status: "success" },
   };
@@ -101,6 +110,13 @@ try {
       status: "not-armed",
       runtime: OUTPUT_TELEMETRY_RUNTIME,
     },
+    openaiPolicyOverlay: r941PolicyOverlayRequested
+      ? {
+          status: "native-runtime-not-verified",
+          effectiveProvider: "openai",
+          runtime: r941PatchedRuntime,
+        }
+      : { status: "not-required" },
     cleanup,
     statusFile: { status: "success" },
   };
@@ -519,6 +535,55 @@ function stubExpression(expectedPid, expectedExecutable) {
   const Module = process.getBuiltinModule("module");
   const originalLoad = Module._load;
   const telemetrySource = ${telemetrySource};
+
+  // CAS-R94-1-CODEX-APP-SERVER-RUNTIME-OVERLAY
+  // The Desktop shell keeps its official executable and provider identity.
+  // Only child launches that are unambiguously "codex app-server" are swapped
+  // to the version-matched patched CLI when Transfer staged provider behavior.
+  const r941PolicyOverlayEnabled =
+    process.env.CAS_R94_1_OPENAI_POLICY_OVERLAY === "1";
+  const r941RuntimeExe = String(process.env.CAS_R94_1_CODEX_RUNTIME_EXE || "");
+  if (r941PolicyOverlayEnabled && !r941RuntimeExe) {
+    throw new Error("r94.1 openai policy overlay requested without patched runtime");
+  }
+
+  const childProcess = process.getBuiltinModule("child_process");
+  const pathModule = process.getBuiltinModule("path");
+  const isCodexAppServerLaunch = (file, args) => {
+    if (!r941PolicyOverlayEnabled || !file || !Array.isArray(args)) return false;
+    let base = "";
+    try { base = pathModule.basename(String(file)).toLowerCase(); } catch {}
+    if (base !== "codex.exe" && base !== "codex") return false;
+    return args.some((arg) => String(arg) === "app-server");
+  };
+  const installCodexRuntimeWrapper = (name) => {
+    const original = childProcess?.[name];
+    if (typeof original !== "function" || original.__casR941CodexRuntimeWrapper) return;
+    const wrapped = function(...args) {
+      if (isCodexAppServerLaunch(args[0], args[1])) {
+        args[0] = r941RuntimeExe;
+        globalThis.__CAS_R94_1_CODEX_RUNTIME_OVERLAY_LAST__ = {
+          method: name,
+          effectiveProvider: "openai",
+          runtime: r941RuntimeExe,
+        };
+      }
+      return Reflect.apply(original, this, args);
+    };
+    Object.defineProperty(wrapped, "__casR941CodexRuntimeWrapper", { value: true });
+    childProcess[name] = wrapped;
+  };
+  for (const name of ["spawn", "spawnSync", "execFile", "execFileSync"]) {
+    installCodexRuntimeWrapper(name);
+  }
+  if (r941PolicyOverlayEnabled) {
+    globalThis.__CAS_R94_1_CODEX_RUNTIME_OVERLAY__ = {
+      enabled: true,
+      effectiveProvider: "openai",
+      runtime: r941RuntimeExe,
+    };
+  }
+
   const isInspectorArgument = (argument) =>
     typeof argument === "string" && /^--inspect(?:-brk)?(?:=|$)/.test(argument);
 

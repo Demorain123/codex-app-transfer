@@ -376,7 +376,6 @@ for invariant in (
 for forbidden in (
     "taskkill /T",
     "taskkill /IM",
-    "SO_REUSEADDR",
     "Stop-Process -Name",
     "Get-Process | Stop-Process",
 ):

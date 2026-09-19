@@ -499,10 +499,23 @@
     return !!element.closest('[data-message-author-role="user"],[data-message-author="user"]');
   }
 
-  function r94StrongSemanticOutputSurface(node) {
+  function r94SpecificSemanticOutputSurface(node) {
     if (!(node instanceof Element)) return false;
     if (node.matches('[data-local-conversation-final-assistant]')) return true;
     return node.matches('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
+  }
+
+  function r94AssistantMessageSurface(node) {
+    if (!(node instanceof Element) || !node.matches('[data-message-author-role="assistant"]')) return false;
+    const turn = r94CanonicalTurn(node);
+    // A whole-turn identity wrapper is not one output event. A nested assistant
+    // message node is: this maps the user's visible "update 1 / update 2 / update
+    // 3" groups to one host timestamp per emitted assistant block.
+    return turn instanceof Element && turn !== node;
+  }
+
+  function r94StrongSemanticOutputSurface(node) {
+    return r94SpecificSemanticOutputSurface(node) || r94AssistantMessageSurface(node);
   }
 
   function r94DirectVisualChildren(parent) {
@@ -548,6 +561,14 @@
     if (!(node instanceof Element) || !isVisible(node) || insideComposer(node) || insideOwnUi(node) || r94IsUserSurface(node)) return [];
     if (normalizedText(node).length < 2 && !r94StrongSemanticOutputSurface(node)) return [];
     if (node.matches('[data-local-conversation-final-assistant]')) return [node];
+    if (r94SpecificSemanticOutputSurface(node)) return [node];
+    if (r94AssistantMessageSurface(node)) {
+      const nestedSpecific = node.querySelector('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
+      // Plain assistant update => one timestamp for the whole update block.
+      // If it contains explicit tool/agent/status children, keep descending so
+      // those operational blocks can receive their own timestamps.
+      if (!(nestedSpecific instanceof Element)) return [node];
+    }
     if (r94AtomicTextSurface(node)) return [node];
     if (depth >= 12) return [node];
 

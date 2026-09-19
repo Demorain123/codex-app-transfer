@@ -103,8 +103,10 @@ pub struct ApplyConfig<'a> {
     /// `openai_base_url` → proxy,上游凭据由 proxy 按 provider 配置注入
     /// (`forward.rs::inject_auth`,与 auth.json 无关)。Caller(src-tauri)在活动
     /// 已是可用真实 chatgpt 时置 `true`。借鉴 CodexPlusPlus relay 思路(保留
-    /// chatgpt 登录态解锁 plugins),但**不写 `model_provider`**(守用户硬约束),
-    /// 改走现有 `openai_base_url` 根键路径。
+    /// chatgpt 登录态解锁 plugins)。r94.1 默认仍走 `openai_base_url`
+    /// built-in 路径；只有检测到无法在 built-in openai 上生效、且可安全迁移的
+    /// user provider policy 时，才保留原 custom `model_provider` 并只重定向其
+    /// base_url。这样不会为了 identity 本身恢复 custom provider。
     #[serde(default)]
     pub preserve_chatgpt_auth: bool,
     /// CAS-SUB2API-GROK-COMPAT-HOOK: keep user-owned model_catalog_json.
@@ -2388,15 +2390,13 @@ model = \"gpt-5.5\"
         assert!(auth_after.get("auth_mode").is_none());
     }
 
-    /// #258:apply 无条件 strip `model_provider` 字段 —— Codex CLI 缺失时 fallback
-    /// 到 openai 跟显式写等价,strip 避开"显式字段触发上游 UI surface" 的潜在路径。
-    /// 注:这意味着 user 旧 config 残留 `model_provider = "custom"` 也会被 strip,
-    /// 走 CLI default openai —— 跟 #178 强制覆盖逻辑等价(都不会让流量进入
-    /// `[model_providers.custom]` 段),但 footprint 更小。无 env opt-in 写回:
-    /// 任何允许 model_provider 字段写回 config 的 escape hatch 都可能让"残留
-    /// model_provider 导致回话丢失"风险复发,所以 strip 是终态。
+    /// #258 baseline + r94.1:identity-only custom provider 仍 strip
+    /// `model_provider` → built-in openai,保持 Desktop/history 的常用兼容路径。
+    /// 只有 provider block 含 retry/timeout/headers/query/capability 等用户行为策略
+    /// 且通过 r94.1 capability gate 时才允许 semantic carry-forward；本 fixture
+    /// 只有 name/base_url,所以应继续按旧行为 normalize。
     #[test]
-    fn apply_strips_legacy_custom_model_provider() {
+    fn apply_strips_identity_only_legacy_custom_model_provider() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(

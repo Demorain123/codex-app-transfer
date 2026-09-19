@@ -136,15 +136,15 @@ async fn r94_stop_exact_stale_exit_guard(dead_binder_pid: u32, guard_pid: u32) -
     let script = format!(
         concat!(
             "$ErrorActionPreference='Stop';",
-            "$parent={dead_binder_pid};$pid={guard_pid};",
+            "$parent={dead_binder_pid};$targetPid={guard_pid};",
             "$marker='\\.codex-app-transfer\\codex-no-micro\\mcp-exit-guard-r32.ps1';",
-            "$p=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $pid);",
+            "$p=Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $targetPid);",
             "if(-not $p){{exit 41}};",
             "if([uint32]$p.ParentProcessId -ne [uint32]$parent){{exit 42}};",
             "if(-not ($p.Name -ieq 'pwsh.exe' -or $p.Name -ieq 'powershell.exe')){{exit 43}};",
             "if(-not $p.CommandLine -or $p.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){{exit 44}};",
-            "Stop-Process -Id $pid -Force -ErrorAction Stop;",
-            "Write-Output ('stopped=' + $pid)"
+            "Stop-Process -Id $targetPid -Force -ErrorAction Stop;",
+            "Write-Output ('stopped=' + $targetPid)"
         )
     );
     let result = run_command(

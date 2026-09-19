@@ -600,11 +600,11 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     // stripped from the snapshot copy by snapshot_codex_state().
     let snapshot_config = read_snapshot_config(paths);
 
-    // Resolve provider identity from the live config on the first apply.
-    // During one Transfer snapshot session the provider identity becomes a
-    // stable ownership boundary: redirecting another provider would require a
-    // second endpoint journal/restore record. Detect such changes before any
-    // routing mutation and require a fresh Transfer session instead.
+    // Resolve the user's source provider once, but never keep it as the
+    // effective Codex provider. After the first apply Transfer owns the absence
+    // of root model_provider; any new live value is a user identity edit and we
+    // fail before touching routing so a fresh snapshot can establish the new
+    // baseline.
     let live_config_for_provider = match std::fs::read_to_string(&paths.config_toml) {
         Ok(live) => live,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -615,91 +615,76 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     let snapshot_source_provider = snapshot_config
         .as_deref()
         .and_then(|snapshot| root_string_value(snapshot, "model_provider"));
-    let snapshot_provider_policy = snapshot_source_provider
-        .as_deref()
-        .and_then(|source_provider| {
-            snapshot_config.as_deref().and_then(|snapshot| {
-                provider_policy_truth_for_source(snapshot, source_provider)
-            })
-        });
-    let snapshot_provider_has_policy = snapshot_provider_policy
-        .as_ref()
-        .is_some_and(|policy| policy.has_provider_policy());
 
-    if !snapshot_taken_now {
-        let live_identity_is_expected = match (
-            snapshot_source_provider.as_deref(),
-            live_source_provider.as_deref(),
-        ) {
-            (None, None) => true,
-            (Some(snapshot_id), Some(live_id)) if snapshot_id == live_id => true,
-            // Identity-only providers are intentionally normalized to built-in
-            // openai by removing model_provider, so live=None is expected.
-            (Some(_), None) if !snapshot_provider_has_policy => true,
-            _ => false,
-        };
-        if !live_identity_is_expected {
-            tracing::warn!(
-                target: "codex_integration::apply",
-                marker = "CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED",
-                snapshot_provider = snapshot_source_provider.as_deref().unwrap_or("<builtin-openai>"),
-                live_provider = live_source_provider.as_deref().unwrap_or("<builtin-openai>"),
-                "model_provider changed during the current Transfer snapshot session; refusing to redirect another provider without a fresh baseline"
-            );
-            return Err(CodexError::Other(
-                "r94.1 detected a model_provider change during the current Transfer session; restart/re-apply Transfer so the new provider becomes the snapshot baseline".to_string(),
-            ));
-        }
+    if !snapshot_taken_now && live_source_provider.is_some() {
+        tracing::warn!(
+            target: "codex_integration::apply",
+            marker = "CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED",
+            snapshot_provider = snapshot_source_provider.as_deref().unwrap_or("<builtin-openai>"),
+            live_provider = live_source_provider.as_deref().unwrap_or("<builtin-openai>"),
+            "model_provider changed while Transfer owns built-in-openai normalization; refusing to overwrite the user edit"
+        );
+        return Err(CodexError::Other(
+            "r94.1 detected a model_provider change during the current Transfer session; restart/re-apply Transfer so the new provider becomes the snapshot baseline".to_string(),
+        ));
     }
 
-    let effective_source_provider = live_source_provider
-        .as_deref()
-        .or_else(|| {
-            if snapshot_taken_now {
-                snapshot_source_provider.as_deref()
-            } else {
-                None
-            }
-        });
-    let provider_policy = effective_source_provider
-        .and_then(|source_provider| {
-            provider_policy_truth_for_source(&live_config_for_provider, source_provider)
-        });
+    let source_provider = if snapshot_taken_now {
+        live_source_provider
+            .as_deref()
+            .or(snapshot_source_provider.as_deref())
+    } else {
+        snapshot_source_provider.as_deref()
+    };
 
-    // If the first-apply migration recovered only the provider *identity* from
-    // the snapshot but the corresponding live provider table has disappeared,
-    // never partially recreate it with just base_url. That would reactivate the
-    // provider while silently dropping retry/timeout/header policy from the
-    // snapshot. A complete live table is required for semantic carry-forward.
-    if provider_policy.is_none()
-        && snapshot_taken_now
-        && live_source_provider.is_none()
-        && snapshot_provider_has_policy
+    // The source table itself is never rewritten by r94.1. On repeated applies
+    // read its current live values so user edits to retry/header policy can be
+    // picked up, while the snapshot remains the provider-identity ownership
+    // boundary.
+    let provider_policy = source_provider.and_then(|source_provider| {
+        provider_policy_truth_for_source(&live_config_for_provider, source_provider)
+            .or_else(|| {
+                snapshot_config.as_deref().and_then(|snapshot| {
+                    provider_policy_truth_for_source(snapshot, source_provider)
+                })
+            })
+    });
+
+    // If the snapshot says the source provider had behavior policy but the live
+    // source table disappeared, do not rebuild a partial overlay from stale
+    // snapshot policy. That would hide a user deletion.
+    if !snapshot_taken_now
+        && let Some(snapshot) = snapshot_config.as_deref()
+        && let Some(snapshot_policy) = snapshot_source_provider
+            .as_deref()
+            .and_then(|source_provider| provider_policy_truth_for_source(snapshot, source_provider))
+        && snapshot_policy.has_provider_policy()
+        && snapshot_source_provider
+            .as_deref()
+            .and_then(|source_provider| {
+                provider_policy_truth_for_source(&live_config_for_provider, source_provider)
+            })
+            .is_none()
     {
-        let snapshot_policy = snapshot_provider_policy
-            .as_ref()
-            .expect("checked provider policy above");
         log_provider_policy_truth(
-            snapshot_policy,
+            &snapshot_policy,
             false,
-            "unchanged",
+            "openai",
             "live-provider-table-missing",
         );
         return Err(CodexError::Other(format!(
-            "r94.1 cannot preserve provider policy for '{}' because the live provider table is missing",
+            "r94.1 cannot preserve provider policy for '{}' because the live source provider table is missing",
             snapshot_policy.source_provider
         )));
     }
 
-    // Capability-aware fail-closed gate. Do this before openai_base_url or
-    // chatgpt_base_url are modified, so an unsupported semantic migration never
-    // leaves a half-applied config.
+    // Validate portability before any routing key or overlay field is mutated.
     if let Some(policy) = provider_policy.as_ref().filter(|policy| policy.has_provider_policy()) {
         if cfg.base_url.trim().is_empty() {
             log_provider_policy_truth(
                 policy,
                 false,
-                "unchanged",
+                "openai",
                 "relay-url-unavailable",
             );
             return Err(CodexError::Other(format!(
@@ -707,26 +692,17 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
                 policy.source_provider
             )));
         }
-        if let Some(reason) = provider_policy_carry_forward_block_reason(policy) {
-            log_provider_policy_truth(policy, false, "unchanged", reason);
+        if let Some(reason) = provider_policy_overlay_block_reason(policy) {
+            log_provider_policy_truth(policy, false, "openai", reason);
             return Err(CodexError::Other(format!(
-                "r94.1 cannot preserve provider policy for '{}' without changing behavior: {reason}",
+                "r94.1 cannot overlay provider policy from '{}' onto built-in openai without changing behavior: {reason}",
                 policy.source_provider
             )));
         }
     }
-    let carry_forward_provider_policy = provider_policy
+    let overlay_provider_policy = provider_policy
         .as_ref()
         .is_some_and(|policy| policy.has_provider_policy());
-
-    if carry_forward_provider_policy && cfg.preserve_chatgpt_auth {
-        tracing::warn!(
-            target: "codex_integration::apply",
-            marker = "CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY",
-            expected_relay = %cfg.base_url,
-            "custom provider policy is active while ChatGPT control-plane auth is preserved; the first runtime turn must be observed at the Transfer relay before this preview is considered validated"
-        );
-    }
 
     // 2. config.toml: openai_base_url
     if cfg.base_url.is_empty() {
@@ -755,47 +731,51 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
         sync_root_value(&paths.config_toml, "chatgpt_base_url", None)?;
     }
 
-    // 2b. Provider identity / policy semantic carry-forward.
+    // 2b. Provider identity remains built-in openai; behavior is overlaid.
     //
-    // Common case: no provider-only behavior fields -> keep r94's built-in
-    // openai normalization by stripping model_provider.
-    //
-    // Policy case: the user selected a non-built-in custom provider and its
-    // table contains behavior fields (retry/timeouts/headers/query params/
-    // capability flags or future unknown fields). Those settings only remain
-    // effective while that provider is selected, so retain the original
-    // provider id and rewrite only its base_url to the Transfer relay. The
-    // provider table itself is otherwise untouched.
-    //
-    // This deliberately avoids copying values into TOML roots that Codex does
-    // not read. Restore still uses the pre-apply snapshot to recover the user's
-    // original provider id and original endpoint.
-    if carry_forward_provider_policy {
+    // This is the user's requested r94 behavior: Transfer still strips the root
+    // model_provider selection. We do NOT keep a custom provider such as
+    // "OpenAi" active just to make stream_max_retries effective.
+    sync_root_value(&paths.config_toml, "model_provider", None)?;
+
+    if overlay_provider_policy {
         let policy = provider_policy
             .as_ref()
-            .expect("carry-forward implies provider policy");
-        let section = format!("model_providers.{}", policy.source_provider);
-        let relay_literal = toml_string_literal(cfg.base_url);
-        sync_table_field(
-            &paths.config_toml,
-            &section,
-            "base_url",
-            Some(&relay_literal),
-        )?;
-        let provider_literal = toml_string_literal(&policy.source_provider);
-        sync_root_value(
-            &paths.config_toml,
-            "model_provider",
-            Some(&provider_literal),
-        )?;
+            .expect("overlay implies provider policy");
+        write_openai_policy_overlay(paths, policy, &live_config_for_provider)?;
+        let native_fields = OPENAI_POLICY_OVERLAY_FIELDS
+            .iter()
+            .filter(|field| {
+                snapshot_table_field_literal(
+                    &live_config_for_provider,
+                    &format!("model_providers.{}", policy.source_provider),
+                    field,
+                )
+                .is_some()
+            })
+            .count();
         log_provider_policy_truth(
             policy,
-            true,
-            &policy.source_provider,
-            "custom-provider-policy-preserved",
+            native_fields > 0,
+            "openai",
+            if native_fields > 0 {
+                "built-in-openai-native-policy-overlay"
+            } else {
+                "built-in-openai-policy-already-equivalent"
+            },
         );
+        if native_fields > 0 {
+            tracing::info!(
+                target: "codex_integration::apply",
+                marker = "CAS-R94-1-BUILTIN-OPENAI-RUNTIME-REQUIRED",
+                source_provider = %policy.source_provider,
+                effective_provider = "openai",
+                overlay_manifest = %paths.openai_policy_overlay_json.display(),
+                "portable provider fields require the r94.1 patched Codex runtime; stock Codex would ignore a configured openai collision"
+            );
+        }
     } else {
-        sync_root_value(&paths.config_toml, "model_provider", None)?;
+        remove_openai_policy_overlay_manifest(paths)?;
     }
 
     // 2c. **#212/#215 Codex 联网默认开**(Codex docs "Full access" 配对):

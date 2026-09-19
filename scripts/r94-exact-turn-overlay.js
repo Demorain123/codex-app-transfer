@@ -780,107 +780,124 @@
     return r94SpecificSemanticOutputSurface(node) || r94AssistantMessageSurface(node);
   }
 
-  function r94DirectVisualChildren(parent) {
-    if (!(parent instanceof Element)) return [];
-    return Array.from(parent.children || []).filter(function(child) {
-      if (!(child instanceof Element) || !isVisible(child)) return false;
-      if (child.closest('#' + R94_OVERLAY_ID)) return false;
-      if (insideComposer(child) || insideOwnUi(child) || r94IsUserSurface(child)) return false;
-      return normalizedText(child).length >= 2 || r94StrongSemanticOutputSurface(child);
+  // R94_SEMANTIC_OUTPUT_UNIT_RUNTIME
+  // One timestamp belongs to one Codex output item/message/tool surface, not to
+  // arbitrary visual descendants such as paragraphs, list items, table rows or
+  // code-block internals. This prevents one assistant update from exploding
+  // into dozens of unrelated timestamps when Markdown reflows.
+  const R94_SEMANTIC_OUTPUT_SELECTOR = [
+    '[data-message-author-role="assistant"]',
+    '[data-local-conversation-final-assistant]',
+    '[role="status"]',
+    '[data-testid*="agent"]',
+    '[data-testid*="tool"]',
+    '[data-testid*="command"]',
+    '[data-testid*="integration"]'
+  ].join(',');
+
+  function r94SemanticKind(node) {
+    if (!(node instanceof Element)) return 'assistant';
+    if (node.matches('[data-local-conversation-final-assistant]')) return 'final';
+    if (node.matches('[data-testid*="agent"]') || node.closest('[data-testid*="agent"]')) return 'agent';
+    if (node.matches('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]') ||
+        node.closest('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]')) return 'tool';
+    if (node.matches('[role="status"]') || node.closest('[role="status"]')) return 'status';
+    return 'assistant';
+  }
+
+  function r94SemanticOutputSurfaceUsable(node, turn) {
+    if (!(node instanceof Element) || !node.isConnected || !isVisible(node)) return false;
+    if (!(turn instanceof Element) || (!turn.contains(node) && node !== turn)) return false;
+    if (insideComposer(node) || insideOwnUi(node) || r94IsUserSurface(node)) return false;
+    if (normalizedText(node).length < 2 && !r94StrongSemanticOutputSurface(node)) return false;
+    return true;
+  }
+
+  function r94CollectSemanticOutputSurfaces(turn) {
+    if (!(turn instanceof Element)) return [];
+    const raw = [];
+    if (turn.matches(R94_SEMANTIC_OUTPUT_SELECTOR)) raw.push(turn);
+    turn.querySelectorAll(R94_SEMANTIC_OUTPUT_SELECTOR).forEach(function(node) { raw.push(node); });
+
+    const filtered = [];
+    const seen = new Set();
+    for (const node of raw) {
+      if (!r94SemanticOutputSurfaceUsable(node, turn) || seen.has(node)) continue;
+      seen.add(node);
+      filtered.push(node);
+    }
+
+    // Prefer concrete tool/agent/status descendants over their generic assistant
+    // wrapper. Plain assistant updates remain one unit. A final assistant block
+    // stays one unit and is later suppressed when Codex already owns its sent-time.
+    return filtered.filter(function(node) {
+      const kind = r94SemanticKind(node);
+      if (kind !== 'assistant') return true;
+      for (const other of filtered) {
+        if (other === node || !node.contains(other)) continue;
+        const otherKind = r94SemanticKind(other);
+        if (otherKind === 'tool' || otherKind === 'agent' || otherKind === 'status') return false;
+      }
+      return true;
     });
   }
 
-  function r94AtomicTextSurface(node) {
-    if (!(node instanceof Element)) return false;
-    if (r94StrongSemanticOutputSurface(node)) return true;
-    const tag = String(node.tagName || '').toLowerCase();
-    return ['p','li','pre','blockquote','table','tr','details','summary'].includes(tag);
-  }
-
-  function r94VerticalRowCount(children) {
-    const rects = [];
-    for (const child of children) {
-      if (!(child instanceof Element) || !isVisible(child)) continue;
-      try {
-        const rect = child.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        rects.push({ top: rect.top, bottom: rect.bottom });
-      } catch {}
-    }
-    rects.sort(function(a,b) { return a.top - b.top; });
-    if (!rects.length) return 0;
-    let rows = 1;
-    let bottom = rects[0].bottom;
-    for (let i = 1; i < rects.length; i += 1) {
-      const rect = rects[i];
-      if (rect.top > bottom + 2) rows += 1;
-      bottom = Math.max(bottom, rect.bottom);
-    }
-    return rows;
-  }
-
-  function r94CollectVisualSegments(node, root, depth) {
-    if (!(node instanceof Element) || !isVisible(node) || insideComposer(node) || insideOwnUi(node) || r94IsUserSurface(node)) return [];
-    if (normalizedText(node).length < 2 && !r94StrongSemanticOutputSurface(node)) return [];
-    if (node.matches('[data-local-conversation-final-assistant]')) return [node];
-    if (r94SpecificSemanticOutputSurface(node)) return [node];
-    if (r94AssistantMessageSurface(node)) {
-      const nestedSpecific = node.querySelector('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
-      // Plain assistant update => one timestamp for the whole update block.
-      // If it contains explicit tool/agent/status children, keep descending so
-      // those operational blocks can receive their own timestamps.
-      if (!(nestedSpecific instanceof Element)) return [node];
-    }
-    if (r94AtomicTextSurface(node)) return [node];
-    if (depth >= 12) return [node];
-
-    const semantic = node.closest('[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]');
-    if (semantic instanceof Element && semantic !== root && root instanceof Element && root.contains(semantic)) {
-      let owner = semantic;
-      let parent = semantic.parentElement;
-      while (parent instanceof Element && parent !== root) {
-        if (r94StrongSemanticOutputSurface(parent)) owner = parent;
-        parent = parent.parentElement;
-      }
-      if (owner === node || node.contains(owner)) return [owner];
-    }
-
-    const children = r94DirectVisualChildren(node);
-    if (!children.length) return [node];
-    if (children.length === 1) return r94CollectVisualSegments(children[0], root, depth + 1);
-    if (r94VerticalRowCount(children) < 2) return [node];
-
-    const out = [];
-    for (const child of children) {
-      const nested = r94CollectVisualSegments(child, root, depth + 1);
-      for (const item of nested) out.push(item);
-    }
-    return out.length ? out : [node];
-  }
-
   function r94TopLevelSegments(turn) {
-    if (!(turn instanceof Element)) return [];
-    let candidates = [];
-    const direct = r94DirectVisualChildren(turn);
-    if (!direct.length) candidates = r94CollectVisualSegments(turn, turn, 0);
-    else {
-      for (const child of direct) {
-        const nested = r94CollectVisualSegments(child, turn, 0);
-        for (const item of nested) candidates.push(item);
+    return r94CollectSemanticOutputSurfaces(turn);
+  }
+
+  function r94NormalizeItemId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const uuid = raw.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    return uuid ? uuid[0] : raw;
+  }
+
+  function r94ItemIdForSurface(surface) {
+    if (!(surface instanceof Element)) return '';
+    const attrs = [
+      'data-item-id',
+      'data-message-id',
+      'data-content-search-item-id',
+      'data-agent-item-id',
+      'data-tool-call-id',
+      'data-call-id'
+    ];
+    const nodes = [surface];
+    for (const child of surface.querySelectorAll(
+      '[data-item-id],[data-message-id],[data-content-search-item-id],[data-agent-item-id],[data-tool-call-id],[data-call-id]'
+    )) nodes.push(child);
+    for (const node of nodes) {
+      if (!(node instanceof Element)) continue;
+      for (const attr of attrs) {
+        const value = r94NormalizeItemId(node.getAttribute(attr));
+        if (value) return value;
       }
     }
+    return '';
+  }
 
-    const unique = [];
-    const seen = new Set();
-    for (const candidate of candidates) {
-      if (!(candidate instanceof Element) || seen.has(candidate)) continue;
-      if (!turn.contains(candidate) && candidate !== turn) continue;
-      if (!isVisible(candidate) || insideComposer(candidate) || insideOwnUi(candidate) || r94IsUserSurface(candidate)) continue;
-      if (normalizedText(candidate).length < 2 && !r94StrongSemanticOutputSurface(candidate)) continue;
-      seen.add(candidate);
-      unique.push(candidate);
-    }
-    return unique;
+  function r94ExactItemTimeForSurface(surface, turn, capability) {
+    if (!(surface instanceof Element) || !(turn instanceof Element) || !capability ||
+        typeof capability.getItemRecord !== 'function') return null;
+    const ids = r94IdsForTurn(turn);
+    if (!ids) return null;
+    const itemId = r94ItemIdForSurface(surface);
+    if (!itemId) return null;
+    const record = capability.getItemRecord(ids.threadId, ids.turnId, itemId);
+    if (!record) return null;
+    const started = Number(record.startedAtMs);
+    const completed = Number(record.completedAtMs);
+    const epoch = Number.isFinite(started) && started > 0
+      ? started
+      : (Number.isFinite(completed) && completed > 0 ? completed : null);
+    if (!Number.isFinite(epoch)) return null;
+    return {
+      epoch,
+      source: Number.isFinite(started) && started > 0 ? 'item/started' : 'item/completed',
+      itemId,
+      itemType: String(record.itemType || '')
+    };
   }
 
   function r94StructuralPath(node, stop) {

@@ -230,6 +230,8 @@ function Assert-GeneratedTimestampProfile([string]$Text) {
         'R94_NATIVE_RAIL_NO_CUSTOM_PAINT_RUNTIME',
         'R94_STREAMING_SEGMENT_THROTTLE_RUNTIME',
         'R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME',
+    'R94_MULTI_PANE_THREAD_OWNERSHIP_RUNTIME',
+    'R94_MULTI_PANE_LATEST_OWNER_CACHE_RUNTIME',
     'R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME',
         'window.setTimeout(r94FlushSegmentTurns, 220)',
         'const timelineRail = null;',

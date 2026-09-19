@@ -11,6 +11,8 @@ foreach ($Marker in @(
     'R94_EXACT_TIMESTAMP_OVERLAY_RUNTIME',
     'R94_EXACT_TURN_CAPABILITY_RUNTIME',
     'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
+    'function r94AssistantMessageSurface(node) {',
+    'function r94IsUserSurface(node) {',
     'host-first-observed-live-output'
 )) {
     if (-not $R94OverlayBody.Contains($Marker)) {

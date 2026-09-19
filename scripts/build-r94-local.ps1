@@ -566,46 +566,46 @@ Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'CAS-R94-1-PROVIDER-CONFIG-TRUTH',
-    'CAS-R94-1-PROVIDER-POLICY-CARRY-FORWARD',
+    'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY',
     'CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY',
-    'provider_policy_carry_forward_block_reason',
-    'custom-provider-policy-preserved',
-    'built-in-openai-id-collision',
+    'provider_policy_overlay_block_reason',
+    'OPENAI_POLICY_OVERLAY_FIELDS',
+    'write_openai_policy_overlay',
+    'restore_openai_policy_overlay',
+    'built-in-openai-native-policy-overlay',
+    'CAS-R94-1-BUILTIN-OPENAI-RUNTIME-REQUIRED',
     'provider-id-requires-quoted-toml-key',
     'nested-provider-policy-not-portable',
-    'CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY',
     'wire-api-not-responses',
-    'relay-auth-path-not-openai-auth',
-    'endpoint-coupled-provider-policy',
+    'boolean-provider-capability-not-portable',
+    'unsupported-openai-overlay-field',
     'provider_section_fields',
     'section_requires_quoted_key',
     'behavior_fields',
-    'policy.source_provider == "openai"',
-    'sync_table_field(',
-    '"base_url"',
+    'sync_root_value(&paths.config_toml, "model_provider", None)',
+    '"model_providers.openai"',
     'r94_1_provider_policy_truth_reads_custom_provider_fields',
     'r94_1_provider_policy_reader_accepts_plain_header_comment',
     'r94_1_quoted_provider_table_fails_closed_before_mutation',
     'r94_1_nested_provider_policy_fails_closed_before_mutation',
     'r94_1_nested_provider_table_is_detected_even_after_unrelated_table',
-    'r94_1_dotted_endpoint_coupled_policy_fails_closed',
+    'r94_1_dotted_unknown_provider_policy_fails_closed',
     'r94_1_live_provider_switch_in_same_session_fails_before_mutation',
-    'r94_1_live_provider_removal_in_policy_session_fails_before_mutation',
+    'r94_1_expected_root_provider_absence_reuses_snapshot_source',
     'r94_1_identity_only_provider_can_repeat_after_transfer_strips_root_identity',
     'CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED',
     'r94_1_dotted_provider_text_inside_unrelated_table_is_not_root_policy',
     'r94_1_snapshot_policy_without_live_provider_table_is_detected',
-    'r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table',
+    'r94_1_dotted_root_provider_policy_overlays_builtin_openai',
     'live-provider-table-missing',
     'root_scope',
-    'r94_1_provider_policy_carry_forward_keeps_user_fields_effective',
-    'r94_1_restore_preserves_post_apply_user_endpoint_edit',
-    'r94_1_restore_repairs_old_provider_endpoint_after_active_provider_switch',
-    'r94_1_policy_with_non_openai_auth_fails_before_routing_mutation',
+    'r94_1_provider_policy_overlays_builtin_openai_and_keeps_source_untouched',
+    'r94_1_restore_preserves_source_provider_endpoint_edit',
+    'r94_1_restore_preserves_live_provider_identity_edit_and_restores_overlay',
+    'r94_1_portable_retry_policy_reuses_values_without_source_auth',
     'r94_1_identity_only_provider_still_normalizes_to_builtin_openai',
-    'r94_1_builtin_openai_policy_collision_fails_before_routing_mutation',
-    'CAS-R94-1-PROVIDER-ENDPOINT-RESTORE-SYMMETRY',
-    'provider_endpoint_owned_by_transfer',
+    'r94_1_builtin_openai_policy_is_journalled_for_native_overlay',
+    'CAS-R94-1-BUILTIN-OPENAI-OVERLAY-RESTORE',
     'snapshot_toml_value_literal(snapshot_config, "model_context_window")',
     'model_context_window_set: !preserve_external_model_catalog',
     'r94_1_external_catalog_removes_transfer_only_global_window',
@@ -618,10 +618,12 @@ foreach ($Marker in @(
         throw "r94.1 provider/config truth contract missing: $Marker"
     }
 }
+
 foreach ($Forbidden in @(
-    'source provider policy is preserved in user config but is not effective after built-in openai normalization',
-    'carried_forward = false,',
-    'policy.source_provider.eq_ignore_ascii_case("openai")',
+    'custom-provider-policy-preserved',
+    'CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY',
+    'provider_policy_carry_forward_block_reason',
+    'Some(&provider_literal)',
     'sync_root_value(&paths.config_toml, "stream_max_retries"',
     'sync_root_value(&paths.config_toml, "request_max_retries"',
     'sync_root_value(&paths.config_toml, "stream_idle_timeout_ms"',
@@ -632,36 +634,26 @@ foreach ($Forbidden in @(
     'sync_root_value(&paths.config_toml, "http_headers"'
 )) {
     if ($R941ApplyRsText.Contains($Forbidden)) {
-        throw "r94.1 provider policy carry-forward contract violated: $Forbidden"
+        throw "r94.1 built-in openai policy-overlay contract violated: $Forbidden"
     }
 }
-if (-not $R941ApplyRsText.Contains('Some(&relay_literal)') -or
-    -not $R941ApplyRsText.Contains('Some(&provider_literal)')) {
-    throw 'r94.1 provider policy carry-forward must keep the source provider active and redirect only its endpoint'
-}
+
 $DoubleSuffix = '94.1' + '.1'
 if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocation.MyCommand.Path)).Contains($DoubleSuffix)) {
     throw ("r94.1 build source contains a double-suffixed preview identity: " + $DoubleSuffix)
 }
 Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 
-Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_PREFLIGHT_PASS' -ForegroundColor Green
-Write-Host '  - provider behavior fields remain on the active source provider; Transfer rewrites only the provider endpoint needed for relay routing'
-Write-Host '  - identity-only providers still normalize to built-in openai, preserving the common r94 Desktop/history path'
-Write-Host '  - provider id matching is case-sensitive: custom OpenAi is preserved, exact built-in openai collision fails closed'
-Write-Host '  - quoted/nested provider tables and endpoint-coupled auth policies fail before routing mutation instead of claiming partial semantic preservation'
-Write-Host '  - ChatGPT-auth + custom-provider preview emits an explicit first-turn relay canary requirement; config success alone is not treated as transport proof'
-Write-Host '  - same-session model_provider identity changes fail closed before routing mutation; restart/re-apply establishes a fresh provider baseline'
-Write-Host '  - identity-only provider normalization remains repeatable and is not mistaken for a user identity edit'
-Write-Host '  - nested provider subtables are detected across the full document, and dotted auth/AWS policy fails closed'
-Write-Host '  - dotted provider keys are recognized only at TOML root scope; unrelated table text cannot impersonate provider policy'
-Write-Host '  - snapshot policy never partially resurrects a missing live provider table'
-Write-Host '  - root-level dotted provider policy is carried forward without mixing it with a duplicate section table'
-Write-Host '  - provider endpoint restore is symmetric and only reverts an endpoint still proven to be Transfer-owned'
-Write-Host '  - post-apply user endpoint edits win over snapshot restoration'
-Write-Host '  - provider policy is never faked by moving values to unsupported TOML root keys'
-Write-Host '  - external catalog removes only a proven Transfer-owned root window, restores explicit snapshot-owned values, and preserves ambiguous live edits'
-Write-Host '  - unrelated user config keys and future provider fields remain user-owned'
+Write-Host 'R94_1_BUILTIN_OPENAI_POLICY_OVERLAY_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - Transfer keeps the effective Codex provider on built-in openai; custom source provider identity is not retained for runtime'
+Write-Host '  - portable provider behavior fields are copied into a Transfer-owned [model_providers.openai] overlay while the source table stays user-owned'
+Write-Host '  - stock Codex built-in-provider collision is not treated as success; a native runtime overlay is explicitly required when copied fields exist'
+Write-Host '  - retry budgets, stream/connect timeouts, query params and header maps are journalled and restored symmetrically'
+Write-Host '  - unsupported/nested/quoted/future provider behavior fails closed instead of silently degrading to Codex defaults'
+Write-Host '  - same-session model_provider identity changes fail closed before routing mutation; a fresh apply establishes a new source baseline'
+Write-Host '  - identity-only providers still normalize directly to built-in openai and require no patched provider-policy runtime'
+Write-Host '  - source auth/routing metadata remains untouched; only portable behavior is reused'
+Write-Host '  - external catalog ownership rules from r94.1 remain unchanged'
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',

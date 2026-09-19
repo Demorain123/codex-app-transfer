@@ -480,6 +480,7 @@ foreach ($Marker in @(
     'R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME',
     'R94_STATUS_TRUTH_SEMANTICS_RUNTIME',
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
+    'R94_TELEMETRY_TRUTH_SEMANTICS_PASS',
     'state.ingestExternalUsage = ingestExternalUsage',
     'contextTokens',
     "('session ' + shortNumber(displayUsage.sessionTotalTokens))",
@@ -494,7 +495,11 @@ foreach ($Marker in @(
 }
 foreach ($Forbidden in @(
     'R94_TURN_STATUS_BASE_OWNER_PASS',
-    'R94_TURN_STATUS_BASE_OWNER_RUNTIME'
+    'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
+    'nativeFallback.nativeSpeed',
+    'exact.contextPercent = Number.isFinite(exact.inputTokens)',
+    'contextPercent: Number.isFinite(inputTokens)',
+    "('total ' + shortNumber(displayUsage.sessionTotalTokens))"
 )) {
     if ($TurnNotificationFinalizer.Contains($Forbidden)) {
         throw "r94 turn finalizer still permits base-status downgrade: $Forbidden"

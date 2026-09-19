@@ -3013,7 +3013,7 @@ supports_websockets = true
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
         )
         .unwrap();
 
@@ -3170,7 +3170,7 @@ supports_websockets = true
         std::fs::create_dir_all(&paths.codex_home).unwrap();
         std::fs::write(
             &paths.config_toml,
-            "model_provider = \"OpenAi\"\nopenai_base_url = \"http://127.0.0.1:18080\"\nmodel_context_window = 1000000\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nstream_max_retries = 15\n",
+            "model_provider = \"OpenAi\"\nopenai_base_url = \"http://127.0.0.1:18080\"\nmodel_context_window = 1000000\nmodel_catalog_json = \"V:/user/catalog.json\"\n\n[model_providers.OpenAi]\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n",
         )
         .unwrap();
 

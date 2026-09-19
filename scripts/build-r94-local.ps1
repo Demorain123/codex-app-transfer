@@ -125,6 +125,8 @@ foreach ($Marker in @(
     'R94_LIVE_SEGMENT_TIMESTAMP_RUNTIME',
     'function r94CollectVisualSegments(node, root, depth) {',
     'function r94TopLevelSegments(turn) {',
+    'function r94AssistantMessageSurface(node) {',
+    'function r94IsUserSurface(node) {',
     'function r94HostEpochNow() {',
     'host-first-observed-live-output',
     'r94BaselineCurrentSegments();',

@@ -90,7 +90,7 @@ $MainProcessCollector = @'
   const activeThreadExpression = "(() => {" +
     "const a=(e,n)=>e&&e.getAttribute?e.getAttribute(n):null;" +
     "const out=[];const seen=new Set();" +
-    "for(const b of document.querySelectorAll('[data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id]')){" +
+    "for(const b of document.querySelectorAll('[data-cas-pane-statusbar=\"true\"][data-cas-pane-thread-id],[data-cas-status-inside-composer=\"true\"][data-cas-pane-thread-id]')){" +
       "const v=String(a(b,'data-cas-pane-thread-id')||'').replace(/^local:/i,'').trim().toLowerCase();" +
       "if(v&&!seen.has(v)){seen.add(v);out.push(v);}" +
     "}" +

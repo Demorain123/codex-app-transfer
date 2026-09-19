@@ -3244,6 +3244,53 @@ supports_websockets = true
     }
 
     #[test]
+    fn r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::write(
+            &paths.config_toml,
+            "model_provider = \"OpenAi\"\nmodel_providers.OpenAi.name = \"OpenAi\"\nmodel_providers.OpenAi.base_url = \"https://old.example/v1\"\nmodel_providers.OpenAi.wire_api = \"responses\"\nmodel_providers.OpenAi.requires_openai_auth = true\nmodel_providers.OpenAi.stream_max_retries = 15\n",
+        )
+        .unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        apply_provider(&paths, &cfg).unwrap();
+        let toml = read_toml(&paths);
+        assert!(toml.contains("model_provider = \"OpenAi\""), "{toml}");
+        assert!(
+            toml.contains(
+                "model_providers.OpenAi.base_url = \"http://127.0.0.1:18080\""
+            ),
+            "{toml}"
+        );
+        assert!(
+            toml.contains("model_providers.OpenAi.stream_max_retries = 15"),
+            "{toml}"
+        );
+        assert!(
+            !toml.contains("[model_providers.OpenAi]"),
+            "dotted-root provider form must not be mixed with a section table: {toml}"
+        );
+    }
+
+    #[test]
     fn r94_1_provider_policy_carry_forward_keeps_user_fields_effective() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();

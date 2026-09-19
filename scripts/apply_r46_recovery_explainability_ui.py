@@ -71,6 +71,24 @@ const chainRepairGuide = computed<ChainRepairGuide>(() => {
     }
   }
 
+  if (h.transfer.code === 'transfer_port_stale_owner') {
+    return {
+      mode: 'repair', canRun: true, label: '尝试修复', title: '适用：旧 Transfer 的 Exit Guard 残留占用固定端口',
+      summary: '已检测到 Windows 监听端点仍指向一个死亡 binder PID。按钮会再次确认同一 dead binder，并且只在 Codex 已退出、唯一直接子进程精确匹配 Transfer 的 mcp-exit-guard-r32.ps1 时停止该一个 PID。',
+      willDo: '连续确认 dead binder → 精确识别旧 r32 Exit Guard 直接子进程 → 再次核验身份后只停止该 PID → 等待原固定端口释放 → 在同一端口重新启动 Transfer。',
+      wontDo: '不会换端口，不会按进程名批量结束 PowerShell/MCP，不会杀仍存活的端口 owner，不会使用 SO_REUSEADDR，也不会修改账号、模型、会话历史、Docker 数据卷或 workspace。',
+    }
+  }
+
+  if (h.transfer.code === 'transfer_port_occupied_live') {
+    return {
+      mode: 'advice', canRun: false, label: '此故障不适用', title: '不适用：固定端口由仍存活的进程占用',
+      summary: '这不是已验证的 stale Exit Guard 场景。存在真实 live owner 时，自动停止进程可能误伤其他程序。',
+      willDo: '展开 Transfer 明细查看 owner PID/进程并人工确认来源。',
+      wontDo: '不会杀 live owner，不会抢占监听，也不会自动换端口。',
+    }
+  }
+
   if (h.transfer.code === 'transfer_stopped') {
     return {
       mode: 'repair', canRun: true, label: '尝试修复', title: '适用：Transfer 本地转发器未启动',
@@ -414,6 +432,9 @@ for invariant in (
     "旧会话恢复（先预览）",
     "相同故障指纹已经尝试过一次",
     "不适用：MCP/helper 进程异常",
+    "适用：旧 Transfer 的 Exit Guard 残留占用固定端口",
+    "transfer_port_stale_owner",
+    "不会换端口",
     "第一步只做：",
 ):
     if invariant not in text:

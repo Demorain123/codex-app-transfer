@@ -814,6 +814,8 @@
   const R94_SEMANTIC_OUTPUT_SELECTOR = [
     '[data-message-author-role="assistant"]',
     '[data-local-conversation-final-assistant]',
+    '[data-item-id]',
+    '[data-content-search-item-id]',
     '[role="status"]',
     '[data-testid*="agent"]',
     '[data-testid*="tool"]',
@@ -977,6 +979,7 @@
     const ids = r94IdsForTurn(turn);
     const rootId = ids && ids.turnId ? ids.turnId : r94StructuralPath(turn, document.body);
     const semanticId =
+      r94ItemIdForSurface(segment) ||
       segment.getAttribute('data-message-id') ||
       segment.getAttribute('data-testid') ||
       segment.getAttribute('role') || '';

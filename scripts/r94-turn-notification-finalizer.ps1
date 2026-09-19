@@ -616,6 +616,18 @@ if ($R94TurnStatusOwner -eq 'pane') {
     throw 'r94 pane turn-status owner was not resolved'
 }
 
+foreach ($Forbidden in @(
+    'nativeFallback.nativeSpeed',
+    'exact.contextPercent = Number.isFinite(exact.inputTokens)',
+    'contextPercent: Number.isFinite(inputTokens)',
+    "('total ' + shortNumber(displayUsage.sessionTotalTokens))"
+)) {
+    if ($Patched.Contains($Forbidden)) {
+        throw "r94 telemetry truth regression survived final materialization: $Forbidden"
+    }
+}
+Write-Host 'R94_TELEMETRY_TRUTH_SEMANTICS_PASS' -ForegroundColor Green
+
 Write-Host 'R94_LOCAL_ITEM_LIFECYCLE_BRIDGE_PASS' -ForegroundColor Green
 Write-Host 'R94_MULTI_PANE_USAGE_OWNERSHIP_PASS' -ForegroundColor Green
 Write-Host 'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS' -ForegroundColor Green

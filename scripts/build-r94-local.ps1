@@ -247,6 +247,14 @@ foreach ($Marker in @(
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }
 }
+foreach ($Forbidden in @(
+    'R94_TURN_STATUS_BASE_OWNER_PASS',
+    'R94_TURN_STATUS_BASE_OWNER_RUNTIME'
+)) {
+    if ($TurnNotificationFinalizer.Contains($Forbidden)) {
+        throw "r94 turn finalizer still permits base-status downgrade: $Forbidden"
+    }
+}
 Assert-PowerShellParses $ComposerStatusFinalizer 'r94 composer status finalizer'
 Assert-PowerShellParses $TurnNotificationFinalizer 'r94 turn notification finalizer'
 Write-Host 'R94_STATUS_AND_TURN_FINALIZERS_PREFLIGHT_PASS' -ForegroundColor Green

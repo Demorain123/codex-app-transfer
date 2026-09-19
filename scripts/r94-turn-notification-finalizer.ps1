@@ -334,11 +334,13 @@ if ($R94PaneStatusStart.Success) {
     $R94TurnStatusOwner = 'pane'
     Write-Host 'R94_TURN_STATUS_PANE_OWNER_PASS' -ForegroundColor Green
 } elseif ($Patched.Contains('  function statusHtml() {')) {
-    $Patched = Replace-BlockRequired $Patched '  function statusHtml() {' '  function ensureMirror() {' $R94BaseStatusHtml 'r94 turn-scoped base status presentation'
-    $R94TurnStatusOwner = 'base'
-    Write-Host 'R94_TURN_STATUS_BASE_OWNER_PASS' -ForegroundColor Yellow
+    # R94_PANE_STATUS_OWNER_REQUIRED
+    # r89/r90 pane status is part of the inherited contract. A base-only shape
+    # means an earlier generated-owner transform silently deleted that runtime,
+    # which must fail the build instead of shipping another UI regression.
+    throw 'r94 pane status owner missing; refusing base-only status downgrade'
 } else {
-    throw 'r94 could not locate either pane statusHtmlForPane(...) or base statusHtml() runtime owner'
+    throw 'r94 could not locate inherited pane statusHtmlForPane(...) runtime owner'
 }
 
 $R94ConsumeText = @'
@@ -398,18 +400,8 @@ if ($R94TurnStatusOwner -eq 'pane') {
             throw "r94 pane turn-status marker missing: $Marker"
         }
     }
-} elseif ($R94TurnStatusOwner -eq 'base') {
-    foreach ($Marker in @(
-        'R94_TURN_STATUS_BASE_OWNER_RUNTIME',
-        'exact-turn-capability',
-        'exact-jsonl-fallback'
-    )) {
-        if (-not $Patched.Contains($Marker)) {
-            throw "r94 base turn-status marker missing: $Marker"
-        }
-    }
 } else {
-    throw 'r94 turn-status owner was not resolved'
+    throw 'r94 pane turn-status owner was not resolved'
 }
 
 Write-Host 'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS' -ForegroundColor Green

@@ -208,14 +208,23 @@ fn provider_section_fields(
     let mut section_requires_quoted_key = false;
     let mut fields = Vec::new();
 
+    let matches_header = |candidate: &str, header: &str| {
+        if candidate == header {
+            return true;
+        }
+        candidate
+            .strip_prefix(header)
+            .is_some_and(|rest| rest.trim_start().starts_with('#'))
+    };
+
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        if trimmed.starts_with('[') {
             if in_section {
                 break;
             }
-            let plain = trimmed == plain_header;
-            let quoted = trimmed == quoted_header;
+            let plain = matches_header(trimmed, &plain_header);
+            let quoted = matches_header(trimmed, &quoted_header);
             in_section = plain || quoted;
             if in_section {
                 found_section = true;
@@ -2892,6 +2901,50 @@ supports_websockets = true
         assert_eq!(truth.wire_api.as_deref(), Some("\"responses\""));
         assert_eq!(truth.supports_websockets.as_deref(), Some("true"));
         assert!(truth.has_provider_policy());
+    }
+
+    #[test]
+    fn r94_1_provider_policy_reader_accepts_plain_header_comment() {
+        let config = "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi] # user comment\nrequires_openai_auth = true\nstream_max_retries = 15\n";
+        let truth = provider_policy_truth_from_config(config).expect("provider with table comment");
+        assert_eq!(truth.source_provider, "OpenAi");
+        assert_eq!(truth.stream_max_retries.as_deref(), Some("15"));
+        assert!(!truth.section_requires_quoted_key);
+        assert!(truth.has_provider_policy());
+    }
+
+    #[test]
+    fn r94_1_quoted_provider_table_fails_closed_before_mutation() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        let original = "model_provider = \"OpenAi\"\n\n[model_providers.\"OpenAi\"]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nstream_max_retries = 15\n";
+        std::fs::write(&paths.config_toml, original).unwrap();
+
+        let cfg = ApplyConfig {
+            base_url: "http://127.0.0.1:18080",
+            gateway_api_key: "cas_test",
+            supports_1m: false,
+            provider_name: "Mock",
+            default_model: "mock-model",
+            model_mappings: None,
+            model_capabilities: None,
+            is_qoder: false,
+            model_display_names: None,
+            review_model_slot: None,
+            auto_review_model_overrides: None,
+            app_version: "r94.1-test",
+            codex_network_access: true,
+            preserve_chatgpt_auth: false,
+            preserve_external_model_catalog: false,
+        };
+
+        let err = apply_provider(&paths, &cfg)
+            .expect_err("quoted provider table must fail closed until sync helper supports exact quoted headers");
+        assert!(
+            err.to_string().contains("provider-id-requires-quoted-toml-key"),
+            "{err}"
+        );
+        assert_eq!(read_toml(&paths), original);
     }
 
     #[test]

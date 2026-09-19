@@ -328,7 +328,7 @@ $MainProcessCollector = @'
             const activeTurn = activeTurnId ? (turnMeta.get(activeTurnId) || { turnId: activeTurnId }) : null;
             const envelope = {
               info: previousEnvelope?.info || null,
-              updatedAt: latestItemEventAt || rowEpoch(lines.length ? { timestamp: '' } : null, Date.now()),
+              updatedAt: latestItemEventAt || Date.now(),
               model: previousEnvelope?.model || null,
               turnId: previousEnvelope?.turnId || null,
               turnStartedAt: previousEnvelope?.turnStartedAt ?? null,

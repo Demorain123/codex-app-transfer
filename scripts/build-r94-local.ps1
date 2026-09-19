@@ -488,7 +488,8 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host 'R94_EXACT_TURN_PREFLIGHT_ONLY_PASS' -ForegroundColor Green
         Write-Host '  - r90 pane ownership / WAITING / truth-first telemetry remains inherited'
         Write-Host '  - legacy per-segment timestamp stamping is disabled at the final r86/r78 owner'
-        Write-Host '  - native final/user timestamps remain authoritative; live assistant/progress/tool blocks get host first-observed ≈ timestamps in the Transfer overlay'
+        Write-Host '  - native final/user timestamps remain authoritative; live assistant/progress/tool blocks get host first-observed ≈ YYYY-MM-DD HH:mm:ss timestamps'
+        Write-Host '  - a separate left timeline rail exposes dated navigation nodes and click-to-jump without mutating Codex React DOM'
         Write-Host '  - native Codex turn/action-row DOM is read-only; labels live in a Transfer-owned overlay root'
         Write-Host '  - mutation observation is childList-only; visible-turn work is IntersectionObserver bounded'
         Write-Host '  - historical/remounted blocks never receive host-now estimates; live segment discovery stays childList-only with no periodic timestamp sweep'
@@ -503,7 +504,8 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
     } else {
         Write-Host ''
         Write-Host 'R94_EXACT_TURN_RUNTIME_PASS' -ForegroundColor Green
-        Write-Host '  - hybrid timestamp overlay keeps native final/user times and adds ≈ first-observed time to each live output block without native turn child mutation'
+        Write-Host '  - hybrid timestamp overlay keeps native final/user times and adds ≈ YYYY-MM-DD HH:mm:ss first-observed time to each live output block'
+        Write-Host '  - left timeline rail adds U/A/T/G/S/F dated nodes, hover labels and click-to-jump navigation'
         Write-Host '  - legacy r74-r90 stamp path is inert'
         Write-Host '  - composer status is mounted in the rounded composer shell but outside the editable tree; telemetry can never become prompt text'
         Write-Host '  - exact turn capability is keyed by threadId + turnId and native duplicate timestamps are suppressed'

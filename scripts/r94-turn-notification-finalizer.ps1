@@ -40,6 +40,13 @@ $R94TurnHelpers = @'
       if (!oldest) break;
       map.delete(oldest);
     }
+    try {
+      window.__casR94PaneUsageDiagnostics = {
+        exactThreads: map.size,
+        threads: Array.from(map.keys()).slice(-8),
+        lastThread: threadId,
+      };
+    } catch {}
   }
 
   function r94ExternalExactForThread(threadId) {

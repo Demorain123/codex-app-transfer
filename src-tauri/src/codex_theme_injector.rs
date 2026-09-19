@@ -1186,10 +1186,12 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     ).length;
     const editables = document.querySelectorAll('.ProseMirror[contenteditable="true"],[role="textbox"][contenteditable="true"],textarea').length;
     const timestampOverlay = !!document.getElementById('cas-r94-timestamp-overlay');
+    const timelineRail = !!document.getElementById('cas-r94-timeline-rail');
     const ts = window.__casR94TimestampDiagnostics && typeof window.__casR94TimestampDiagnostics === 'object'
       ? window.__casR94TimestampDiagnostics
       : {};
     const hybridSegmentMode = ts.hybridSegmentMode === true;
+    const timelineRailMode = ts.timelineRailMode === true;
     const composerDiag = window.__casR94ComposerStatusDiagnostics && typeof window.__casR94ComposerStatusDiagnostics === 'object'
       ? window.__casR94ComposerStatusDiagnostics
       : {};
@@ -1210,7 +1212,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         exactTurn &&
         statusInsideComposer &&
         timestampOverlay &&
-        hybridSegmentMode
+        hybridSegmentMode &&
+        timelineRail &&
+        timelineRailMode
       ) {
         state = 'match';
       } else if (
@@ -1235,6 +1239,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       editables,
       timestampOverlay,
       hybridSegmentMode,
+      timelineRail,
+      timelineRailMode,
       tsObserved: Number(ts.observedTurns) || 0,
       tsVisible: Number(ts.visibleTurns) || 0,
       tsBadges: Number(ts.badges) || 0,
@@ -1245,6 +1251,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       tsSegmentBadges: Number(ts.liveSegmentBadges) || 0,
       tsSegmentCache: Number(ts.liveSegmentCache) || 0,
       tsSegmentSource: String(ts.lastLiveSegmentSource || ''),
+      timelineEntries: Number(ts.timelineEntries) || 0,
+      timelineMarkers: Number(ts.timelineMarkers) || 0,
+      timelineActiveKey: String(ts.timelineActiveKey || ''),
+      timelineLastKind: String(ts.timelineLastKind || ''),
       composerMountReason: String(composerDiag.lastReason || ''),
       composerMountSurface: String(composerDiag.surface || ''),
       composerMountAnchor: String(composerDiag.anchor || ''),
@@ -1280,7 +1290,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · ExactTurn=' + (s.exactTurn ? 'ON' : 'OFF') +
         ' · Status@Composer=' + (s.statusInsideComposer ? 'YES' : 'NO') +
         ' · TSOverlay=' + (s.timestampOverlay ? 'ON' : 'OFF') +
-        ' · SEGMode=' + (s.hybridSegmentMode ? 'ON' : 'OFF') + '</div>',
+        ' · SEGMode=' + (s.hybridSegmentMode ? 'ON' : 'OFF') +
+        ' · Timeline=' + (s.timelineRail && s.timelineRailMode ? 'ON' : 'OFF') + '</div>',
       '<div>Composer cand=' + s.composerCandidates +
         ' · editables=' + s.editables +
         ' · statusBars=' + s.statusBars +
@@ -1295,6 +1306,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
       '<div>SEG stamp/badge/cache=' + s.tsSegmentStamped + '/' + s.tsSegmentBadges + '/' + s.tsSegmentCache +
         (s.tsSegmentSource ? ' · source=' + escapeHtml(s.tsSegmentSource) : '') + '</div>',
+      '<div>TL entries/markers=' + s.timelineEntries + '/' + s.timelineMarkers +
+        ' · active=' + escapeHtml(s.timelineActiveKey || '-') +
+        ' · kind=' + escapeHtml(s.timelineLastKind || '-') + '</div>',
       (s.state === 'legacy' || s.state === 'mismatch' || s.state === 'missing')
         ? '<div style="margin-top:4px;font-weight:800">EXPECTED ' +
           escapeHtml(META.transferRevision) + ' · OBSERVED ' + escapeHtml(s.runtime) + '</div>'

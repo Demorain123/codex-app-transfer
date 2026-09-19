@@ -940,12 +940,27 @@
     return r94Hash(rootId + '|' + r94StructuralPath(segment, turn) + '|' + semanticId + '|' + tag);
   }
 
-  function r94CreateSegmentBadge(root, epoch) {
+  function r94SegmentTimeIsExact(source) {
+    return /^item\/(started|completed)$/i.test(String(source || ''));
+  }
+
+  function r94SegmentTimeLabel(epoch, source) {
+    return (r94SegmentTimeIsExact(source) ? '' : '≈') + r94LocalDateTimeStamp(epoch);
+  }
+
+  function r94SegmentTimeTitle(epoch, source) {
+    if (r94SegmentTimeIsExact(source)) {
+      return r94FullTimestampTitle(epoch, 'exact: Codex app-server ' + String(source || 'item lifecycle'));
+    }
+    return r94FullTimestampTitle(epoch, 'approximate: first observed locally when this semantic output item appeared');
+  }
+
+  function r94CreateSegmentBadge(root, epoch, source) {
     const badge = document.createElement('div');
     badge.className = R94_SEGMENT_BADGE_CLASS;
     badge.setAttribute('aria-hidden','true');
-    badge.textContent = '≈' + r94LocalDateTimeStamp(epoch);
-    badge.title = r94FullTimestampTitle(epoch, 'approximate: first observed locally while this output block was live');
+    badge.textContent = r94SegmentTimeLabel(epoch, source);
+    badge.title = r94SegmentTimeTitle(epoch, source);
     badge.style.cssText = [
       'position:absolute',
       'left:0',
@@ -1285,12 +1300,7 @@
     }
 
     function r94TimelineKindForSegment(segment) {
-      if (!(segment instanceof Element)) return 'assistant';
-      if (segment.matches('[data-testid*="agent"]') || segment.closest('[data-testid*="agent"]')) return 'agent';
-      if (segment.matches('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]') ||
-          segment.closest('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]')) return 'tool';
-      if (segment.matches('[role="status"]') || segment.closest('[role="status"]')) return 'status';
-      return 'assistant';
+      return r94SemanticKind(segment);
     }
 
     function r94RegisterTurnTimeline(turn, ids, exact) {
@@ -1510,18 +1520,23 @@
         entry.epoch = epoch;
         entry.source = source;
       }
+      const label = r94SegmentTimeLabel(epoch, source);
+      const title = r94SegmentTimeTitle(epoch, source);
       if (!entry.badge || !entry.badge.isConnected) {
-        entry.badge = r94CreateSegmentBadge(overlayRoot, epoch);
+        entry.badge = r94CreateSegmentBadge(overlayRoot, epoch, source);
+      } else {
+        if (entry.badge.textContent !== label) entry.badge.textContent = label;
+        if (entry.badge.title !== title) entry.badge.title = title;
       }
       visibleSegmentEntries.add(entry);
       diagnostics.lastLiveSegmentSource = source;
-      if (isNew) {
+      if (isNew || r94SegmentTimeIsExact(source)) {
         r94UpsertTimelineEntry(
           'segment:' + key,
           epoch,
           segment,
           r94TimelineKindForSegment(segment),
-          true,
+          !r94SegmentTimeIsExact(source),
           normalizedText(segment).slice(0,180)
         );
       }
@@ -1529,29 +1544,40 @@
 
     function r94StampLiveSegments(turn) {
       if (!(turn instanceof Element) || !turn.isConnected) return;
-      if (!r94TurnIsLatest(turn) || !r94TurnIsLive(turn)) return;
+      if (!r94TurnIsLatest(turn)) return;
 
+      const live = r94TurnIsLive(turn);
       const segments = r94TopLevelSegments(turn);
       for (const segment of segments) {
         if (!(segment instanceof Element) || !segment.isConnected || r94SegmentIsNativeFinal(segment, turn)) continue;
+        const key = r94SegmentKey(segment, turn);
+        if (!key) continue;
 
-        // DOM wrappers can be reparented while a block streams. A concrete node
-        // that already has a first-observed record keeps that original time even
-        // if its structural path changes later in the same turn.
+        // R94_ITEM_EXACT_TIMESTAMP_RUNTIME
+        // Official app-server item lifecycle timestamps outrank local
+        // first-observed time whenever the DOM surface exposes the same item id.
+        const exactItem = r94ExactItemTimeForSurface(segment, turn, capability);
+        if (exactItem && Number.isFinite(exactItem.epoch)) {
+          segmentTimeByKey.delete(key);
+          segmentTimeByKey.set(key, { epoch: exactItem.epoch, source: exactItem.source });
+          r94TrimSegmentCache();
+          r94EnsureSegmentEntry(segment, turn, key, exactItem.epoch, exactItem.source);
+          continue;
+        }
+
+        // DOM wrappers can be reparented while an item streams. A concrete node
+        // keeps the first timestamp assigned to that semantic output item.
         const existingEntry = segmentEntryByNode.get(segment);
         if (existingEntry && Number.isFinite(existingEntry.epoch)) {
           r94EnsureSegmentEntry(
             segment,
             turn,
-            existingEntry.key || r94SegmentKey(segment, turn),
+            existingEntry.key || key,
             existingEntry.epoch,
             existingEntry.source || 'host-first-observed-live-node'
           );
           continue;
         }
-
-        const key = r94SegmentKey(segment, turn);
-        if (!key) continue;
 
         const cached = segmentTimeByKey.get(key);
         if (cached && Number.isFinite(cached.epoch)) {
@@ -1559,7 +1585,9 @@
           continue;
         }
 
-        if (baselineSegmentNodes.has(segment) || baselineSegmentKeys.has(key)) continue;
+        // Historical/remounted semantic items must never be assigned "now".
+        // Only a genuinely live turn can receive an approximate host timestamp.
+        if (!live || baselineSegmentNodes.has(segment) || baselineSegmentKeys.has(key)) continue;
 
         const epoch = r94HostEpochNow();
         const source = 'host-first-observed-live-output';

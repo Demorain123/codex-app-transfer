@@ -66,6 +66,37 @@ if ($R77OutputText.Contains('CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE')) {
 $PatchedR77 = Replace-R94NormalizedRequired $PatchedR77 $R94R77OldModelApply $R94R77NewModelApply 'supersede r77 bounded model exact-replacement for r94 collector'
 Write-Host 'R94_R77_MODEL_COLLECTOR_COMPAT_SOURCE_PASS' -ForegroundColor Green
 
+# The historical r77 active-thread migration exact-replaces r76's older
+# single-thread resolver. r94 already owns a stronger multi-pane resolver that
+# returns every visible pane/sub-agent thread id and retains route/sidebar/
+# above-composer fallbacks only when no pane owner is available. Supersede only
+# this one legacy replacement when the complete r94 collector profile is present.
+$R94R77OldActiveThreadApply = @'
+$R77OutputText = Replace-Required $R77OutputText $OldActiveThread $NewActiveThread 'stable active thread resolver'
+'@
+$R94R77NewActiveThreadApply = @'
+if ($R77OutputText.Contains('CAS-R94-MULTI-PANE-THREAD-COLLECTOR')) {
+    foreach ($Marker in @(
+        'CAS-R94-ACTIVE-THREAD-FALLBACK',
+        'const out=[];const seen=new Set();',
+        'if(out.length)return out;',
+        'data-above-composer-conversation-id',
+        'const threadIds = Array.from(new Set(',
+        '(Array.isArray(threadValue) ? threadValue : [threadValue])',
+        'for (const threadId of threadIds) {'
+    )) {
+        if (-not $R77OutputText.Contains($Marker)) {
+            throw "r94 multi-pane collector missing active-thread marker: $Marker"
+        }
+    }
+    Write-Host 'R94_R77_ACTIVE_THREAD_RESOLVER_SUPERSEDED_PASS' -ForegroundColor Green
+} else {
+    $R77OutputText = Replace-Required $R77OutputText $OldActiveThread $NewActiveThread 'stable active thread resolver'
+}
+'@
+$PatchedR77 = Replace-R94NormalizedRequired $PatchedR77 $R94R77OldActiveThreadApply $R94R77NewActiveThreadApply 'supersede r77 single-thread resolver for r94 multi-pane collector'
+Write-Host 'R94_R77_ACTIVE_THREAD_RESOLVER_COMPAT_SOURCE_PASS' -ForegroundColor Green
+
 $R94OverlaySourcePath = Join-Path $PSScriptRoot 'r94-exact-turn-overlay.js'
 $R94DisabledStampPath = Join-Path $PSScriptRoot 'r94-timestamp-stamp-disabled.js'
 $R94FinalObserverPatchPath = Join-Path $PSScriptRoot 'r94-r78-exact-turn-patch.inc.ps1'

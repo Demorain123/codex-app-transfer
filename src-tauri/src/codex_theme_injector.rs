@@ -1188,6 +1188,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const paneUsageDiag = window.__casR94PaneUsageDiagnostics && typeof window.__casR94PaneUsageDiagnostics === 'object'
       ? window.__casR94PaneUsageDiagnostics
       : {};
+    const collectorDiag = window.__casR94LocalUsageCollectorDiagnostics && typeof window.__casR94LocalUsageCollectorDiagnostics === 'object'
+      ? window.__casR94LocalUsageCollectorDiagnostics
+      : {};
     const statusEditorLeaks = statusNodes.filter((node) =>
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
@@ -1254,6 +1257,14 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       statusPaneThreadId,
       statusPaneSummary,
       exactUsageThreads: Number(paneUsageDiag.exactThreads) || 0,
+      collectorTick: Number(collectorDiag.tick) || 0,
+      collectorStage: String(collectorDiag.stage || ''),
+      collectorThreadId: String(collectorDiag.threadId || ''),
+      collectorThreadCount: Number(collectorDiag.threadCount) || 0,
+      collectorFileHit: collectorDiag.fileHit === true,
+      collectorEnvelopeHit: collectorDiag.envelopeHit === true,
+      collectorPushOk: collectorDiag.pushOk === true,
+      collectorError: String(collectorDiag.error || ''),
       statusEditorLeaks,
       composerCandidates,
       editables,
@@ -1333,6 +1344,14 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Pane owners=' + s.statusBars +
         ' · exactUsageThreads=' + s.exactUsageThreads +
         (s.statusPaneSummary ? ' · ' + escapeHtml(s.statusPaneSummary) : '') + '</div>',
+      '<div>Collector tick=' + s.collectorTick +
+        ' · stage=' + escapeHtml(s.collectorStage || '-') +
+        ' · threads=' + s.collectorThreadCount +
+        ' · tid=' + escapeHtml(s.collectorThreadId ? (s.collectorThreadId.slice(0, 8) + '…' + s.collectorThreadId.slice(-4)) : '-') +
+        ' · file=' + (s.collectorFileHit ? 'hit' : '-') +
+        ' · envelope=' + (s.collectorEnvelopeHit ? 'hit' : '-') +
+        ' · push=' + (s.collectorPushOk ? 'ok' : '-') +
+        (s.collectorError ? ' · err=' + escapeHtml(s.collectorError) : '') + '</div>',
       '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
         ' · user=' + s.tsUserBadges +
         ' · nativeSupp=' + s.tsSuppressed +
@@ -2004,6 +2023,8 @@ mod tests {
         assert!(script.contains("Timeline="));
         assert!(script.contains("TL meta="));
         assert!(script.contains("TS obs/vis/badge/cache"));
+        assert!(script.contains("Collector tick="));
+        assert!(script.contains("__casR94LocalUsageCollectorDiagnostics"));
         assert!(script.contains("SEG stamp/badge/cache"));
         assert!(script.contains("nativeRail='"));
         assert!(script.contains("launchMode"));

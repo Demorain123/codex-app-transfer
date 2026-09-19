@@ -496,16 +496,11 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     // stripped from the snapshot copy by snapshot_codex_state().
     let snapshot_config = read_snapshot_config(paths);
 
-    // Resolve provider identity from the live config first. This matters when
-    // the user changes model_provider while Transfer is already running: a
-    // current-session live edit must win over the original snapshot identity.
-    //
-    // On the first apply of a session we still allow snapshot fallback when the
-    // live root key is absent. That is the migration/recovery path from r94,
-    // whose previous normalization may already have stripped model_provider
-    // while the snapshot still contains the user's original custom provider.
-    // On later applies in the same session, an absent live key is respected as
-    // an intentional move back to built-in openai and is not resurrected.
+    // Resolve provider identity from the live config on the first apply.
+    // During one Transfer snapshot session the provider identity becomes a
+    // stable ownership boundary: redirecting another provider would require a
+    // second endpoint journal/restore record. Detect such changes before any
+    // routing mutation and require a fresh Transfer session instead.
     let live_config_for_provider = match std::fs::read_to_string(&paths.config_toml) {
         Ok(live) => live,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -516,6 +511,43 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     let snapshot_source_provider = snapshot_config
         .as_deref()
         .and_then(|snapshot| root_string_value(snapshot, "model_provider"));
+    let snapshot_provider_policy = snapshot_source_provider
+        .as_deref()
+        .and_then(|source_provider| {
+            snapshot_config.as_deref().and_then(|snapshot| {
+                provider_policy_truth_for_source(snapshot, source_provider)
+            })
+        });
+    let snapshot_provider_has_policy = snapshot_provider_policy
+        .as_ref()
+        .is_some_and(|policy| policy.has_provider_policy());
+
+    if !snapshot_taken_now {
+        let live_identity_is_expected = match (
+            snapshot_source_provider.as_deref(),
+            live_source_provider.as_deref(),
+        ) {
+            (None, None) => true,
+            (Some(snapshot_id), Some(live_id)) if snapshot_id == live_id => true,
+            // Identity-only providers are intentionally normalized to built-in
+            // openai by removing model_provider, so live=None is expected.
+            (Some(_), None) if !snapshot_provider_has_policy => true,
+            _ => false,
+        };
+        if !live_identity_is_expected {
+            tracing::warn!(
+                target: "codex_integration::apply",
+                marker = "CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED",
+                snapshot_provider = snapshot_source_provider.as_deref().unwrap_or("<builtin-openai>"),
+                live_provider = live_source_provider.as_deref().unwrap_or("<builtin-openai>"),
+                "model_provider changed during the current Transfer snapshot session; refusing to redirect another provider without a fresh baseline"
+            );
+            return Err(CodexError::Other(
+                "r94.1 detected a model_provider change during the current Transfer session; restart/re-apply Transfer so the new provider becomes the snapshot baseline".to_string(),
+            ));
+        }
+    }
+
     let effective_source_provider = live_source_provider
         .as_deref()
         .or_else(|| {
@@ -538,18 +570,13 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     if provider_policy.is_none()
         && snapshot_taken_now
         && live_source_provider.is_none()
-        && let Some(snapshot_policy) = effective_source_provider
-            .and_then(|source_provider| {
-                snapshot_config
-                    .as_deref()
-                    .and_then(|snapshot| {
-                        provider_policy_truth_for_source(snapshot, source_provider)
-                    })
-            })
-            .filter(|policy| policy.has_provider_policy())
+        && snapshot_provider_has_policy
     {
+        let snapshot_policy = snapshot_provider_policy
+            .as_ref()
+            .expect("checked provider policy above");
         log_provider_policy_truth(
-            &snapshot_policy,
+            snapshot_policy,
             false,
             "unchanged",
             "live-provider-table-missing",
@@ -1151,6 +1178,25 @@ fn restore_from_snapshot_values(
         Err(e) => return Err(e.into()),
     };
     let snapshot_source_provider = root_string_value(snapshot_config, "model_provider");
+    let live_source_provider =
+        root_string_value(&live_config_before_restore, "model_provider");
+    let snapshot_provider_has_policy = snapshot_source_provider
+        .as_deref()
+        .and_then(|source_provider| {
+            provider_policy_truth_for_source(snapshot_config, source_provider)
+        })
+        .is_some_and(|policy| policy.has_provider_policy());
+    let preserve_live_model_provider_on_auto_restore =
+        mode == RestoreMode::Auto
+            && match (
+                snapshot_source_provider.as_deref(),
+                live_source_provider.as_deref(),
+            ) {
+                (None, Some(_)) => true,
+                (Some(snapshot_id), Some(live_id)) if snapshot_id != live_id => true,
+                (Some(_), None) if snapshot_provider_has_policy => true,
+                _ => false,
+            };
     let live_openai_base =
         snapshot_toml_value_literal(&live_config_before_restore, "openai_base_url");
     let provider_endpoint_owned_by_transfer = snapshot_source_provider
@@ -1184,6 +1230,11 @@ fn restore_from_snapshot_values(
         };
         match (*key, literal.as_deref(), mode) {
             ("model", None, RestoreMode::Auto) => continue,
+            ("model_provider", _, RestoreMode::Auto)
+                if preserve_live_model_provider_on_auto_restore =>
+            {
+                continue;
+            }
             _ => sync_root_value(&paths.config_toml, key, literal.as_deref())?,
         }
     }

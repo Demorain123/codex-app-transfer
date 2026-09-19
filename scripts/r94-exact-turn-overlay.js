@@ -1367,13 +1367,26 @@
         const latestId = r94NormalizeTurnId(latest.turnId);
         if (latestId === ids.turnId) return true;
         const latestStatus = String(latest.status || '').toLowerCase();
-        // While capability says another turn is actively running, do not stamp
-        // this turn. If the capability is merely a completed old turn, allow
-        // DOM live-tail evidence to bridge the brief turn/started race.
         if (/inprogress|in_progress|running|started|pending/.test(latestStatus)) return false;
       }
-      const domLatest = r94LatestVisibleAssistantTurnFor(turn);
-      return !!(domLatest && (domLatest === turn || domLatest.contains(turn) || turn.contains(domLatest)));
+      // R94_STREAMING_LATEST_OWNER_CACHE_RUNTIME
+      // Mutation/capability events already tell us which turn is changing.
+      // Reuse that owner instead of querySelectorAll() over the transcript on
+      // every streaming batch.
+      return !!(
+        latestObservedTurn instanceof Element &&
+        latestObservedTurn.isConnected &&
+        (latestObservedTurn === turn || latestObservedTurn.contains(turn) || turn.contains(latestObservedTurn))
+      );
+    }
+
+    function r94ActiveGenerationCached(turn) {
+      const now = performance.now();
+      const cached = generationUiCache.get(turn);
+      if (cached && now - cached.at < 750) return cached.value;
+      const value = r94ActiveGenerationUiPresentFor(turn);
+      generationUiCache.set(turn, { at: now, value });
+      return value;
     }
 
     function r94TurnIsLive(turn) {
@@ -1383,20 +1396,25 @@
       const status = String(record && record.status || '').toLowerCase();
       if (/inprogress|in_progress|running|started|pending/.test(status)) return true;
       if (/completed|failed|interrupted|cancelled|canceled/.test(status)) return false;
-      if (r94ActiveGenerationUiPresentFor(turn)) return true;
 
       const externalThread = String(state.metrics && state.metrics.externalThreadId || '').replace(/^local:/i, '').trim().toLowerCase();
       const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
       if (externalThread && idsThread && externalThread !== idsThread) return false;
       const updated = Number(state.metrics && state.metrics.externalUpdatedAt);
-      if (!Number.isFinite(updated) || updated <= 0) return false;
-      const age = r94HostEpochNow() - updated;
-      return age >= -5000 && age <= 90000;
+      if (Number.isFinite(updated) && updated > 0) {
+        const age = r94HostEpochNow() - updated;
+        if (age >= -5000 && age <= 90000) return true;
+      }
+
+      // DOM-wide control/busy scans are the expensive fallback. Cache them so
+      // streaming childList bursts cannot run them every frame.
+      return r94ActiveGenerationCached(turn);
     }
 
     function r94EnsureSegmentEntry(segment, turn, key, epoch, source) {
       if (!(segment instanceof Element) || !segment.isConnected || !key || !Number.isFinite(epoch)) return;
       let entry = segmentEntryByNode.get(segment);
+      const isNew = !entry;
       if (!entry) {
         entry = { segment, turn, key, epoch, source, badge: null };
         segmentEntryByNode.set(segment, entry);
@@ -1411,14 +1429,16 @@
       }
       visibleSegmentEntries.add(entry);
       diagnostics.lastLiveSegmentSource = source;
-      r94UpsertTimelineEntry(
-        'segment:' + key,
-        epoch,
-        segment,
-        r94TimelineKindForSegment(segment),
-        true,
-        normalizedText(segment).slice(0,180)
-      );
+      if (isNew) {
+        r94UpsertTimelineEntry(
+          'segment:' + key,
+          epoch,
+          segment,
+          r94TimelineKindForSegment(segment),
+          true,
+          normalizedText(segment).slice(0,180)
+        );
+      }
     }
 
     function r94StampLiveSegments(turn) {
@@ -1468,7 +1488,7 @@
     }
 
     function r94FlushSegmentTurns() {
-      segmentFrameId = 0;
+      segmentTimerId = 0;
       const turns = Array.from(pendingSegmentTurns);
       pendingSegmentTurns.clear();
       for (const turn of turns) {
@@ -1477,9 +1497,12 @@
     }
 
     function r94ScheduleSegmentTurn(turn) {
+      // R94_STREAMING_SEGMENT_THROTTLE_RUNTIME
+      // One full visual-segment scan per ~220ms is plenty for human-visible
+      // timestamps and avoids rescanning a long response every animation frame.
       if (disposed || document.visibilityState === 'hidden' || !(turn instanceof Element)) return;
       pendingSegmentTurns.add(turn);
-      if (!segmentFrameId) segmentFrameId = requestAnimationFrame(r94FlushSegmentTurns);
+      if (!segmentTimerId) segmentTimerId = window.setTimeout(r94FlushSegmentTurns, 220);
     }
 
     function r94RefreshTurn(turn) {
@@ -1651,6 +1674,7 @@
               element.closest('#' + R94_TIMELINE_RAIL_ID)) continue;
           const owner = r94CanonicalTurn(element);
           if (owner) {
+            latestObservedTurn = owner;
             r94ScheduleScan(owner);
             r94ScheduleSegmentTurn(owner);
             if (!intersectionObserver || visibleTurns.has(owner)) r94RefreshTurn(owner);
@@ -1701,6 +1725,7 @@
         if (!ids || ids.turnId !== turnId) continue;
         const idsThread = String(ids.threadId || '').replace(/^local:/i, '').trim().toLowerCase();
         if (threadId && idsThread && threadId !== idsThread) continue;
+        latestObservedTurn = turn;
         r94RefreshTurn(turn);
         r94ScheduleSegmentTurn(turn);
       }

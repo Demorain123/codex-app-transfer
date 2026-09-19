@@ -290,6 +290,16 @@ if ($Patched.Contains($R94BaseFallback)) {
     $Patched = $Patched.Replace($R94BaseFallback,$R94BaseFailClosed)
 }
 
+foreach ($UnsafeRuntimeMount in @(
+    'if (bar.parentElement !== parent || bar.nextSibling !== composer) parent.insertBefore(bar, composer);',
+    'composer.parentElement.insertBefore(bar, composer);'
+)) {
+    if ($Patched.Contains($UnsafeRuntimeMount)) {
+        throw "r94 unsafe status fallback survived final materialization: $UnsafeRuntimeMount"
+    }
+}
+Write-Host 'R94_UNSAFE_EDITOR_MOUNT_FALLBACKS_ABSENT_PASS' -ForegroundColor Green
+
 $R94NoNativeUsage = @'
   function readNativeUsage() {
     // R94_NATIVE_USAGE_SCAN_DISABLED_RUNTIME
@@ -346,6 +356,7 @@ foreach ($Forbidden in @(
 
 Write-Host 'R94_STATUS_INSIDE_COMPOSER_FINAL_OWNER_PASS' -ForegroundColor Green
 Write-Host 'R94_COMPOSER_INLINE_MOUNT_V3_EDITOR_SAFE_PASS' -ForegroundColor Green
+Write-Host 'R94_STATUS_NEVER_ENTERS_EDITABLE_PASS' -ForegroundColor Green
 Write-Host 'R94_NATIVE_USAGE_SCAN_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS' -ForegroundColor Green
 Write-Host 'R94_NO_STATUS_VIEWPORT_TRACKING_PASS' -ForegroundColor Green

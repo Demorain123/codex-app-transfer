@@ -814,6 +814,10 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
     # generation owner at that same nested layer.
     $PanePatch = $PanePatch + "`n`n" + $ExactOverlayPatch
 
+    # These invariants inspect the generated r90->r94 builder source *before*
+    # that builder executes. For the r88 child promotion, therefore validate the
+    # string-construction owner ($R941R88Replacement), not the future expanded
+    # child line "$R94 = $R94.Replace(...)" which does not exist until runtime.
     foreach ($Marker in @(
         "`$TempObserver = Join-Path `$PSScriptRoot 'r94-timestamp-observer.js'",
         "`$TempPaneJs = Join-Path `$PSScriptRoot 'r94-pane-runtime.js'",
@@ -822,7 +826,8 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         'visible/package identity is r94.1 / 2.4.5+94.1',
         "`$R94Builder = `$R94Builder.Replace('2.4.5+94','2.4.5+94.1')",
         'r94.1 could not locate nested r88 identity retarget',
-        "`$R94 = `$R94.Replace('2.4.5+94','2.4.5+94.1')",
+        '$R941R88Replacement = $R941R88Retarget +',
+        "Replace('visible/package identity is r94 / 2.4.5+94.1','visible/package identity is r94.1 / 2.4.5+94.1')",
         '.r94-r89-pane-runtime-patch.generated.inc.ps1'
     )) {
         if (-not $Builder.Contains($Marker)) { throw "r94 retargeted builder invariant missing: $Marker" }

@@ -21,7 +21,7 @@ foreach ($Marker in @(
     'const timelineRail = null;',
     'function r94AssistantMessageSurface(node) {',
     'function r94IsUserSurface(node) {',
-    'host-first-observed-live-output'
+    'R94_ITEM_EXACT_TIMESTAMP_RUNTIME'
 )) {
     if (-not $R94OverlayBody.Contains($Marker)) {
         throw "r94 r78 owner received an incomplete exact-turn observer source: $Marker"
@@ -59,7 +59,7 @@ foreach ($Marker in @(
     'const timelineRail = null;',
     'function r94UpsertTimelineEntry(key, epoch, anchor, kind, approx, preview) {',
     'window.__casR94TurnCapability = capability;',
-    'host-first-observed-live-output',
+    'R94_ITEM_EXACT_TIMESTAMP_RUNTIME',
     'new IntersectionObserver(function(entries) {',
     'mutationObserver.observe(document.documentElement, { childList: true, subtree: true });',
     'state.observer = { disconnect: r94Cleanup };'
@@ -129,6 +129,7 @@ if (-not (Test-Path -LiteralPath $R94TurnNotificationFinalizerPath)) {
 $R94TurnNotificationFinalizerText = [System.IO.File]::ReadAllText($R94TurnNotificationFinalizerPath)
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
+    'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS',
     'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS'
 )) {
     if (-not $R94TurnNotificationFinalizerText.Contains($Marker)) {

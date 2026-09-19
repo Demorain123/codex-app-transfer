@@ -95,6 +95,37 @@ $R94TurnHelpers = @'
     const normalizedThread = r94NormalizePaneId(threadId);
     if (!normalizedThread || !envelope || typeof envelope !== 'object') return;
 
+    // R94_LOCAL_ITEM_LIFECYCLE_BRIDGE_RUNTIME
+    // The bounded rollout tail carries only item id/type/timestamps — never
+    // prompt/response text — so split-view and sub-agent panes still receive
+    // exact item timing even when Desktop does not surface every child event.
+    const recentItems = Array.isArray(envelope.recentItems) ? envelope.recentItems : [];
+    for (const itemMeta of recentItems.slice(-96)) {
+      if (!itemMeta || typeof itemMeta !== 'object') continue;
+      const turnId = String(itemMeta.turnId || '').trim();
+      const itemId = String(itemMeta.itemId || '').trim();
+      if (!turnId || !itemId) continue;
+      const item = { id: itemId, type: String(itemMeta.itemType || '') };
+      const startedAtMs = Number(itemMeta.startedAtMs);
+      const completedAtMs = Number(itemMeta.completedAtMs);
+      if (Number.isFinite(startedAtMs) && startedAtMs > 0) {
+        r94OfferNotification('item/started', {
+          threadId: normalizedThread,
+          turnId,
+          item,
+          startedAtMs,
+        });
+      }
+      if (Number.isFinite(completedAtMs) && completedAtMs > 0) {
+        r94OfferNotification('item/completed', {
+          threadId: normalizedThread,
+          turnId,
+          item,
+          completedAtMs,
+        });
+      }
+    }
+
     const active = envelope.activeTurn && typeof envelope.activeTurn === 'object' ? envelope.activeTurn : null;
     if (active && active.turnId) {
       r94OfferNotification('turn/started', {
@@ -192,8 +223,15 @@ if (-not $Patched.Contains('R94_TURN_NOTIFICATION_BRIDGE_RUNTIME')) {
 $R94ExternalIngest = @'
   function ingestExternalUsage(envelope) {
     if (!envelope || typeof envelope !== 'object') return false;
+    const threadId = r94NormalizePaneId(typeof envelope.threadId === 'string' ? envelope.threadId : '');
     const info = envelope.info && typeof envelope.info === 'object' ? envelope.info : null;
-    if (!info) return false;
+
+    // Lifecycle identity is useful before the first token_count snapshot exists.
+    r94OfferRolloutEnvelope(envelope, threadId, info);
+    if (!info) {
+      try { refreshUi(); } catch {}
+      return true;
+    }
 
     const hit = consumeValue(info, 0);
     if (!hit) return false;
@@ -204,7 +242,6 @@ $R94ExternalIngest = @'
     const total = info.total_token_usage && typeof info.total_token_usage === 'object'
       ? info.total_token_usage
       : (info.totalTokenUsage && typeof info.totalTokenUsage === 'object' ? info.totalTokenUsage : null);
-    const threadId = r94NormalizePaneId(typeof envelope.threadId === 'string' ? envelope.threadId : '');
     const turnId = String(envelope.turnId || '').trim().toLowerCase();
     const updatedAt = Number(envelope.updatedAt) || Date.now();
 
@@ -245,7 +282,6 @@ $R94ExternalIngest = @'
     state.metrics.externalTurnId = turnId || null;
     state.metrics.externalUpdatedAt = updatedAt;
 
-    r94OfferRolloutEnvelope(envelope, threadId, info);
     try { refreshUi(); } catch {}
     return true;
   }
@@ -403,6 +439,8 @@ foreach ($Marker in @(
     'r94ExternalExactByThread',
     'r94StoreExternalExact(exact);',
     'r94OfferRolloutEnvelope(envelope, threadId, info);',
+    'R94_LOCAL_ITEM_LIFECYCLE_BRIDGE_RUNTIME',
+    'recentItems.slice(-96)',
     'window.__casR94TurnCapability',
     "typeof capability.ingestNotification !== 'function'",
     'thread\/tokenUsage\/updated',
@@ -428,6 +466,7 @@ if ($R94TurnStatusOwner -eq 'pane') {
     throw 'r94 pane turn-status owner was not resolved'
 }
 
+Write-Host 'R94_LOCAL_ITEM_LIFECYCLE_BRIDGE_PASS' -ForegroundColor Green
 Write-Host 'R94_MULTI_PANE_USAGE_OWNERSHIP_PASS' -ForegroundColor Green
 Write-Host 'R94_PASSIVE_ITEM_LIFECYCLE_INGEST_PASS' -ForegroundColor Green
 Write-Host 'R94_PASSIVE_TURN_NOTIFICATION_INGEST_PASS' -ForegroundColor Green

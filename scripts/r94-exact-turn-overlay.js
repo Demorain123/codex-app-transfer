@@ -945,7 +945,10 @@
     }
 
     const overlayRoot = r94EnsureOverlayRoot();
-    const timelineRail = r94EnsureTimelineRailRoot();
+    // R94_NATIVE_RAIL_PRESERVE_RUNTIME
+    // Codex already owns the compact conversation rail/minimap. Do not draw a
+    // second Transfer rail on top of it; keep our timeline data internal only.
+    const timelineRail = null;
     const capability = r94CreateCapability();
     state.r94TimestampCapability = capability;
     window.__casR94TurnCapability = capability;
@@ -963,7 +966,8 @@
       lastSource: '',
       lastLiveSegmentSource: '',
       nativeTimestampSuppressed: 0,
-      timelineRailMode: true,
+      timelineRailMode: false,
+      nativeRailPreserved: true,
       timelineEntries: 0,
       timelineMarkers: 0,
       timelineActiveKey: '',
@@ -990,12 +994,15 @@
     const timelineMarkers = new Map();
     let timelineScroller = null;
     let timelineActiveKey = '';
+    let latestObservedTurn = null;
+    const generationUiCache = new WeakMap();
 
     let disposed = false;
     let mutationObserver = null;
     let frameId = 0;
     let scanFrameId = 0;
     let segmentFrameId = 0;
+    let segmentTimerId = 0;
 
     const resizeObserver = typeof ResizeObserver === 'function'
       ? new ResizeObserver(function() { r94SchedulePosition(); })

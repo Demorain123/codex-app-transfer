@@ -496,7 +496,18 @@
   function r94IsUserSurface(node) {
     const element = node instanceof Element ? node : node && node.parentElement;
     if (!(element instanceof Element)) return false;
-    return !!element.closest('[data-message-author-role="user"],[data-message-author="user"]');
+    const userSelector = '[data-message-author-role="user"],[data-message-author="user"]';
+    if (element.closest(userSelector)) return true;
+
+    // Wrapper-only chains around a user bubble must not acquire assistant
+    // timestamps. A mixed whole-turn wrapper is allowed to continue downward so
+    // its assistant/tool descendants can still be segmented.
+    const user = element.querySelector(userSelector);
+    if (!(user instanceof Element)) return false;
+    const assistant = element.querySelector(
+      '[data-message-author-role="assistant"],[data-local-conversation-final-assistant],[role="status"],[data-testid*="agent"],[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]'
+    );
+    return !(assistant instanceof Element);
   }
 
   function r94SpecificSemanticOutputSurface(node) {

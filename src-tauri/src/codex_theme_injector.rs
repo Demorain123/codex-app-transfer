@@ -1228,11 +1228,16 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       tsCache: Number(ts.cacheSize) || 0,
       tsSuppressed: Number(ts.nativeTimestampSuppressed) || 0,
       tsSource: String(ts.lastSource || ''),
+      tsSegmentStamped: Number(ts.liveSegmentsStamped) || 0,
+      tsSegmentBadges: Number(ts.liveSegmentBadges) || 0,
+      tsSegmentCache: Number(ts.liveSegmentCache) || 0,
+      tsSegmentSource: String(ts.lastLiveSegmentSource || ''),
       composerMountReason: String(composerDiag.lastReason || ''),
       composerMountSurface: String(composerDiag.surface || ''),
       composerMountAnchor: String(composerDiag.anchor || ''),
       composerMountAttempts: Number(composerDiag.attempts) || 0,
       composerMountCount: Number(composerDiag.mounted) || 0,
+      composerUnsafeRejects: Number(composerDiag.unsafeRejects) || 0,
     };
   };
 
@@ -1268,10 +1273,13 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · mount=' + escapeHtml(s.composerMountReason || 'none') +
         ' · surface=' + escapeHtml(s.composerMountSurface || '-') +
         ' · anchor=' + escapeHtml(s.composerMountAnchor || '-') +
-        ' · attempts=' + s.composerMountAttempts + '/' + s.composerMountCount + '</div>',
+        ' · attempts=' + s.composerMountAttempts + '/' + s.composerMountCount +
+        ' · unsafe=' + s.composerUnsafeRejects + '</div>',
       '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
         ' · nativeSupp=' + s.tsSuppressed +
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
+      '<div>SEG stamp/badge/cache=' + s.tsSegmentStamped + '/' + s.tsSegmentBadges + '/' + s.tsSegmentCache +
+        (s.tsSegmentSource ? ' · source=' + escapeHtml(s.tsSegmentSource) : '') + '</div>',
       (s.state === 'legacy' || s.state === 'mismatch' || s.state === 'missing')
         ? '<div style="margin-top:4px;font-weight:800">EXPECTED ' +
           escapeHtml(META.transferRevision) + ' · OBSERVED ' + escapeHtml(s.runtime) + '</div>'
@@ -1924,7 +1932,9 @@ mod tests {
         assert!(script.contains("__casR94TimestampDiagnostics"));
         assert!(script.contains("__casR94ComposerStatusDiagnostics"));
         assert!(script.contains("mount="));
+        assert!(script.contains("unsafe="));
         assert!(script.contains("TS obs/vis/badge/cache"));
+        assert!(script.contains("SEG stamp/badge/cache"));
         assert!(script.contains("launchMode"));
         assert!(!script.contains("__CAS_DEBUG_META__"));
     }

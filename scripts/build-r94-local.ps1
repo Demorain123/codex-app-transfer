@@ -589,8 +589,10 @@ foreach ($Marker in @(
     'r94_1_nested_provider_policy_fails_closed_before_mutation',
     'r94_1_nested_provider_table_is_detected_even_after_unrelated_table',
     'r94_1_dotted_endpoint_coupled_policy_fails_closed',
-    'r94_1_live_provider_switch_after_snapshot_wins',
-    'r94_1_live_provider_removal_after_snapshot_is_not_resurrected',
+    'r94_1_live_provider_switch_in_same_session_fails_before_mutation',
+    'r94_1_live_provider_removal_in_policy_session_fails_before_mutation',
+    'r94_1_identity_only_provider_can_repeat_after_transfer_strips_root_identity',
+    'CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED',
     'r94_1_dotted_provider_text_inside_unrelated_table_is_not_root_policy',
     'r94_1_snapshot_policy_without_live_provider_table_is_detected',
     'r94_1_dotted_root_provider_policy_is_carried_forward_without_duplicate_table',
@@ -649,7 +651,8 @@ Write-Host '  - identity-only providers still normalize to built-in openai, pres
 Write-Host '  - provider id matching is case-sensitive: custom OpenAi is preserved, exact built-in openai collision fails closed'
 Write-Host '  - quoted/nested provider tables and endpoint-coupled auth policies fail before routing mutation instead of claiming partial semantic preservation'
 Write-Host '  - ChatGPT-auth + custom-provider preview emits an explicit first-turn relay canary requirement; config success alone is not treated as transport proof'
-Write-Host '  - live model_provider edits in the current session win over the original snapshot; a live removal is never resurrected on later apply'
+Write-Host '  - same-session model_provider identity changes fail closed before routing mutation; restart/re-apply establishes a fresh provider baseline'
+Write-Host '  - identity-only provider normalization remains repeatable and is not mistaken for a user identity edit'
 Write-Host '  - nested provider subtables are detected across the full document, and dotted auth/AWS policy fails closed'
 Write-Host '  - dotted provider keys are recognized only at TOML root scope; unrelated table text cannot impersonate provider policy'
 Write-Host '  - snapshot policy never partially resurrects a missing live provider table'

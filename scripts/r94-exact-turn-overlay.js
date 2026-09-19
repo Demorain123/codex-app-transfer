@@ -633,8 +633,10 @@
       segment.getAttribute('data-message-id') ||
       segment.getAttribute('data-testid') ||
       segment.getAttribute('role') || '';
-    const textHead = normalizedText(segment).slice(0, 96);
-    return r94Hash(rootId + '|' + r94StructuralPath(segment, turn) + '|' + semanticId + '|' + textHead);
+    const tag = String(segment.tagName || '').toLowerCase();
+    // Do not hash mutable text. Streaming text changes must keep one stable
+    // first-observed timestamp for the same visual block.
+    return r94Hash(rootId + '|' + r94StructuralPath(segment, turn) + '|' + semanticId + '|' + tag);
   }
 
   function r94CreateSegmentBadge(root, epoch) {
@@ -907,7 +909,15 @@
       const ids = r94IdsForTurn(turn);
       if (!ids) return false;
       const latest = ids.threadId ? capability.latestForThread(ids.threadId) : null;
-      if (latest && latest.turnId) return r94NormalizeTurnId(latest.turnId) === ids.turnId;
+      if (latest && latest.turnId) {
+        const latestId = r94NormalizeTurnId(latest.turnId);
+        if (latestId === ids.turnId) return true;
+        const latestStatus = String(latest.status || '').toLowerCase();
+        // While capability says another turn is actively running, do not stamp
+        // this turn. If the capability is merely a completed old turn, allow
+        // DOM live-tail evidence to bridge the brief turn/started race.
+        if (/inprogress|in_progress|running|started|pending/.test(latestStatus)) return false;
+      }
       const domLatest = r94LatestVisibleAssistantTurnFor(turn);
       return !!(domLatest && (domLatest === turn || domLatest.contains(turn) || turn.contains(domLatest)));
     }

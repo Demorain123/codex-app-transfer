@@ -111,7 +111,8 @@ async fn r94_find_stale_exit_guard_child(dead_binder_pid: u32) -> Result<Vec<u32
             "$_.CommandLine -and $_.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -ge 0 ",
             "}});",
             "$rows | ForEach-Object {{ [string]$_.ProcessId }}"
-        )
+        ),
+        dead_binder_pid = dead_binder_pid,
     );
     let result = run_command(
         "powershell.exe",
@@ -162,7 +163,9 @@ async fn r94_stop_exact_stale_exit_guard(dead_binder_pid: u32, guard_pid: u32) -
             "if(-not $p.CommandLine -or $p.CommandLine.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){{exit 44}};",
             "Stop-Process -Id $targetPid -Force -ErrorAction Stop;",
             "Write-Output ('stopped=' + $targetPid)"
-        )
+        ),
+        dead_binder_pid = dead_binder_pid,
+        guard_pid = guard_pid,
     );
     let result = run_command(
         "powershell.exe",
@@ -378,6 +381,8 @@ for invariant in (
     "preserve_running_codex_exit_guard",
     "r94_find_stale_exit_guard_child",
     "r94_stop_exact_stale_exit_guard",
+    "dead_binder_pid = dead_binder_pid",
+    "guard_pid = guard_pid",
     "ParentProcessId = ",
     "mcp-exit-guard-r32.ps1",
     "stale_listener_identity_changed",

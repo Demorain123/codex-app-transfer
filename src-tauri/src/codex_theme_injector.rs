@@ -1176,6 +1176,18 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const statusTurnSource = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-turn-source') || '') : '';
     const statusTurnId = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-turn-id') || '') : '';
     const statusPaneThreadId = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-pane-thread-id') || '') : '';
+    const statusPaneSummary = statusNodes.map((node, index) => {
+      if (!(node instanceof Element)) return '';
+      const tid = String(node.getAttribute('data-cas-pane-thread-id') || '');
+      const src = String(node.getAttribute('data-cas-turn-source') || '');
+      const turn = String(node.getAttribute('data-cas-turn-id') || '');
+      const shortTid = tid ? (tid.slice(0, 8) + (tid.length > 12 ? '…' + tid.slice(-4) : '')) : '-';
+      const shortTurn = turn ? (turn.slice(0, 8) + (turn.length > 12 ? '…' + turn.slice(-4) : '')) : '-';
+      return 'P' + (index + 1) + ':' + shortTid + ':' + (src || '-') + ':' + shortTurn;
+    }).filter(Boolean).join(' | ');
+    const paneUsageDiag = window.__casR94PaneUsageDiagnostics && typeof window.__casR94PaneUsageDiagnostics === 'object'
+      ? window.__casR94PaneUsageDiagnostics
+      : {};
     const statusEditorLeaks = statusNodes.filter((node) =>
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
@@ -1240,6 +1252,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       statusTurnSource,
       statusTurnId,
       statusPaneThreadId,
+      statusPaneSummary,
+      exactUsageThreads: Number(paneUsageDiag.exactThreads) || 0,
       statusEditorLeaks,
       composerCandidates,
       editables,
@@ -1316,6 +1330,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Status src=' + escapeHtml(s.statusTurnSource || '-') +
         ' · paneTid=' + escapeHtml(s.statusPaneThreadId || '-') +
         ' · turn=' + escapeHtml(s.statusTurnId || '-') + '</div>',
+      '<div>Pane owners=' + s.statusBars +
+        ' · exactUsageThreads=' + s.exactUsageThreads +
+        (s.statusPaneSummary ? ' · ' + escapeHtml(s.statusPaneSummary) : '') + '</div>',
       '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
         ' · user=' + s.tsUserBadges +
         ' · nativeSupp=' + s.tsSuppressed +

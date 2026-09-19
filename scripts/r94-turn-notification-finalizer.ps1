@@ -285,36 +285,6 @@ $R94StatusHtml = @'
       '</div>';
   }
 '@
-$R94BaseStatusHtml = @'
-  // R94_TURN_STATUS_BASE_OWNER_RUNTIME
-  // Fallback for the single-status runtime shape. It still prefers the exact
-  // recent-turn capability and never borrows native/global Usage metrics.
-  function statusHtml() {
-    const m = state.metrics || {};
-    const threadId = r94NormalizePaneId(m.externalThreadId || '');
-    const turnRecord = r94LatestTurnCapability(threadId);
-    const turnExact = r94TurnUsageSnapshot(turnRecord);
-    const fallbackExact = m.externalExact && typeof m.externalExact === 'object' ? m.externalExact : null;
-    const exact = turnExact || fallbackExact;
-    const context = exact && Number.isFinite(exact.contextPercent) ? ('ctx ' + exact.contextPercent.toFixed(1) + '%') : 'ctx --';
-    const input = exact && Number.isFinite(exact.inputTokens) ? ('in ' + shortNumber(exact.inputTokens)) : 'in --';
-    const output = exact && Number.isFinite(exact.outputTokens) ? ('out ' + shortNumber(exact.outputTokens)) : 'out --';
-    const cache = exact && Number.isFinite(exact.cacheHitPercent) ? ('cache ' + exact.cacheHitPercent.toFixed(1) + '%') : 'cache --';
-    const total = exact && Number.isFinite(exact.sessionTotalTokens) ? ('total ' + shortNumber(exact.sessionTotalTokens)) : 'total --';
-    const model = String(m.model || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return [
-      '<span class="cas-status-item" data-cas-metric-source="' + (turnExact ? 'exact-turn-capability' : 'exact-jsonl-fallback') + '">' + context + '</span>',
-      '<span class="cas-status-item">' + input + '</span>',
-      '<span class="cas-status-item">' + output + '</span>',
-      '<span class="cas-status-item cas-status-secondary">' + cache + '</span>',
-      '<span class="cas-status-item">-- tok/s</span>',
-      '<span class="cas-status-item cas-status-tertiary">' + total + '</span>',
-      '<span class="cas-status-spacer"></span>',
-      '<span class="cas-status-item cas-status-muted cas-status-secondary">' + model + '</span>',
-    ].join('');
-  }
-'@
-
 $R94TurnStatusOwner = $null
 $R94PaneStatusStart = [regex]::Match(
     $Patched,

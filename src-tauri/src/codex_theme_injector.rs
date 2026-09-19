@@ -1250,6 +1250,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       tsObserved: Number(ts.observedTurns) || 0,
       tsVisible: Number(ts.visibleTurns) || 0,
       tsBadges: Number(ts.badges) || 0,
+      tsUserBadges: Number(ts.userBadges) || 0,
       tsCache: Number(ts.cacheSize) || 0,
       tsSuppressed: Number(ts.nativeTimestampSuppressed) || 0,
       tsSource: String(ts.lastSource || ''),
@@ -1316,6 +1317,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · paneTid=' + escapeHtml(s.statusPaneThreadId || '-') +
         ' · turn=' + escapeHtml(s.statusTurnId || '-') + '</div>',
       '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
+        ' · user=' + s.tsUserBadges +
         ' · nativeSupp=' + s.tsSuppressed +
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
       '<div>SEG stamp/badge/cache=' + s.tsSegmentStamped + '/' + s.tsSegmentBadges + '/' + s.tsSegmentCache +

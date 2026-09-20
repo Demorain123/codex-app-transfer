@@ -600,6 +600,7 @@ foreach ($Marker in @(
     'live-provider-table-missing',
     'root_scope',
     'r94_1_provider_policy_overlays_builtin_openai_and_keeps_source_untouched',
+    'r94_1_partial_overlay_journal_recovers_without_false_user_edit',
     'r94_1_restore_preserves_source_provider_endpoint_edit',
     'r94_1_restore_preserves_live_provider_identity_edit_and_restores_overlay',
     'r94_1_portable_retry_policy_reuses_values_without_source_auth',

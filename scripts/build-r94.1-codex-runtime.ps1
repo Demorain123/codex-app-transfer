@@ -128,7 +128,11 @@ if ($PreflightOnly) {
         'CAS-R94-1-CODEX-RUNTIME-DISCOVERY',
         "OpenAI\\Codex\\bin",
         "app\\resources\\codex.exe",
-        'R94_1_CODEX_RUNTIME_DISCOVERY_PASS'
+        'R94_1_CODEX_RUNTIME_DISCOVERY_PASS',
+        'CAS-R94-1-SHORT-NATIVE-BUILD-ROOT',
+        "'_r941-codex-runtime'",
+        'core.longpaths=true',
+        'LegacyWorkRoot'
     )) {
         if (-not $BuilderSource.Contains($Marker)) {
             throw "r94.1 Codex runtime discovery contract missing: $Marker"
@@ -227,10 +231,33 @@ if ($null -eq $BundledRuntime -or [string]::IsNullOrWhiteSpace($CodexCliVersion)
 Write-Host ("R94_1_CODEX_RUNTIME_DISCOVERY_PASS: {0} ({1})" -f $BundledRuntime, $CodexCliVersion) -ForegroundColor Green
 
 $Tag = "rust-v$CodexCliVersion"
-$WorkRoot = Join-Path $RepoRoot 'target\r94.1-codex-runtime'
+
+# CAS-R94-1-SHORT-NATIVE-BUILD-ROOT
+# openai/codex contains intentionally long snapshot filenames. Keeping its
+# checkout under the already-deep Transfer repo can exceed Windows path limits
+# even before Cargo starts. Put only the disposable native-build workspace at
+# the root of the same drive; the final patched runtime still lands in this repo.
+$DriveRoot = [System.IO.Path]::GetPathRoot($RepoRoot)
+if ([string]::IsNullOrWhiteSpace($DriveRoot)) {
+    throw "could not resolve drive root for r94.1 native runtime workspace: $RepoRoot"
+}
+$WorkRoot = Join-Path $DriveRoot '_r941-codex-runtime'
 $SourceDir = Join-Path $WorkRoot "src-$CodexCliVersion"
 $BuildTarget = Join-Path $WorkRoot "build-$CodexCliVersion"
 $MetadataPath = "$OutputPath.json"
+
+# Best-effort cleanup for the pre-fix deep-path checkout that may have been left
+# behind by a Filename too long failure. It is never reused after this revision.
+$LegacyWorkRoot = Join-Path $RepoRoot 'target\r94.1-codex-runtime'
+if ((Test-Path -LiteralPath $LegacyWorkRoot) -and
+    -not [string]::Equals($LegacyWorkRoot, $WorkRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    try {
+        Remove-Item -LiteralPath $LegacyWorkRoot -Recurse -Force -ErrorAction Stop
+        Write-Host "[r94.1] removed legacy deep native-build workspace: $LegacyWorkRoot"
+    } catch {
+        Write-Warning ("could not remove legacy deep native-build workspace; it will not be reused: " + $_.Exception.Message)
+    }
+}
 
 $Reuse = $false
 if ((Test-Path -LiteralPath $OutputPath) -and (Test-Path -LiteralPath $MetadataPath)) {
@@ -254,9 +281,11 @@ if (-not $Reuse) {
         Remove-Item -LiteralPath $SourceDir -Recurse -Force
     }
 
-    Write-Host "[r94.1] cloning openai/codex $Tag for the version-matched runtime patch"
-    git clone --filter=blob:none --depth 1 --single-branch --branch $Tag https://github.com/openai/codex.git $SourceDir
-    if ($LASTEXITCODE -ne 0) { throw "openai/codex clone failed: $LASTEXITCODE" }
+    Write-Host "[r94.1] cloning openai/codex $Tag into short native-build root: $SourceDir"
+    git -c core.longpaths=true clone --filter=blob:none --depth 1 --single-branch --branch $Tag https://github.com/openai/codex.git $SourceDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "openai/codex clone failed: $LASTEXITCODE (workRoot=$WorkRoot; core.longpaths=true)"
+    }
 
     $ProviderSource = Join-Path $SourceDir 'codex-rs\model-provider-info\src\lib.rs'
     $ProviderTests = Join-Path $SourceDir 'codex-rs\model-provider-info\src\model_provider_info_tests.rs'

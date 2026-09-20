@@ -80,10 +80,10 @@ foreach ($Check in @(
         throw "r94.1 native runtime overlay integration missing: $($Check.Marker)"
     }
 }
-if ($CodexRuntimeBuilderText.Contains('built_in_provider.base_url') -or
-    $CodexRuntimeBuilderText.Contains('built_in_provider.requires_openai_auth') -or
-    $CodexRuntimeBuilderText.Contains('built_in_provider.name =')) {
-    throw 'r94.1 patched runtime must not replace built-in openai identity/routing/auth'
+if (-not $CodexRuntimeBuilderText.Contains("if ($MergeReplacement.Contains('built_in_provider.base_url')") -or
+    -not $CodexRuntimeBuilderText.Contains("$MergeReplacement.Contains('built_in_provider.requires_openai_auth')") -or
+    -not $CodexRuntimeBuilderText.Contains("$MergeReplacement.Contains('built_in_provider.name =')")) {
+    throw 'r94.1 patched runtime builder is missing its precise identity/routing/auth negative guard'
 }
 Write-Host 'R94_1_BUILTIN_OPENAI_RUNTIME_CHAIN_PREFLIGHT_PASS' -ForegroundColor Green
 

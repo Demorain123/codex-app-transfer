@@ -94,7 +94,7 @@ $PsErrors = $null
     [ref]$PsTokens,
     [ref]$PsErrors
 ) | Out-Null
-if ($PsErrors.Count -ne 0) {
+if (@($PsErrors).Count -ne 0) {
     throw ("r94.1 Codex runtime builder PowerShell parse failed: " + (($PsErrors | ForEach-Object Message) -join '; '))
 }
 Write-Host 'R94_1_CODEX_RUNTIME_PS_PARSE_PASS' -ForegroundColor Green
@@ -117,16 +117,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_FOCUSED_TESTS_PASS' -ForegroundColor Green
 
-if (-not $PreflightOnly) {
-    & pwsh -NoProfile -ExecutionPolicy Bypass -File $CodexRuntimeBuilder -OutputPath $CodexRuntimeExe
-    if ($LASTEXITCODE -ne 0) {
-        throw "r94.1 patched Codex runtime build failed with exit code $LASTEXITCODE"
-    }
-    if (-not (Test-Path -LiteralPath $CodexRuntimeExe)) {
-        throw "r94.1 patched Codex runtime missing after build: $CodexRuntimeExe"
-    }
-}
-
 $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner)
 if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
 if ($PreflightOnly) { $Args += '-PreflightOnly' }
@@ -136,6 +126,23 @@ $OldVisibleVersion = $env:CAS_TRANSFER_VISIBLE_VERSION
 try {
     $env:CAS_TRANSFER_VISIBLE_REVISION = 'r94.1'
     $env:CAS_TRANSFER_VISIBLE_VERSION = '2.4.5+94.1'
+
+    if (-not $PreflightOnly) {
+        $CheapPreflightArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner,'-PreflightOnly')
+        & pwsh @CheapPreflightArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "r94.1 inherited preflight failed before native runtime build with exit code $LASTEXITCODE"
+        }
+        Write-Host 'R94_1_INHERITED_PREFLIGHT_BEFORE_NATIVE_BUILD_PASS' -ForegroundColor Green
+
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File $CodexRuntimeBuilder -OutputPath $CodexRuntimeExe
+        if ($LASTEXITCODE -ne 0) {
+            throw "r94.1 patched Codex runtime build failed with exit code $LASTEXITCODE"
+        }
+        if (-not (Test-Path -LiteralPath $CodexRuntimeExe)) {
+            throw "r94.1 patched Codex runtime missing after build: $CodexRuntimeExe"
+        }
+    }
 
     & pwsh @Args
     if ($LASTEXITCODE -ne 0) {

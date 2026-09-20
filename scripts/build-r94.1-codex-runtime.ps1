@@ -117,7 +117,11 @@ if ($PreflightOnly) {
         'provider.stream_idle_timeout_ms.is_some()',
         'provider.websocket_connect_timeout_ms.is_some()',
         'provider.http_headers.take()',
-        'provider.query_params.take()'
+        'provider.query_params.take()',
+        'CAS-R94-1-CODEX-RUNTIME-DISCOVERY',
+        "OpenAI\\Codex\\bin",
+        "app\\resources\\codex.exe",
+        'R94_1_CODEX_RUNTIME_DISCOVERY_PASS'
     )) {
         if (-not $MergeReplacement.Contains($Marker)) {
             throw "r94.1 Codex runtime patch contract missing: $Marker"
@@ -154,28 +158,66 @@ if ($null -eq $Package -or [string]::IsNullOrWhiteSpace($Package.InstallLocation
     throw 'OpenAI.Codex AppX package not found; cannot pin the r94.1 runtime patch to the installed Desktop runtime'
 }
 
-$Candidates = @(
-    Get-ChildItem -LiteralPath $Package.InstallLocation -Recurse -File -Filter 'codex.exe' -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '(?i)\\app\\codex\.exe$' }
-)
+# CAS-R94-1-CODEX-RUNTIME-DISCOVERY
+# Current Windows Desktop relocates the packaged CLI out of WindowsApps to a
+# user-executable cache. Prefer that copy because app\resources\codex.exe may
+# be Application Protected and return Access Denied to an unpackaged shell.
+$CandidatePaths = New-Object System.Collections.Generic.List[string]
+
+if (-not [string]::IsNullOrWhiteSpace($env:CODEX_CLI_PATH)) {
+    $CandidatePaths.Add($env:CODEX_CLI_PATH)
+}
+
+if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $LocalCodexBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+    if (Test-Path -LiteralPath $LocalCodexBin) {
+        Get-ChildItem -LiteralPath $LocalCodexBin -Recurse -File -Filter 'codex.exe' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            ForEach-Object { $CandidatePaths.Add($_.FullName) }
+    }
+}
+
+$PackagedCli = Join-Path $Package.InstallLocation 'app\resources\codex.exe'
+if (Test-Path -LiteralPath $PackagedCli) {
+    $CandidatePaths.Add($PackagedCli)
+}
+
+try {
+    Get-Command codex.exe -ErrorAction Stop |
+        Select-Object -ExpandProperty Source -Unique |
+        ForEach-Object { if ($_){ $CandidatePaths.Add($_) } }
+} catch {}
 
 $BundledRuntime = $null
 $CodexCliVersion = $null
-foreach ($Candidate in $Candidates) {
-    try {
-        $VersionText = (& $Candidate.FullName --version 2>$null | Out-String).Trim()
-    } catch {
+$Discovery = New-Object System.Collections.Generic.List[object]
+foreach ($CandidatePath in @($CandidatePaths | Select-Object -Unique)) {
+    if ([string]::IsNullOrWhiteSpace($CandidatePath) -or -not (Test-Path -LiteralPath $CandidatePath -PathType Leaf)) {
         continue
     }
+    $VersionText = $null
+    $ErrorText = $null
+    try {
+        $VersionText = (& $CandidatePath --version 2>&1 | Out-String).Trim()
+    } catch {
+        $ErrorText = $_.Exception.Message
+    }
+    $Discovery.Add([pscustomobject]@{
+        path = $CandidatePath
+        version = $VersionText
+        error = $ErrorText
+    })
     if ($VersionText -match '(?i)^codex-cli\s+([0-9]+\.[0-9]+\.[0-9]+(?:[-+][^\s]+)?)') {
-        $BundledRuntime = $Candidate.FullName
+        $BundledRuntime = $CandidatePath
         $CodexCliVersion = $Matches[1]
         break
     }
 }
 if ($null -eq $BundledRuntime -or [string]::IsNullOrWhiteSpace($CodexCliVersion)) {
-    throw "could not locate the bundled codex-cli runtime under $($Package.InstallLocation)"
+    $Evidence = ($Discovery | ConvertTo-Json -Compress -Depth 4)
+    throw "could not locate a runnable Codex CLI runtime. Checked CODEX_CLI_PATH, %LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe, packaged app\resources\codex.exe and PATH. evidence=$Evidence"
 }
+Write-Host ("R94_1_CODEX_RUNTIME_DISCOVERY_PASS: {0} ({1})" -f $BundledRuntime, $CodexCliVersion) -ForegroundColor Green
 
 $Tag = "rust-v$CodexCliVersion"
 $WorkRoot = Join-Path $RepoRoot 'target\r94.1-codex-runtime'

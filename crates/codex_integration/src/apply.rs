@@ -480,9 +480,6 @@ fn write_openai_policy_overlay(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
-    let prior_manifest = std::fs::read(&paths.openai_policy_overlay_json)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<OpenAiPolicyOverlayManifest>(&bytes).ok());
     let mut fields = std::collections::BTreeMap::new();
     let mut previous_fields = std::collections::BTreeMap::new();
 
@@ -490,19 +487,10 @@ fn write_openai_policy_overlay(
         if let Some(literal) =
             snapshot_table_field_literal(source_config, &source_section, field)
         {
-            let previous = prior_manifest
-                .as_ref()
-                .and_then(|manifest| manifest.previous_fields.get(*field).cloned())
-                .unwrap_or_else(|| {
-                    snapshot_table_field_literal(&target_before, target_section, field)
-                });
-            previous_fields.insert((*field).to_string(), previous);
-            sync_table_field(
-                &paths.config_toml,
-                target_section,
-                field,
-                Some(&literal),
-            )?;
+            previous_fields.insert(
+                (*field).to_string(),
+                snapshot_table_field_literal(&target_before, target_section, field),
+            );
             fields.insert((*field).to_string(), literal);
         }
     }
@@ -521,11 +509,24 @@ fn write_openai_policy_overlay(
         return Ok(());
     }
 
+    // Journal ownership before mutating config.toml. If Transfer crashes after
+    // only some fields are written, restore_openai_policy_overlay can still
+    // identify and revert every field that reached the expected overlay value;
+    // fields not written yet are simply ignored by the ownership check.
     std::fs::create_dir_all(&paths.app_home)?;
     std::fs::write(
         &paths.openai_policy_overlay_json,
         serde_json::to_vec_pretty(&manifest)?,
     )?;
+
+    for (field, literal) in &manifest.fields {
+        sync_table_field(
+            &paths.config_toml,
+            target_section,
+            field,
+            Some(literal),
+        )?;
+    }
     Ok(())
 }
 

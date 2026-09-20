@@ -564,6 +564,11 @@ if (-not $CargoLockText.Contains('name = "codex-app-transfer"') -or
 }
 Write-Host 'R94_BACKEND_PACKAGE_IDENTITY_PREFLIGHT_PASS' -ForegroundColor Green
 
+if ($R941ApplyRsText -match '(?m)^\s*(?:&&|\|\|)\s+let\s+') {
+    throw 'r94.1 Rust 2024 let-chain syntax detected in Rust 2021 workspace'
+}
+Write-Host 'R94_1_RUST_2021_SYNTAX_COMPAT_PASS' -ForegroundColor Green
+
 foreach ($Marker in @(
     'CAS-R94-1-PROVIDER-CONFIG-TRUTH',
     'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY',

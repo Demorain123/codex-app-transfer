@@ -461,7 +461,21 @@ fn write_openai_policy_overlay(
             for (field, expected_literal) in &previous_manifest.fields {
                 let live_literal =
                     snapshot_table_field_literal(&live, "model_providers.openai", field);
-                if live_literal.as_deref().map(str::trim) != Some(expected_literal.trim()) {
+                let previous_literal = previous_manifest
+                    .previous_fields
+                    .get(field)
+                    .cloned()
+                    .unwrap_or(None);
+                let live_trimmed = live_literal.as_deref().map(str::trim);
+                let overlay_trimmed = Some(expected_literal.trim());
+                let previous_trimmed = previous_literal.as_deref().map(str::trim);
+
+                // Crash-safe journal semantics:
+                // - overlay value => Transfer already wrote this field;
+                // - previous value => journal existed but this field had not
+                //   been written yet (or was already restored);
+                // - anything else => genuine live user edit, fail closed.
+                if live_trimmed != overlay_trimmed && live_trimmed != previous_trimmed {
                     return Err(CodexError::Other(format!(
                         "r94.1 detected a user edit to model_providers.openai.{field} while the provider-policy overlay was active; restart/re-apply Transfer to establish a fresh baseline"
                     )));

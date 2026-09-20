@@ -254,9 +254,6 @@ fn provider_section_fields(
 
         if trimmed.starts_with('[') {
             root_scope = false;
-            if in_section {
-                in_section = false;
-            }
             let plain = matches_header(trimmed, &plain_header);
             let quoted = matches_header(trimmed, &quoted_header);
             in_section = plain || quoted;
@@ -709,29 +706,37 @@ pub fn apply_provider(paths: &CodexPaths, cfg: &ApplyConfig) -> Result<ApplyResu
     // If the snapshot says the source provider had behavior policy but the live
     // source table disappeared, do not rebuild a partial overlay from stale
     // snapshot policy. That would hide a user deletion.
-    if !snapshot_taken_now
-        && let Some(snapshot) = snapshot_config.as_deref()
-        && let Some(snapshot_policy) = snapshot_source_provider
-            .as_deref()
-            .and_then(|source_provider| provider_policy_truth_for_source(snapshot, source_provider))
-        && snapshot_policy.has_provider_policy()
-        && snapshot_source_provider
-            .as_deref()
-            .and_then(|source_provider| {
-                provider_policy_truth_for_source(&live_config_for_provider, source_provider)
-            })
-            .is_none()
-    {
-        log_provider_policy_truth(
-            &snapshot_policy,
-            false,
-            "openai",
-            "live-provider-table-missing",
-        );
-        return Err(CodexError::Other(format!(
-            "r94.1 cannot preserve provider policy for '{}' because the live source provider table is missing",
-            snapshot_policy.source_provider
-        )));
+    if !snapshot_taken_now {
+        if let Some(snapshot) = snapshot_config.as_deref() {
+            if let Some(snapshot_policy) = snapshot_source_provider
+                .as_deref()
+                .and_then(|source_provider| {
+                    provider_policy_truth_for_source(snapshot, source_provider)
+                })
+            {
+                let live_source_provider_missing = snapshot_source_provider
+                    .as_deref()
+                    .and_then(|source_provider| {
+                        provider_policy_truth_for_source(
+                            &live_config_for_provider,
+                            source_provider,
+                        )
+                    })
+                    .is_none();
+                if snapshot_policy.has_provider_policy() && live_source_provider_missing {
+                    log_provider_policy_truth(
+                        &snapshot_policy,
+                        false,
+                        "openai",
+                        "live-provider-table-missing",
+                    );
+                    return Err(CodexError::Other(format!(
+                        "r94.1 cannot preserve provider policy for '{}' because the live source provider table is missing",
+                        snapshot_policy.source_provider
+                    )));
+                }
+            }
+        }
     }
 
     // Validate portability before any routing key or overlay field is mutated.

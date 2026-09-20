@@ -3615,6 +3615,60 @@ supports_websockets = true
     }
 
     #[test]
+    fn r94_1_partial_overlay_journal_recovers_without_false_user_edit() {
+        let (_t, paths) = setup();
+        std::fs::create_dir_all(&paths.codex_home).unwrap();
+        std::fs::create_dir_all(&paths.app_home).unwrap();
+
+        let partial = "model_provider = \"OpenAi\"\n\n[model_providers.OpenAi]\nname = \"OpenAi\"\nbase_url = \"https://old.example/v1\"\nwire_api = \"responses\"\nstream_max_retries = 15\nrequest_max_retries = 7\n\n[model_providers.openai]\nstream_max_retries = 15\n";
+        std::fs::write(&paths.config_toml, partial).unwrap();
+
+        let manifest = OpenAiPolicyOverlayManifest {
+            schema_version: 1,
+            source_provider: "OpenAi".to_string(),
+            effective_provider: "openai".to_string(),
+            fields: std::collections::BTreeMap::from([
+                ("request_max_retries".to_string(), "7".to_string()),
+                ("stream_max_retries".to_string(), "15".to_string()),
+            ]),
+            previous_fields: std::collections::BTreeMap::from([
+                ("request_max_retries".to_string(), None),
+                ("stream_max_retries".to_string(), None),
+            ]),
+        };
+        std::fs::write(
+            &paths.openai_policy_overlay_json,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let policy =
+            provider_policy_truth_for_source(partial, "OpenAi").expect("source policy");
+        write_openai_policy_overlay(&paths, &policy, partial)
+            .expect("partial journal should recover and re-apply instead of looking like a user edit");
+
+        let live = read_toml(&paths);
+        assert_eq!(
+            snapshot_table_field_literal(
+                &live,
+                "model_providers.openai",
+                "stream_max_retries"
+            )
+            .as_deref(),
+            Some("15")
+        );
+        assert_eq!(
+            snapshot_table_field_literal(
+                &live,
+                "model_providers.openai",
+                "request_max_retries"
+            )
+            .as_deref(),
+            Some("7")
+        );
+    }
+
+    #[test]
     fn r94_1_restore_preserves_source_provider_endpoint_edit() {
         let (_t, paths) = setup();
         std::fs::create_dir_all(&paths.codex_home).unwrap();

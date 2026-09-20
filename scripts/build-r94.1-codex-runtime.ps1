@@ -117,14 +117,21 @@ if ($PreflightOnly) {
         'provider.stream_idle_timeout_ms.is_some()',
         'provider.websocket_connect_timeout_ms.is_some()',
         'provider.http_headers.take()',
-        'provider.query_params.take()',
+        'provider.query_params.take()'
+    )) {
+        if (-not $MergeReplacement.Contains($Marker)) {
+            throw "r94.1 Codex runtime patch contract missing: $Marker"
+        }
+    }
+    $BuilderSource = [System.IO.File]::ReadAllText($MyInvocation.MyCommand.Path)
+    foreach ($Marker in @(
         'CAS-R94-1-CODEX-RUNTIME-DISCOVERY',
         "OpenAI\\Codex\\bin",
         "app\\resources\\codex.exe",
         'R94_1_CODEX_RUNTIME_DISCOVERY_PASS'
     )) {
-        if (-not $MergeReplacement.Contains($Marker)) {
-            throw "r94.1 Codex runtime patch contract missing: $Marker"
+        if (-not $BuilderSource.Contains($Marker)) {
+            throw "r94.1 Codex runtime discovery contract missing: $Marker"
         }
     }
     foreach ($Marker in @(

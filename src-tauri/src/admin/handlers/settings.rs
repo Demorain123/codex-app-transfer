@@ -824,4 +824,56 @@ mod tests {
             assert!(names[0].contains("before-import"));
         });
     }
+
+    #[test]
+    fn r94_1_transfer_retry_setting_accepts_zero_to_fifteen_and_hot_applies() {
+        with_isolated_home(|_| {
+            save_registry(&config_with_secret()).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            let response = runtime.block_on(async {
+                save_settings(Json(json!({"upstreamConnectRetries": 15}))).await
+            });
+            assert_eq!(response.into_response().status(), StatusCode::OK);
+            assert_eq!(
+                codex_app_transfer_proxy::upstream_connect_retry_limit(),
+                15
+            );
+            let saved = load_registry().unwrap();
+            assert_eq!(saved["settings"]["upstreamConnectRetries"], json!(15));
+
+            let response = runtime.block_on(async {
+                save_settings(Json(json!({"upstreamConnectRetries": 0}))).await
+            });
+            assert_eq!(response.into_response().status(), StatusCode::OK);
+            assert_eq!(codex_app_transfer_proxy::upstream_connect_retry_limit(), 0);
+        });
+    }
+
+    #[test]
+    fn r94_1_transfer_retry_setting_rejects_values_above_fifteen() {
+        with_isolated_home(|_| {
+            save_registry(&config_with_secret()).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let response = runtime.block_on(async {
+                save_settings(Json(json!({"upstreamConnectRetries": 16}))).await
+            });
+            assert_eq!(
+                response.into_response().status(),
+                StatusCode::BAD_REQUEST
+            );
+            let saved = load_registry().unwrap();
+            assert!(
+                saved["settings"].get("upstreamConnectRetries").is_none(),
+                "invalid retry value must not be persisted"
+            );
+        });
+    }
+
 }

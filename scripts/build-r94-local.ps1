@@ -315,7 +315,9 @@ foreach ($Marker in @(
     'function r94CollectSemanticOutputSurfaces(turn) {',
     'R94_NO_DESCENDANT_EXACT_BORROW_RUNTIME',
     'R94_PANE_TPS_SAMPLE_CLOCK_RUNTIME',
+    'R94_APP_SERVER_EMITTED_AT_RUNTIME',
     'R94_SHORT_NATIVE_TIME_LIFECYCLE_UPGRADE_RUNTIME',
+    'R94_PANE_NATIVE_SHORT_TIME_COVER_RUNTIME',
     'R94_NATIVE_TIME_FULL_FORMAT_OVERLAY_RUNTIME',
     'R94_PANE_ORPHAN_SEMANTIC_TIMESTAMP_RUNTIME',
     'R94_PANE_ORPHAN_CAPABILITY_RETRY_RUNTIME',
@@ -364,12 +366,14 @@ Write-Host 'R94_PER_OUTPUT_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - nested assistant message groups are timestamp units; explicit tool/agent/status surfaces remain independent'
 Write-Host '  - assistant prose surrounding embedded tool/agent/status cards keeps its own timestamp unit'
 Write-Host '  - current Codex agent/progress cards outside canonical turn wrappers use a pane-scoped live-only structural fallback'
+Write-Host '  - pane-level orphan output resolves through the status bar exported thread id instead of process-global active-thread guessing'
+Write-Host '  - app-server emittedAtMs and persisted rollout row timestamps fill missing lifecycle timestamps without host-now substitution'
 Write-Host '  - assistant commentary/final blocks preferentially bind to timestamp-only Codex rollout output metadata (MessagePhase when present); no transcript text is forwarded'
 Write-Host '  - nested wrapper item ids cannot steal the concrete tool/agent item timestamp'
 Write-Host '  - prose-bearing assistant wrappers never borrow an embedded tool item exact time'
 Write-Host '  - user-only wrappers are excluded from assistant timestamping'
 Write-Host '  - existing/remounted history is baselined and cannot receive a fresh host-now timestamp'
-Write-Host '  - native final sent-time remains read-only; short native labels are visually covered by one full-date overlay only when an exact epoch exists'
+Write-Host '  - native final sent-time remains read-only; canonical and split-pane short native labels are covered only when an exact same-pane epoch exists'
 Write-Host '  - all Transfer timestamp badges live in the overlay root with pointer-events:none'
 Write-Host 'R94_FULL_DATE_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - Transfer-owned timestamp labels use the current host system wall clock as YYYY-MM-DD HH:mm:ss; tooltip also carries the short local timezone'
@@ -521,6 +525,8 @@ foreach ($Marker in @(
     'R94_TERMINAL_TURN_IDLE_FALLBACK_RUNTIME',
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
     'R94_PANE_LOCAL_TPS_RUNTIME',
+    'R94_PANE_THREAD_ID_EXPORT_RUNTIME',
+    'data-cas-pane-thread-id',
     'R94_CODEX_TOKEN_DURATION_INGEST_RUNTIME',
     'R94_ASSISTANT_OUTPUT_METADATA_INGEST_RUNTIME',
     'R94_ROLLOUT_DURATION_TPS_RUNTIME',

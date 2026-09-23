@@ -965,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn r94_1_transfer_retry_setting_supports_time_bounded_infinite_mode() {
+    fn r94_1_transfer_retry_setting_supports_hour_minute_and_legacy_fractional_windows() {
         with_isolated_home(|_| {
             save_registry(&config_with_secret()).unwrap();
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -973,6 +973,7 @@ mod tests {
                 .build()
                 .unwrap();
 
+            // Legacy r94.1 fractional-hours config remains accepted.
             let response = runtime.block_on(async {
                 save_settings(Json(json!({
                     "upstreamConnectRetryInfinite": true,
@@ -984,21 +985,46 @@ mod tests {
             let policy = codex_app_transfer_proxy::upstream_connect_retry_policy();
             assert!(policy.infinite);
             assert_eq!(policy.max_duration_ms, 5_400_000);
+
+            // New UI: 25h59m.
+            let response = runtime.block_on(async {
+                save_settings(Json(json!({
+                    "upstreamConnectRetryMaxHours": 25,
+                    "upstreamConnectRetryMaxMinutes": 59
+                })))
+                .await
+            });
+            assert_eq!(response.into_response().status(), StatusCode::OK);
+            let policy = codex_app_transfer_proxy::upstream_connect_retry_policy();
+            assert_eq!(policy.max_duration_ms, 93_540_000);
         });
     }
 
     #[test]
-    fn r94_1_transfer_retry_setting_rejects_invalid_infinite_duration() {
+    fn r94_1_transfer_retry_setting_allows_unlimited_time_and_rejects_bad_minutes() {
         with_isolated_home(|_| {
             save_registry(&config_with_secret()).unwrap();
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap();
+
             let response = runtime.block_on(async {
                 save_settings(Json(json!({
                     "upstreamConnectRetryInfinite": true,
-                    "upstreamConnectRetryMaxHours": 0
+                    "upstreamConnectRetryMaxHours": 0,
+                    "upstreamConnectRetryMaxMinutes": 0
+                })))
+                .await
+            });
+            assert_eq!(response.into_response().status(), StatusCode::OK);
+            let policy = codex_app_transfer_proxy::upstream_connect_retry_policy();
+            assert!(policy.infinite);
+            assert_eq!(policy.max_duration_ms, 0);
+
+            let response = runtime.block_on(async {
+                save_settings(Json(json!({
+                    "upstreamConnectRetryMaxMinutes": 60
                 })))
                 .await
             });

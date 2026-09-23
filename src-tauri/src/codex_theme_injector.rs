@@ -1342,6 +1342,11 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       ? window.__casR94OutputEventDiagnostics
       : {};
     const rolloutTpsChips = document.querySelectorAll('[data-cas-metric-source="rollout-token-interval"]').length;
+    // R94_RUNTIME_DEBUG_TPS_SOURCE_COUNTS
+    // Keep both exact same-turn delta and rollout-interval sources visible in
+    // Debug MATCH. The build contract intentionally checks tpsExact= so a
+    // future source rename cannot silently erase this diagnostic evidence.
+    const exactTpsChips = document.querySelectorAll('[data-cas-metric-source="exact-pane-output-delta"]').length;
     const statusEditorLeaks = statusNodes.filter((node) =>
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
@@ -1446,6 +1451,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       outputEventThreads: Number(outputEventDiag.threads) || 0,
       outputEventCount: Number(outputEventDiag.outputs) || 0,
       rolloutTpsChips,
+      exactTpsChips,
       statusEditorLeaks,
       composerCandidates,
       editables,
@@ -1594,6 +1600,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · orphan=' + s.tsOrphanSegments +
         ' · itemExact=' + s.tsExactItemBindings +
         ' · outMeta=' + s.outputEventCount +
+        ' · tpsExact=' + s.exactTpsChips +
         ' · tpsRollout=' + s.rolloutTpsChips +
         (s.tsSegmentSource ? ' · source=' + escapeHtml(s.tsSegmentSource) : '') + '</div>',
       '<div>TL meta=' + s.timelineEntries +

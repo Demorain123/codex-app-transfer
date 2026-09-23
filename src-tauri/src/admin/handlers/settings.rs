@@ -64,6 +64,7 @@ pub(super) fn default_config_value() -> Value {
             // 否则 normalize_imported_config 给缺该键的导入配置补 false,migrate 会把这个**生成的默认**当成用户
             // 显式 opt-out 迁成 off,绕过「无真账号→synthetic」缺键默认。缺键 = migrate None = 走默认推导。
             "autoWakeCodexPet": true,
+           "upstreamConnectRetries": 0,
            "updateUrl": DEFAULT_UPDATE_URL
         }
     })
@@ -348,6 +349,23 @@ pub async fn get_settings() -> impl IntoResponse {
 }
 
 pub async fn save_settings(Json(input): Json<Value>) -> impl IntoResponse {
+    // CAS-R94-1-TRANSFER-UPSTREAM-RETRY-SETTING
+    // Explicit opt-in only: 0 disables Transfer retry, accepted range is 0..=15.
+    // Reject malformed values instead of silently clamping persisted config.
+    let requested_upstream_connect_retries = match input.get("upstreamConnectRetries") {
+        None => None,
+        Some(value) => match value.as_u64() {
+            Some(value) if value <= 15 => Some(value as u8),
+            _ => {
+                return err(
+                    StatusCode::BAD_REQUEST,
+                    "upstreamConnectRetries must be an integer between 0 and 15",
+                )
+                .into_response()
+            }
+        },
+    };
+
     // CAS-HYBRID-DIRECT-R28-ENABLE-PREFLIGHT: transition only from a clean
     // Transfer state. Do not auto-restore here because CC Switch may already own a newer config.
     let requested_hybrid = input.get("hybridDirectMode").and_then(Value::as_bool);
@@ -416,6 +434,16 @@ pub async fn save_settings(Json(input): Json<Value>) -> impl IntoResponse {
     });
     match result {
         Ok((settings, portable_changed, auto_unlock_changed, web_fetch_changed)) => {
+            if let Some(limit) = requested_upstream_connect_retries {
+                let applied = codex_app_transfer_proxy::set_upstream_connect_retry_limit(limit);
+                codex_app_transfer_proxy::proxy_telemetry().logs.add(
+                    "INFO",
+                    format!(
+                        "[transfer-upstream-retry-setting] configured={applied} source=settings"
+                    ),
+                );
+            }
+
             // CAS-HYBRID-DIRECT-R28-SETTING-ACTIVE: immediately disable any in-memory
             // synthetic ChatGPT fabrication. The setting itself never rewrites Codex files.
             if requested_hybrid == Some(true) {

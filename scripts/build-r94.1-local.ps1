@@ -74,7 +74,11 @@ foreach ($Check in @(
     @{ Text = $RetryNoMicroText; Marker = 'CAS_TRANSFER_PROXY_PORT' },
     @{ Text = $RetryLauncherText; Marker = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY' },
     @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY ' },
+    @{ Text = $RetryLauncherText; Marker = "retry && retry.infinite ? '∞'" },
+    @{ Text = $RetryLauncherText; Marker = 'retry.maxDurationMs' },
     @{ Text = $OutputUiText; Marker = 'CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY' },
+    @{ Text = $OutputUiText; Marker = "retry && retry.infinite ? '∞'" },
+    @{ Text = $OutputUiText; Marker = 'retry.maxDurationMs' },
     @{ Text = $OutputUiText; Marker = 'R74_TRANSFER_RETRY_GENERATED_CARRY_PASS' },
     @{ Text = $OutputUiText; Marker = 'function outputTelemetryRuntimeSource(proxyPort)' }
 )) {
@@ -153,7 +157,7 @@ finally {
 if ($PreflightOnly) {
     Write-Host 'R94_1_PREVIEW_WRAPPER_PREFLIGHT_PASS' -ForegroundColor Green
     Write-Host '  - focused r94.1 Transfer-only tests + inherited r94 generated-chain preflight completed; release build was not started'
-    Write-Host '  - Transfer upstream connect retry setting/logging/Codex status overlay contracts passed'
+    Write-Host '  - uncapped finite + timed infinite Transfer retry setting/logging/Codex status overlay contracts passed'
 } else {
     Write-Host 'R94_1_PREVIEW_WRAPPER_RUNTIME_PASS' -ForegroundColor Green
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'

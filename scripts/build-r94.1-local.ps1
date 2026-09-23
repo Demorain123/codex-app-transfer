@@ -135,9 +135,11 @@ finally {
 if ($PreflightOnly) {
     Write-Host 'R94_1_PREVIEW_WRAPPER_PREFLIGHT_PASS' -ForegroundColor Green
     Write-Host '  - focused r94.1 Transfer-only tests + inherited r94 generated-chain preflight completed; release build was not started'
+    Write-Host '  - Transfer upstream connect retry setting/logging/Codex status overlay contracts passed'
 } else {
     Write-Host 'R94_1_PREVIEW_WRAPPER_RUNTIME_PASS' -ForegroundColor Green
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
     Write-Host '  - Transfer does not build, patch, replace or launch a private Codex runtime'
+    Write-Host '  - Transfer upstream connect retries are configurable 0..15; No Lagging shows live TRANSFER RETRY status inside Codex'
 }

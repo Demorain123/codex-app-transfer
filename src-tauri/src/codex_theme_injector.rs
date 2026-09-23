@@ -1150,6 +1150,20 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
+  // CAS-R94-1-STATUS-COVERAGE-TRUTH
+  // Debug MATCH must mean every visible editor has a safe Transfer status bar,
+  // not merely that one pane somewhere in the renderer mounted successfully.
+  const isVisibleElement = (node) => {
+    if (!(node instanceof Element) || !node.isConnected) return false;
+    let rect = null;
+    try { rect = node.getBoundingClientRect(); } catch {}
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    let style = null;
+    try { style = getComputedStyle(node); } catch {}
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+    return true;
+  };
+
   // CAS-R94-1-RUNTIME-DEBUG-DRAG
   // Click anywhere on the panel to collapse/expand. A deliberate pointer move
   // crosses a small dead-zone and becomes a drag, so normal click jitter does
@@ -1287,7 +1301,25 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const exactTurn = !!window.__casR94TurnCapability;
     const statusNodes = Array.from(document.querySelectorAll('[data-cas-status-inside-composer="true"]'));
     const statusBars = statusNodes.length;
-    const statusPrimary = statusNodes.length ? statusNodes[0] : null;
+    const visibleEditables = Array.from(document.querySelectorAll(
+      '.ProseMirror[contenteditable="true"],[role="textbox"][contenteditable="true"],textarea'
+    )).filter(isVisibleElement);
+    const safeStatusNodes = statusNodes.filter((node) =>
+      node instanceof Element &&
+      isVisibleElement(node) &&
+      node.getAttribute('data-cas-status-owner') === 'r94-inline-safe' &&
+      !node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
+    );
+    const coveredVisibleEditables = visibleEditables.filter((editable) =>
+      safeStatusNodes.some((bar) =>
+        bar.parentElement instanceof Element &&
+        bar.parentElement.contains(editable)
+      )
+    ).length;
+    const statusCoverageOk =
+      visibleEditables.length > 0 &&
+      coveredVisibleEditables === visibleEditables.length;
+    const statusPrimary = safeStatusNodes.length ? safeStatusNodes[0] : (statusNodes.length ? statusNodes[0] : null);
     const statusTurnSource = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-turn-source') || '') : '';
     const statusTurnId = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-turn-id') || '') : '';
     const statusPaneThreadId = statusPrimary instanceof Element ? String(statusPrimary.getAttribute('data-cas-pane-thread-id') || '') : '';
@@ -1310,11 +1342,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
     ).length;
-    const statusInsideComposer = statusEditorLeaks === 0 && statusNodes.some((node) =>
-      node instanceof Element &&
-      node.getAttribute('data-cas-status-owner') === 'r94-inline-safe' &&
-      !node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
-    );
+    const statusInsideComposer =
+      statusEditorLeaks === 0 &&
+      safeStatusNodes.length > 0 &&
+      statusCoverageOk;
     const composerCandidates = document.querySelectorAll(
       '[data-codex-composer-root],[data-thread-find-composer="true"],[data-codex-composer="true"],[data-testid*="composer"],.composer-surface-chrome,form'
     ).length;
@@ -1326,6 +1357,30 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       : {};
     const hybridSegmentMode = ts.hybridSegmentMode === true;
     const nativeRailPreserved = ts.nativeRailPreserved === true && !customTimelineRail;
+    const tsObserved = Number(ts.observedTurns) || 0;
+    const tsVisible = Number(ts.visibleTurns) || 0;
+    const tsBadges = Number(ts.badges) || 0;
+    const tsUserBadges = Number(ts.userBadges) || 0;
+    const tsSuppressed = Number(ts.nativeTimestampSuppressed) || 0;
+    const tsSegmentStamped = Number(ts.liveSegmentsStamped) || 0;
+    const tsSegmentBadges = Number(ts.liveSegmentBadges) || 0;
+    const tsSemanticUnits = Number(ts.semanticUnits) || 0;
+    const tsExactItemBindings = Number(ts.exactItemBindings) || 0;
+    const timestampEvidence =
+      tsObserved === 0 ||
+      tsVisible === 0 ||
+      tsBadges > 0 ||
+      tsUserBadges > 0 ||
+      tsSuppressed > 0;
+    const timestampHealthy =
+      timestampOverlay &&
+      hybridSegmentMode &&
+      nativeRailPreserved &&
+      timestampEvidence;
+    const segmentEvidence =
+      tsSemanticUnits === 0
+        ? 'IDLE'
+        : ((tsSegmentBadges > 0 || tsExactItemBindings > 0 || tsSegmentStamped > 0) ? 'SEEN' : 'WAIT');
     const composerDiag = window.__casR94ComposerStatusDiagnostics && typeof window.__casR94ComposerStatusDiagnostics === 'object'
       ? window.__casR94ComposerStatusDiagnostics
       : {};
@@ -1345,9 +1400,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         runtimeRevisionNumber === expectedRevisionNumber &&
         exactTurn &&
         statusInsideComposer &&
-        timestampOverlay &&
-        hybridSegmentMode &&
-        nativeRailPreserved
+        statusCoverageOk &&
+        timestampHealthy
       ) {
         state = 'match';
       } else if (
@@ -1367,6 +1421,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       exactTurn,
       statusInsideComposer,
       statusBars,
+      safeStatusBars: safeStatusNodes.length,
+      visibleEditables: visibleEditables.length,
+      coveredVisibleEditables,
+      statusCoverageOk,
       statusTurnSource,
       statusTurnId,
       statusPaneThreadId,
@@ -1387,18 +1445,20 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       hybridSegmentMode,
       customTimelineRail,
       nativeRailPreserved,
-      tsObserved: Number(ts.observedTurns) || 0,
-      tsVisible: Number(ts.visibleTurns) || 0,
-      tsBadges: Number(ts.badges) || 0,
-      tsUserBadges: Number(ts.userBadges) || 0,
+      tsObserved,
+      tsVisible,
+      tsBadges,
+      tsUserBadges,
       tsCache: Number(ts.cacheSize) || 0,
-      tsSuppressed: Number(ts.nativeTimestampSuppressed) || 0,
+      tsSuppressed,
       tsSource: String(ts.lastSource || ''),
-      tsSegmentStamped: Number(ts.liveSegmentsStamped) || 0,
-      tsSegmentBadges: Number(ts.liveSegmentBadges) || 0,
+      tsSegmentStamped,
+      tsSegmentBadges,
       tsSegmentCache: Number(ts.liveSegmentCache) || 0,
-      tsSemanticUnits: Number(ts.semanticUnits) || 0,
-      tsExactItemBindings: Number(ts.exactItemBindings) || 0,
+      tsSemanticUnits,
+      tsExactItemBindings,
+      timestampHealthy,
+      segmentEvidence,
       tsSegmentSource: String(ts.lastLiveSegmentSource || ''),
       timelineEntries: Number(ts.timelineEntries) || 0,
       timelineMarkers: Number(ts.timelineMarkers) || 0,
@@ -1471,7 +1531,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · Timeline=' + (s.nativeRailPreserved ? 'NATIVE' : (s.customTimelineRail ? 'CUSTOM' : 'OFF')) + '</div>',
       '<div>Composer cand=' + s.composerCandidates +
         ' · editables=' + s.editables +
+        ' · visible=' + s.visibleEditables +
         ' · statusBars=' + s.statusBars +
+        ' · safeBars=' + s.safeStatusBars +
+        ' · coverage=' + s.coveredVisibleEditables + '/' + s.visibleEditables +
         ' · editorLeak=' + s.statusEditorLeaks +
         ' · mount=' + escapeHtml(s.composerMountReason || 'none') +
         ' · surface=' + escapeHtml(s.composerMountSurface || '-') +
@@ -1511,7 +1574,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · envelope=' + (s.collectorEnvelopeHit ? 'hit' : '-') +
         ' · push=' + (s.collectorPushOk ? 'ok' : '-') +
         (s.collectorError ? ' · err=' + escapeHtml(s.collectorError) : '') + '</div>',
-      '<div>TS obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
+      '<div>TS health=' + (s.timestampHealthy ? 'OK' : 'WAIT') +
+        ' · SEG=' + escapeHtml(s.segmentEvidence || 'IDLE') +
+        ' · obs/vis/badge/cache=' + s.tsObserved + '/' + s.tsVisible + '/' + s.tsBadges + '/' + s.tsCache +
         ' · user=' + s.tsUserBadges +
         ' · nativeSupp=' + s.tsSuppressed +
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',

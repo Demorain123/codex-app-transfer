@@ -268,6 +268,16 @@ fn load_resolver_snapshot() -> Result<ResolverSnapshot, String> {
         Ok(ConfigMutation::Modified(cfg))
     })?;
 
+    let retry_limit = codex_app_transfer_proxy::set_upstream_connect_retry_limit(
+        cfg.settings.upstream_connect_retries,
+    );
+    codex_app_transfer_proxy::proxy_telemetry().logs.add(
+        "INFO",
+        format!(
+            "[transfer-upstream-retry-setting] configured={retry_limit} source=proxy-start"
+        ),
+    );
+
     let gateway_key = cfg
         .gateway_api_key
         .filter(|s| !s.is_empty())

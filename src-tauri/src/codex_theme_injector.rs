@@ -1276,6 +1276,12 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const retryElapsedMs = Number(retry.elapsedMs) || 0;
     const retryMaxDurationMs = Number(retry.maxDurationMs) || 0;
     const retryRemainingMs = Math.max(0, retryMaxDurationMs - retryElapsedMs);
+    const retryTransport = String(retry.transport || '');
+    const retryLastError = String(retry.lastError || '');
+    const retryBridgePacket = window.__casTransferRetryBridge && typeof window.__casTransferRetryBridge === 'object'
+      ? window.__casTransferRetryBridge
+      : {};
+    const retryBridgeError = String(retryBridgePacket.error || '');
     const expectedRevisionNumber = revisionNumber(META.transferRevision);
     const runtimeRevisionNumber = revisionNumber(runtime);
     const exactTurn = !!window.__casR94TurnCapability;
@@ -1414,6 +1420,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       retryElapsedMs,
       retryMaxDurationMs,
       retryRemainingMs,
+      retryTransport,
+      retryLastError,
+      retryBridgeError,
     };
   };
 
@@ -1485,7 +1494,12 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
                    ? ' · left=' + (s.retryRemainingMs / 3600000).toFixed(2) + 'h/' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h'
                    : ' · window=' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h')
                : ''))
-          : 'UNAVAILABLE') + '</div>',
+          : ('UNAVAILABLE' +
+             (s.retryTransport ? ' · via=' + escapeHtml(s.retryTransport) : '') +
+             (s.retryLastError ? ' · err=' + escapeHtml(s.retryLastError) : '') +
+             (!s.retryLastError && s.retryBridgeError ? ' · bridgeErr=' + escapeHtml(s.retryBridgeError) : ''))) +
+        (s.retryAvailable && s.retryTransport ? ' · via=' + escapeHtml(s.retryTransport) : '') +
+        '</div>',
       '<div>Collector tick=' + s.collectorTick +
         ' · stage=' + escapeHtml(s.collectorStage || '-') +
         ' · threads=' + s.collectorThreadCount +

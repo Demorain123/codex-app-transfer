@@ -69,6 +69,9 @@ foreach ($Check in @(
     @{ Text = $RetryForwardText; Marker = 'finite_retry_round_exhausted' },
     @{ Text = $RetryForwardText; Marker = 'get_or_start_infinite_incident' },
     @{ Text = $RetryForwardText; Marker = 'retry_policy.max_duration_ms > 0' },
+    @{ Text = $RetryForwardText; Marker = '[transfer-upstream-retry-handoff]' },
+    @{ Text = $RetryForwardText; Marker = 'next_layer=codex-native' },
+    @{ Text = $RetryForwardText; Marker = 'phase=codex-native' },
     @{ Text = $RetryServerText; Marker = '/_cas/transfer-retry-status' },
     @{ Text = $RetryServerText; Marker = '"maxDurationMs"' },
     @{ Text = $RetryServerText; Marker = 'transfer_retry_status_options_handler' },
@@ -151,6 +154,23 @@ if ($RetryForwardText.Contains('tokio::time::timeout')) {
 }
 Write-Host 'R94_1_RETRY_NO_HARD_CANCEL_PASS' -ForegroundColor Green
 
+$FiniteExhaustPos = $RetryForwardText.IndexOf('mark_finite_retry_round_exhausted')
+$FiniteFinishPos = $RetryForwardText.IndexOf('finish_transfer_retry(id)', $FiniteExhaustPos)
+$FiniteHandoffPos = $RetryForwardText.IndexOf('[transfer-upstream-retry-handoff]', $FiniteFinishPos)
+$FiniteReturnPos = $RetryForwardText.IndexOf('return Err(ForwardError::Upstream(error));', $FiniteHandoffPos)
+if (
+    $FiniteExhaustPos -lt 0 -or
+    $FiniteFinishPos -le $FiniteExhaustPos -or
+    $FiniteHandoffPos -le $FiniteFinishPos -or
+    $FiniteReturnPos -le $FiniteHandoffPos
+) {
+    throw 'r94.1 retry handoff order violated: finite Transfer must exhaust/finish before error is returned to Codex'
+}
+if (-not $RetryForwardText.Contains('finite_retry_round_exhausted(&resolved.provider_id)')) {
+    throw 'r94.1 retry handoff order violated: Codex reissues must not acquire a second finite Transfer round'
+}
+Write-Host 'R94_1_TRANSFER_BEFORE_CODEX_RETRY_HANDOFF_PASS' -ForegroundColor Green
+
 Write-Host 'R94_1_TRANSFER_RETRY_CONTRACT_PASS' -ForegroundColor Green
 
 & node --check $RetryLauncher
@@ -213,12 +233,13 @@ finally {
 if ($PreflightOnly) {
     Write-Host 'R94_1_PREVIEW_WRAPPER_PREFLIGHT_PASS' -ForegroundColor Green
     Write-Host '  - focused r94.1 Transfer-only tests + inherited r94 generated-chain preflight completed; release build was not started'
-    Write-Host '  - uncapped finite + timed infinite Transfer retry setting/logging/Codex status overlay contracts passed'
+    Write-Host '  - finite retry is one Transfer round before Codex-native retry handoff; infinite mode supports optional hour/minute time limits'
 } else {
     Write-Host 'R94_1_PREVIEW_WRAPPER_RUNTIME_PASS' -ForegroundColor Green
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
     Write-Host '  - Transfer does not build, patch, replace or launch a private Codex runtime'
-    Write-Host '  - Transfer finite retry counts have no artificial 15 cap; timed infinite mode is available'
-    Write-Host '  - No Lagging shows TRANSFER RETRY x/N or x/∞ with elapsed/max time inside Codex'
+    Write-Host '  - retry order is Transfer first, then Codex-native only after Transfer exhausts/hands off'
+    Write-Host '  - finite retry counts have no artificial 15 cap; infinite mode supports hour/minute limits or no time limit'
+    Write-Host '  - No Lagging shows TRANSFER RETRY only while Transfer itself is actively retrying'
 }

@@ -523,9 +523,16 @@ $R94StatusHtml = @'
     const exact = turnExact || threadExact;
     const displayUsage = exact || nativeFallback;
     const hasOwnedUsage = !!(turnExact || threadExact || nativeFallback);
-    const activity = hasOwnedUsage
+    const rawActivity = hasOwnedUsage
       ? paneActivityState(bar)
       : (ownership.awaiting ? 'waiting' : 'unowned');
+    const lifecycleStatus = String(turnRecord && turnRecord.status || '').toLowerCase();
+    const lifecycleTerminal = /completed|failed|interrupted|cancelled|canceled/.test(lifecycleStatus);
+    // R94_TERMINAL_TURN_IDLE_FALLBACK_RUNTIME
+    // Some sub-agent panes do not expose a normal send button after they close,
+    // so DOM-only activity detection reports UNKNOWN forever. An exact terminal
+    // turn lifecycle is sufficient to say the pane is no longer busy.
+    const activity = rawActivity === 'unknown' && lifecycleTerminal ? 'idle' : rawActivity;
     // R94_STATUS_TRUTH_SEMANTICS_RUNTIME
     // "BUSY" means pane-local task activity (stop/busy UI evidence), not proof
     // that the model is decoding tokens at this instant.

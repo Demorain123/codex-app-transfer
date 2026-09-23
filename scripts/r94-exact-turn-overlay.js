@@ -955,23 +955,43 @@
     if (turn.matches(R94_SEMANTIC_OUTPUT_SELECTOR)) raw.push(turn);
     turn.querySelectorAll(R94_SEMANTIC_OUTPUT_SELECTOR).forEach(function(node) { raw.push(node); });
 
-    const filtered = [];
+    const candidates = [];
     const seenNodes = new Set();
-    const seenItemIds = new Set();
     for (const node of raw) {
       if (!r94SemanticOutputSurfaceUsable(node, turn) || seenNodes.has(node)) continue;
       seenNodes.add(node);
-
-      // The renderer can expose the same app-server item id on a card wrapper
-      // and on one or more descendants. One lifecycle item == one timestamp.
-      const itemId = r94ItemIdForSurface(node);
-      if (itemId) {
-        const normalized = String(itemId).toLowerCase();
-        if (seenItemIds.has(normalized)) continue;
-        seenItemIds.add(normalized);
-      }
-      filtered.push(node);
+      candidates.push(node);
     }
+
+    // R94_ITEM_ID_DEDUPE_SPECIFICITY_RUNTIME
+    // Do not let an ancestor assistant wrapper steal a descendant tool/item id.
+    // When the same direct item id appears on nested wrappers, keep the most
+    // specific descendant (and prefer a concrete non-assistant surface).
+    const directItemOwners = new Map();
+    for (const node of candidates) {
+      const itemId = r94DirectItemIdForSurface(node);
+      if (!itemId) continue;
+      const normalized = String(itemId).toLowerCase();
+      const existing = directItemOwners.get(normalized);
+      if (!(existing instanceof Element)) {
+        directItemOwners.set(normalized, node);
+        continue;
+      }
+      const existingKind = r94SemanticKind(existing);
+      const nodeKind = r94SemanticKind(node);
+      if (
+        existing.contains(node) ||
+        (existingKind === 'assistant' && nodeKind !== 'assistant')
+      ) {
+        directItemOwners.set(normalized, node);
+      }
+    }
+
+    const filtered = candidates.filter(function(node) {
+      const itemId = r94DirectItemIdForSurface(node);
+      if (!itemId) return true;
+      return directItemOwners.get(String(itemId).toLowerCase()) === node;
+    });
 
     return filtered.filter(function(node) {
       const kind = r94SemanticKind(node);
@@ -1016,7 +1036,7 @@
     return uuid ? uuid[0] : raw;
   }
 
-  function r94ItemIdForSurface(surface) {
+  function r94DirectItemIdForSurface(surface) {
     if (!(surface instanceof Element)) return '';
     const attrs = [
       'data-item-id',
@@ -1026,14 +1046,29 @@
       'data-tool-call-id',
       'data-call-id'
     ];
-
     for (const attr of attrs) {
       const value = r94NormalizeItemId(surface.getAttribute(attr));
       if (value) return value;
     }
+    return '';
+  }
 
-    // One descendant identity is sufficient; do not enumerate a large
-    // streaming Markdown subtree just to discover an item id.
+  function r94ItemIdForSurface(surface) {
+    if (!(surface instanceof Element)) return '';
+    const direct = r94DirectItemIdForSurface(surface);
+    if (direct) return direct;
+    const attrs = [
+      'data-item-id',
+      'data-message-id',
+      'data-content-search-item-id',
+      'data-agent-item-id',
+      'data-tool-call-id',
+      'data-call-id'
+    ];
+
+    // A descendant identity can still bind an otherwise identity-less exact
+    // surface, but collector-level dedupe uses direct ids so ancestors cannot
+    // suppress the concrete child item before it is timestamped.
     const child = surface.querySelector(
       '[data-item-id],[data-message-id],[data-content-search-item-id],[data-agent-item-id],[data-tool-call-id],[data-call-id]'
     );

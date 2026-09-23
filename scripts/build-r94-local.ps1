@@ -546,7 +546,11 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'TL meta=' },
     @{ Text = $ThemeInjectorRsText; Marker = "data-cas-status-inside-composer" },
     @{ Text = $ThemeInjectorRsText; Marker = 'CAS-R94-1-RUNTIME-DEBUG-DRAG' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'CAS-R94-1-RUNTIME-DEBUG-COLLAPSE' },
     @{ Text = $ThemeInjectorRsText; Marker = 'data-cas-runtime-debug-draggable' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'data-cas-runtime-debug-collapsed' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'Click to collapse/expand' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'shouldToggle' },
     @{ Text = $ThemeInjectorRsText; Marker = 'setPointerCapture' }
 )
 foreach ($Contract in $RuntimeDebugContracts) {

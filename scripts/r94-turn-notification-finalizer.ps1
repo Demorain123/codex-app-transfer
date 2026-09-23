@@ -353,6 +353,12 @@ $R94ExternalIngest = @'
       contextTokens: numberAt(last, [['total_tokens'], ['totalTokens']]),
       contextWindow: numberAt(info, [['model_context_window'], ['modelContextWindow']]),
       sessionTotalTokens: total ? numberAt(total, [['total_tokens'], ['totalTokens']]) : null,
+      // R94_CODEX_TOKEN_DURATION_INGEST_RUNTIME
+      // The main-process rollout tailer computes this from persisted Codex
+      // token_count timestamps using turn_context/task_started as the first
+      // interval anchor. It is pane/thread scoped and does not borrow native UI speed.
+      usageDurationMs: Number.isFinite(Number(envelope.usageDurationMs)) ? Number(envelope.usageDurationMs) : null,
+      outputTokenRate: Number.isFinite(Number(envelope.outputTokenRate)) ? Number(envelope.outputTokenRate) : null,
     } : null;
 
     if (exact) {
@@ -365,6 +371,7 @@ $R94ExternalIngest = @'
       const fingerprint = [
         exact.threadId, exact.turnId, exact.inputTokens, exact.cachedInputTokens, exact.outputTokens,
         exact.reasoningTokens, exact.contextTokens, exact.contextWindow, exact.sessionTotalTokens,
+        exact.usageDurationMs, exact.outputTokenRate,
       ].join('|');
       if (state.metrics.externalExactFingerprint !== fingerprint) {
         state.metrics.externalExactChangedAt = Date.now();
@@ -441,6 +448,29 @@ $R94PaneSpeedHelpers = @'
   function r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity) {
     const paneThread = r94NormalizePaneId(threadId);
     const turnId = String(turnRecord && turnRecord.turnId || (turnExact && turnExact.turnId) || '').trim().toLowerCase();
+
+    // R94_ROLLOUT_DURATION_TPS_RUNTIME
+    // Prefer the persisted rollout interval used by tokscale-style collectors:
+    // output tokens from one token_count divided by the exact interval ending
+    // at that same token_count. This works even when the renderer only sees one
+    // refreshed snapshot for a short sub-agent response.
+    const rolloutExact = r94ExternalExactForThread(paneThread);
+    const rolloutTurnId = String(rolloutExact && rolloutExact.turnId || '').trim().toLowerCase();
+    const rolloutRate = Number(rolloutExact && rolloutExact.outputTokenRate);
+    const rolloutDurationMs = Number(rolloutExact && rolloutExact.usageDurationMs);
+    if (
+      paneThread && turnId && rolloutTurnId === turnId &&
+      Number.isFinite(rolloutRate) && rolloutRate > 0 && rolloutRate < 10000 &&
+      Number.isFinite(rolloutDurationMs) && rolloutDurationMs > 0
+    ) {
+      return {
+        text: rolloutRate.toFixed(rolloutRate >= 100 ? 0 : 1) + ' tok/s',
+        source: 'exact-rollout-token-interval',
+        confidence: activity === 'live' ? 'live-exact-interval' : 'last-exact-interval',
+        title: 'Pane-local Codex output rate from one persisted token_count output count divided by its matched rollout timestamp interval (' + Math.round(rolloutDurationMs) + ' ms).',
+      };
+    }
+
     const outputTokens = Number(turnExact && turnExact.outputTokens);
     const observedAt = Number(turnExact && turnExact.usageObservedAtMs);
     if (!paneThread || !turnId || !Number.isFinite(outputTokens) || !Number.isFinite(observedAt) || observedAt <= 0) {

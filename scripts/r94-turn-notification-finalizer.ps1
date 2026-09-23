@@ -291,6 +291,7 @@ $R94TurnHelpers = @'
     return {
       threadId: r94NormalizePaneId(record.threadId),
       turnId: String(record.turnId || ''),
+      usageObservedAtMs: Number(record.usageObservedAtMs) || null,
       inputTokens,
       cachedInputTokens,
       outputTokens,
@@ -424,6 +425,86 @@ $R94PaneOwnership = @'
 '@
 $Patched = Replace-BlockRequired $Patched '  function paneTelemetryOwnership(threadId) {' '  function paneActivityState(bar) {' $R94PaneOwnership 'r94 multi-pane exact usage ownership'
 
+$R94PaneSpeedHelpers = @'
+  // R94_PANE_LOCAL_TPS_RUNTIME
+  // Derive pane-local output speed only from consecutive exact usage samples
+  // for the same thread+turn. Never borrow the native/global Codex tok/s.
+  function r94PaneSpeedMap() {
+    let map = state.metrics && state.metrics.r94PaneSpeedByTurn;
+    if (!(map instanceof Map)) {
+      map = new Map();
+      if (state.metrics) state.metrics.r94PaneSpeedByTurn = map;
+    }
+    return map;
+  }
+
+  function r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity) {
+    const paneThread = r94NormalizePaneId(threadId);
+    const turnId = String(turnRecord && turnRecord.turnId || (turnExact && turnExact.turnId) || '').trim().toLowerCase();
+    const outputTokens = Number(turnExact && turnExact.outputTokens);
+    const observedAt = Number(turnExact && turnExact.usageObservedAtMs);
+    if (!paneThread || !turnId || !Number.isFinite(outputTokens) || !Number.isFinite(observedAt) || observedAt <= 0) {
+      return {
+        text: '-- tok/s',
+        source: 'timing-unavailable',
+        confidence: 'unavailable',
+        title: 'Unavailable until two exact output-token snapshots for this pane and turn provide a matched token/time delta.',
+      };
+    }
+
+    const key = paneThread + '\u0000' + turnId;
+    const map = r94PaneSpeedMap();
+    let sample = map.get(key);
+    if (!sample) {
+      sample = { outputTokens, observedAt, rate: null };
+      map.set(key, sample);
+    } else if (observedAt > sample.observedAt) {
+      const deltaTokens = outputTokens - Number(sample.outputTokens || 0);
+      const deltaMs = observedAt - Number(sample.observedAt || 0);
+      if (deltaTokens > 0 && deltaMs >= 80) {
+        const rawRate = deltaTokens * 1000 / deltaMs;
+        if (Number.isFinite(rawRate) && rawRate > 0 && rawRate < 10000) {
+          sample.rate = Number.isFinite(sample.rate)
+            ? (sample.rate * 0.35 + rawRate * 0.65)
+            : rawRate;
+        }
+      }
+      sample.outputTokens = outputTokens;
+      sample.observedAt = observedAt;
+      map.delete(key);
+      map.set(key, sample);
+      while (map.size > 96) {
+        const oldest = map.keys().next().value;
+        if (!oldest) break;
+        map.delete(oldest);
+      }
+    }
+
+    if (Number.isFinite(sample.rate)) {
+      const digits = sample.rate >= 100 ? 0 : 1;
+      return {
+        text: sample.rate.toFixed(digits) + ' tok/s',
+        source: 'exact-pane-output-delta',
+        confidence: activity === 'live' ? 'live-exact-delta' : 'last-exact-delta',
+        title: activity === 'live'
+          ? 'Pane-local output speed from consecutive exact output-token snapshots for this thread and turn.'
+          : 'Last pane-local output speed measured from consecutive exact output-token snapshots for this completed/idle turn.',
+      };
+    }
+
+    return {
+      text: '-- tok/s',
+      source: 'exact-pane-awaiting-second-sample',
+      confidence: 'unavailable',
+      title: 'Waiting for a second exact output-token snapshot for this thread and turn; no global/native speed is substituted.',
+    };
+  }
+'@
+
+if (-not $Patched.Contains('R94_PANE_LOCAL_TPS_RUNTIME')) {
+    $Patched = Replace-Required $Patched '  function paneTelemetryOwnership(threadId) {' ($R94PaneSpeedHelpers + [char]10 + [char]10 + '  function paneTelemetryOwnership(threadId) {') 'r94 pane-local tok/s helper'
+}
+
 $R94StatusHtml = @'
   function statusHtmlForPane(sessionId, threadId, agentId, bar) {
     const ownership = paneTelemetryOwnership(threadId);
@@ -480,20 +561,20 @@ $R94StatusHtml = @'
     const output = exact && Number.isFinite(exact.outputTokens) ? ('out ' + shortNumber(exact.outputTokens)) : 'out --';
     const cache = displayUsage && Number.isFinite(displayUsage.cacheHitPercent) ? ('cache ' + displayUsage.cacheHitPercent.toFixed(1) + '%') : 'cache --';
     const session = displayUsage && Number.isFinite(displayUsage.sessionTotalTokens) ? ('session ' + shortNumber(displayUsage.sessionTotalTokens)) : 'session --';
-    const speedOwnership = turnExact
-      ? Object.assign({}, ownership, { owned: true, awaiting: false, exact: turnExact })
-      : ownership;
     // R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME
     // Codex native tok/s may be global, stale between polls, or cover a
-    // different model-response interval. Never relabel it as pane-local speed.
-    const speed = nativeFallback
-      ? {
+    // different model-response interval. Only exact same-thread+same-turn
+    // output-token deltas are eligible for the pane-local speed chip.
+    const speed = turnExact
+      ? r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity)
+      : {
           text: '-- tok/s',
-          source: 'timing-unavailable',
+          source: nativeFallback ? 'native-global-not-reused' : 'timing-unavailable',
           confidence: 'unavailable',
-          title: 'Unavailable: visible native Codex tok/s is intentionally not re-attributed to this pane. A pane-local rate needs a matched response token delta and model-only timing interval.',
-        }
-      : paneSpeedPresentation(speedOwnership, activity);
+          title: nativeFallback
+            ? 'Visible native/global Codex tok/s is intentionally not re-attributed to this pane.'
+            : 'Pane-local tok/s requires exact same-turn output-token samples.',
+        };
     const exactSource = turnExact
       ? 'exact-turn-capability'
       : (threadExact
@@ -530,7 +611,7 @@ $R94StatusHtml = @'
 
     return '<div class="cas-status-metrics-row" data-cas-pane-live-state="' + stateLabel.toLowerCase() + '">' + metrics + '</div>' +
       '<div class="cas-status-identity-row">' +
-        identityChip('sid', sessionId, 'session id') +
+        (sessionId ? identityChip('sid', sessionId, 'session id') : '') +
         identityChip('tid', threadId, 'thread id') +
         (agentId ? identityChip('agent', agentId, 'agent id') : '') +
       '</div>';

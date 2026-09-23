@@ -315,7 +315,10 @@ foreach ($Marker in @(
     'function r94CollectSemanticOutputSurfaces(turn) {',
     'R94_NO_DESCENDANT_EXACT_BORROW_RUNTIME',
     'R94_PANE_TPS_SAMPLE_CLOCK_RUNTIME',
+    'R94_SHORT_NATIVE_TIME_LIFECYCLE_UPGRADE_RUNTIME',
     'R94_NATIVE_TIME_FULL_FORMAT_OVERLAY_RUNTIME',
+    'R94_PANE_ORPHAN_SEMANTIC_TIMESTAMP_RUNTIME',
+    'function r94StampOrphanSemanticRoot(root) {',
     "mode: 'native-time-cover'",
     'function r94ExactItemTimeForSurface(surface, turn, capability) {',
     'function r94ItemIdForSurface(surface) {',
@@ -512,7 +515,10 @@ foreach ($Marker in @(
     'R94_TERMINAL_TURN_IDLE_FALLBACK_RUNTIME',
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
     'R94_PANE_LOCAL_TPS_RUNTIME',
+    'R94_CODEX_TOKEN_DURATION_INGEST_RUNTIME',
+    'R94_ROLLOUT_DURATION_TPS_RUNTIME',
     'function r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity) {',
+    'exact-rollout-token-interval',
     'exact-pane-output-delta',
     'R94_MULTI_PANE_LAST_THREAD_SNAPSHOT_FALLBACK_RUNTIME',
     'thread-snapshot-before-turn-usage',
@@ -706,6 +712,9 @@ foreach ($Marker in @(
     'localUsageSnapshotCache.set(filePath, { size: stat.size, envelope: fallbackEnvelope });',
     'terminalTurn',
     'activeTurn',
+    'R94_CODEX_TOKEN_DURATION_RUNTIME',
+    'usageDurationMs',
+    'outputTokenRate',
     'turnCompletedAt',
     'turnDurationMs',
     'safeEnvelope.turnId = envelope.turnId || null;',
@@ -748,8 +757,9 @@ Write-Host 'R94_STATUS_TRUTH_SEMANTICS_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - ctx uses Codex last_token_usage.total_tokens / model_context_window on exact JSONL'
 Write-Host '  - in/out mean latest model request, session means cumulative total_token_usage'
 Write-Host '  - parent/sub-agent panes retain their last exact same-thread snapshot while a newer turn waits for its first token update'
-Write-Host '  - pane tok/s is derived only from consecutive exact same-thread+same-turn output-token samples'
-Write-Host '  - native/global tok/s is never relabeled as pane-local speed; first exact sample remains -- until a delta exists'
+Write-Host '  - pane tok/s prefers persisted Codex token_count output / matched rollout timestamp interval, following the same non-overlapping duration principle used by established local usage parsers'
+Write-Host '  - short replies can obtain tok/s from the first token_count because turn_context/task_started is the initial duration anchor'
+Write-Host '  - consecutive exact renderer samples remain only a fallback; native/global tok/s is never relabeled as pane-local speed'
 Write-Host '  - unavailable sid is omitted instead of rendering a permanent sid -- placeholder'
 Write-Host 'R94_LOCAL_USAGE_COLLECTOR_DIAGNOSTICS_PREFLIGHT_PASS' -ForegroundColor Green
 

@@ -150,7 +150,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
   const RETRY_CHIP_ATTR = 'data-cas-transfer-retry-chip';
 
   const old = window[ROOT_KEY];
-  if (old && old.version === VERSION) {
+  if (old && old.version === VERSION && old.retryFeature === RETRY_MARKER) {
     try { old.rescan(); } catch {}
     return { ok: true, version: VERSION, reused: true };
   }
@@ -159,6 +159,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
 
   const state = {
     version: VERSION,
+    retryFeature: RETRY_MARKER,
     observer: null,
     timer: null,
     fetchInstalled: false,

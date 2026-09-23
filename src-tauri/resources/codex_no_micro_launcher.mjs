@@ -239,9 +239,13 @@ function outputTelemetryRuntimeSource(proxyPort) {
     const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
     const attempt = Number(retry && retry.attempt) || 0;
     let label = 'TRANSFER RETRY ' + attempt + '/' + denominator;
-    if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
+    if (retry && retry.infinite) {
       const max = Number(retry.maxDurationMs) || 0;
-      label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
+      if (max > 0) {
+        label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
+      } else {
+        label += ' · no time limit';
+      }
     }
     return label;
   }

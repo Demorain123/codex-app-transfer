@@ -589,6 +589,15 @@ function onPort(key: 'proxyPort' | 'adminPort', e: Event) {
   const v = Number((e.target as HTMLInputElement).value)
   if (Number.isFinite(v) && v > 0) void persist({ [key]: v })
 }
+// Transfer-only 上游连接重试:0=关闭,1..15=连接阶段失败后的额外重试次数。
+function onUpstreamConnectRetries(e: Event) {
+  const input = e.target as HTMLInputElement
+  const raw = Number(input.value)
+  const value = Number.isFinite(raw) ? Math.max(0, Math.min(15, Math.trunc(raw))) : 0
+  input.value = String(value)
+  void persist({ upstreamConnectRetries: value })
+}
+
 // WorkBuddy 账号池配额守护阈值:剩余积分低于此值自动切换账号(默认 20)。
 function onWbThreshold(e: Event) {
   const v = Number((e.target as HTMLInputElement).value)
@@ -695,6 +704,20 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
         </div>
         <IconChevronRight class="nav-row__chevron" />
       </RouterLink>
+      <SettingsRow
+        :title="t('settings.upstreamConnectRetries')"
+        :description="t('settings.upstreamConnectRetriesHint')"
+      >
+        <input
+          type="number"
+          class="settings-num"
+          :value="store.num('upstreamConnectRetries', 0)"
+          min="0"
+          max="15"
+          step="1"
+          @change="onUpstreamConnectRetries"
+        />
+      </SettingsRow>
       <SettingsRow :title="t('settings.webFetchBackend')" :description="t('settings.webFetchBackendHint')">
         <SegmentedControl
           :model-value="wfbDisplay"

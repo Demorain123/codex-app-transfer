@@ -218,6 +218,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       '[' + BADGE_ATTR + ']:hover{opacity:1;}',
       '#' + HUD_ID + '{position:fixed;right:10px;bottom:10px;z-index:2147483646;display:none;align-items:center;gap:7px;padding:3px 7px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:999px;background:color-mix(in srgb,Canvas 88%,transparent);color:color-mix(in srgb,CanvasText 64%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 8px color-mix(in srgb,CanvasText 10%,transparent);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;pointer-events:none;}',
       '#' + HUD_ID + '[data-visible=\"true\"]{display:inline-flex;}',
+      '#' + HUD_ID + '[data-transfer-retrying=\"true\"]{border-color:color-mix(in srgb,#e6a700 58%,transparent);background:color-mix(in srgb,#5a4300 82%,Canvas);color:#ffe08a;font-weight:700;}',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
   }
@@ -335,6 +336,20 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function updateHud() {
     const hud = ensureHud();
     if (!hud) return;
+    const r = state.retry;
+    if (r && r.active) {
+      const retryText = 'TRANSFER RETRY ' + r.attempt + '/' + r.maxRetries +
+        (r.activeCount > 1 ? ' · active ' + r.activeCount : '') +
+        (r.provider ? ' · ' + r.provider : '') +
+        (r.delayMs ? ' · wait ' + r.delayMs + 'ms' : '');
+      if (hud.textContent !== retryText) hud.textContent = retryText;
+      hud.setAttribute('data-visible', 'true');
+      hud.setAttribute('data-transfer-retrying', 'true');
+      hud.setAttribute('title', 'Transfer is retrying an upstream connect-stage failure. Codex native retry budget is unchanged.');
+      return;
+    }
+    hud.removeAttribute('data-transfer-retrying');
+    hud.removeAttribute('title');
     const m = state.metrics;
     if (!m.seen) {
       hud.removeAttribute('data-visible');
@@ -371,6 +386,37 @@ function outputTelemetryRuntimeSource(proxyPort) {
       state.timer = null;
       scan();
     }, typeof delay === 'number' ? delay : 80);
+  }
+
+  async function pollTransferRetryStatus() {
+    if (!RETRY_STATUS_URL) return;
+    let nextDelay = 1500;
+    try {
+      const response = await window.fetch(RETRY_STATUS_URL, { cache: 'no-store' });
+      if (!response.ok) throw new Error('retry status http ' + response.status);
+      const value = await response.json();
+      const retry = state.retry;
+      retry.active = value && value.active === true;
+      retry.activeCount = Number(value && value.activeCount) || 0;
+      retry.attempt = Number(value && value.attempt) || 0;
+      retry.maxRetries = Number(value && value.maxRetries) || 0;
+      retry.delayMs = Number(value && value.delayMs) || 0;
+      retry.provider = String((value && value.provider) || '');
+      retry.reason = String((value && value.reason) || '');
+      nextDelay = retry.active ? 200 : (retry.maxRetries > 0 ? 700 : 2000);
+      schedule(0);
+    } catch {
+      state.retry.active = false;
+      schedule(0);
+      nextDelay = 2000;
+    } finally {
+      state.retryTimer = setTimeout(pollTransferRetryStatus, nextDelay);
+    }
+  }
+
+  function installTransferRetryPoll() {
+    if (!RETRY_STATUS_URL || state.retryTimer) return;
+    state.retryTimer = setTimeout(pollTransferRetryStatus, 50);
   }
 
   function installObserver() {
@@ -498,6 +544,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function cleanup() {
     try { state.observer && state.observer.disconnect(); } catch {}
     if (state.timer) clearTimeout(state.timer);
+    if (state.retryTimer) clearTimeout(state.retryTimer);
     const hud = document.getElementById(HUD_ID);
     if (hud) hud.remove();
     const style = document.getElementById(STYLE_ID);
@@ -514,6 +561,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
   window[ROOT_KEY] = state;
   ensureStyle();
   installFetchObserver();
+  installTransferRetryPoll();
   installObserver();
   return { ok: true, version: VERSION, reused: false };
 })()

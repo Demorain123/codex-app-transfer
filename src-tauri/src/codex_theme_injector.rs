@@ -1338,6 +1338,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const collectorDiag = window.__casR94LocalUsageCollectorDiagnostics && typeof window.__casR94LocalUsageCollectorDiagnostics === 'object'
       ? window.__casR94LocalUsageCollectorDiagnostics
       : {};
+    const outputEventDiag = window.__casR94OutputEventDiagnostics && typeof window.__casR94OutputEventDiagnostics === 'object'
+      ? window.__casR94OutputEventDiagnostics
+      : {};
+    const rolloutTpsChips = document.querySelectorAll('[data-cas-metric-source="exact-rollout-token-interval"]').length;
     const statusEditorLeaks = statusNodes.filter((node) =>
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
@@ -1366,6 +1370,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const tsSegmentBadges = Number(ts.liveSegmentBadges) || 0;
     const tsSemanticUnits = Number(ts.semanticUnits) || 0;
     const tsExactItemBindings = Number(ts.exactItemBindings) || 0;
+    const tsOrphanSegments = Number(ts.orphanSegmentsStamped) || 0;
     const timestampEvidence =
       tsObserved === 0 ||
       tsVisible === 0 ||
@@ -1438,6 +1443,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       collectorEnvelopeHit: collectorDiag.envelopeHit === true,
       collectorPushOk: collectorDiag.pushOk === true,
       collectorError: String(collectorDiag.error || ''),
+      outputEventThreads: Number(outputEventDiag.threads) || 0,
+      outputEventCount: Number(outputEventDiag.outputs) || 0,
+      rolloutTpsChips,
       statusEditorLeaks,
       composerCandidates,
       editables,
@@ -1457,6 +1465,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       tsSegmentCache: Number(ts.liveSegmentCache) || 0,
       tsSemanticUnits,
       tsExactItemBindings,
+      tsOrphanSegments,
       timestampHealthy,
       segmentEvidence,
       tsSegmentSource: String(ts.lastLiveSegmentSource || ''),
@@ -1582,7 +1591,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         (s.tsSource ? ' · source=' + escapeHtml(s.tsSource) : '') + '</div>',
       '<div>SEG stamp/badge/cache=' + s.tsSegmentStamped + '/' + s.tsSegmentBadges + '/' + s.tsSegmentCache +
         ' · semantic=' + s.tsSemanticUnits +
+        ' · orphan=' + s.tsOrphanSegments +
         ' · itemExact=' + s.tsExactItemBindings +
+        ' · outMeta=' + s.outputEventCount +
+        ' · tpsExact=' + s.rolloutTpsChips +
         (s.tsSegmentSource ? ' · source=' + escapeHtml(s.tsSegmentSource) : '') + '</div>',
       '<div>TL meta=' + s.timelineEntries +
         ' · customMarkers=' + s.timelineMarkers +
@@ -2260,7 +2272,11 @@ mod tests {
         assert!(script.contains("Retry="));
         assert!(script.contains("retryRemainingMs"));
         assert!(script.contains("__casR94LocalUsageCollectorDiagnostics"));
+        assert!(script.contains("__casR94OutputEventDiagnostics"));
+        assert!(script.contains("exact-rollout-token-interval"));
         assert!(script.contains("SEG stamp/badge/cache"));
+        assert!(script.contains("outMeta="));
+        assert!(script.contains("tpsExact="));
         assert!(script.contains("nativeRail='"));
         assert!(script.contains("launchMode"));
         assert!(!script.contains("__CAS_DEBUG_META__"));

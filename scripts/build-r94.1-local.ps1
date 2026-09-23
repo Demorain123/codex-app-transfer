@@ -55,6 +55,32 @@ Write-Host 'R94_1_TRANSFER_ONLY_PROVIDER_CONFIG_FOCUSED_TESTS_PASS' -ForegroundC
 
 $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner)
 if ($RunFocusedTests) { $Args += '-RunFocusedTests' }
+if ($PreflightOnly) { $Args += '-PreflightOnly' }
+
+$OldVisibleRevision = $env:CAS_TRANSFER_VISIBLE_REVISION
+$OldVisibleVersion = $env:CAS_TRANSFER_VISIBLE_VERSION
+try {
+    $env:CAS_TRANSFER_VISIBLE_REVISION = 'r94.1'
+    $env:CAS_TRANSFER_VISIBLE_VERSION = '2.4.5+94.1'
+
+    & pwsh @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "r94.1 delegated Transfer build failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    if ($null -eq $OldVisibleRevision) {
+        Remove-Item Env:CAS_TRANSFER_VISIBLE_REVISION -ErrorAction SilentlyContinue
+    } else {
+        $env:CAS_TRANSFER_VISIBLE_REVISION = $OldVisibleRevision
+    }
+    if ($null -eq $OldVisibleVersion) {
+        Remove-Item Env:CAS_TRANSFER_VISIBLE_VERSION -ErrorAction SilentlyContinue
+    } else {
+        $env:CAS_TRANSFER_VISIBLE_VERSION = $OldVisibleVersion
+    }
+}
+
 if ($PreflightOnly) {
     Write-Host 'R94_1_PREVIEW_WRAPPER_PREFLIGHT_PASS' -ForegroundColor Green
     Write-Host '  - focused r94.1 Transfer-only tests + inherited r94 generated-chain preflight completed; release build was not started'

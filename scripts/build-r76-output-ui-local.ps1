@@ -210,6 +210,7 @@ $MainProcessCollector = @'
         let latestUsage = null;
         let latestTerminal = null;
         let latestItemEventAt = 0;
+        let latestOutputEventAt = 0;
         // R94_CODEX_TOKEN_DURATION_RUNTIME
         // Same principle used by tokscale's Codex parser: each accepted
         // token_count owns the interval since the previous accepted token row,
@@ -268,6 +269,7 @@ $MainProcessCollector = @'
                   atMs,
                   source: 'response_item',
                 });
+                latestOutputEventAt = Math.max(latestOutputEventAt, atMs);
               }
             }
             continue;
@@ -289,6 +291,7 @@ $MainProcessCollector = @'
                 atMs,
                 source: 'agent_message',
               });
+              latestOutputEventAt = Math.max(latestOutputEventAt, atMs);
             }
             continue;
           }
@@ -406,11 +409,11 @@ $MainProcessCollector = @'
           const previousEnvelope = previous && previous.envelope && typeof previous.envelope === 'object'
             ? previous.envelope
             : null;
-          if (recentItems.length || activeTurnId || latestTerminal) {
+          if (recentItems.length || recentOutputs.length || activeTurnId || latestTerminal) {
             const activeTurn = activeTurnId ? (turnMeta.get(activeTurnId) || { turnId: activeTurnId }) : null;
             const envelope = {
               info: previousEnvelope?.info || null,
-              updatedAt: latestItemEventAt || Date.now(),
+              updatedAt: latestOutputEventAt || latestItemEventAt || Date.now(),
               model: previousEnvelope?.model || null,
               turnId: previousEnvelope?.turnId || null,
               turnStartedAt: previousEnvelope?.turnStartedAt ?? null,

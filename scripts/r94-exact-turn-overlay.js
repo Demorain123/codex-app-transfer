@@ -2246,7 +2246,8 @@
     function r94StampOrphanSemanticRoot(root) {
       // R94_PANE_ORPHAN_SEMANTIC_TIMESTAMP_RUNTIME
       for (const segment of r94OrphanSemanticCandidates(root)) {
-        if (orphanSegmentNodes.has(segment) || !r94OrphanNearComposer(segment)) continue;
+        if (!r94OrphanNearComposer(segment)) continue;
+        const existingOrphanEntry = segmentEntryByNode.get(segment);
 
         const threadId = String(r94ThreadIdForNode(segment) || '').replace(/^local:/i, '').trim().toLowerCase();
         if (!threadId) continue;
@@ -2296,6 +2297,10 @@
             source = claimedOutput.source;
           }
         }
+        if (!Number.isFinite(epoch) && existingOrphanEntry && Number.isFinite(existingOrphanEntry.epoch)) {
+          epoch = existingOrphanEntry.epoch;
+          source = existingOrphanEntry.source || 'host-first-observed-live-orphan-output';
+        }
         if (!Number.isFinite(epoch)) {
           epoch = r94HostEpochNow();
           source = 'host-first-observed-live-orphan-output';
@@ -2309,13 +2314,16 @@
         );
         if (!key) continue;
 
+        const wasOrphanStamped = orphanSegmentNodes.has(segment);
         orphanSegmentNodes.add(segment);
         pendingOrphanSegments.delete(segment);
         segmentTimeByKey.delete(key);
         segmentTimeByKey.set(key, { epoch, source });
         r94TrimSegmentCache();
-        diagnostics.liveSegmentsStamped = (diagnostics.liveSegmentsStamped || 0) + 1;
-        diagnostics.orphanSegmentsStamped = (diagnostics.orphanSegmentsStamped || 0) + 1;
+        if (!wasOrphanStamped) {
+          diagnostics.liveSegmentsStamped = (diagnostics.liveSegmentsStamped || 0) + 1;
+          diagnostics.orphanSegmentsStamped = (diagnostics.orphanSegmentsStamped || 0) + 1;
+        }
         r94EnsureSegmentEntry(segment, segment, key, epoch, source);
       }
     }

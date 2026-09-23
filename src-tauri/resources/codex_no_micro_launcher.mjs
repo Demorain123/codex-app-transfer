@@ -175,6 +175,8 @@ function outputTelemetryRuntimeSource(proxyPort) {
     retryTimer: null,
     retry: {
       statusAvailable: false,
+      transport: 'none',
+      lastError: '',
       active: false,
       activeCount: 0,
       attempt: 0,
@@ -246,6 +248,25 @@ function outputTelemetryRuntimeSource(proxyPort) {
       }
     }
     return label;
+  }
+
+  function applyRetrySnapshot(value, transport) {
+    if (!value || typeof value !== 'object') return false;
+    const retry = state.retry;
+    retry.statusAvailable = true;
+    retry.transport = String(transport || 'unknown');
+    retry.lastError = '';
+    retry.active = value.active === true;
+    retry.activeCount = Number(value.activeCount) || 0;
+    retry.attempt = Number(value.attempt) || 0;
+    retry.maxRetries = Number(value.maxRetries) || 0;
+    retry.infinite = value.infinite === true;
+    retry.elapsedMs = Number(value.elapsedMs) || 0;
+    retry.maxDurationMs = Number(value.maxDurationMs) || 0;
+    retry.delayMs = Number(value.delayMs) || 0;
+    retry.provider = String(value.provider || '');
+    retry.reason = String(value.reason || '');
+    return true;
   }
 
   function ensureStyle() {
@@ -497,25 +518,26 @@ function outputTelemetryRuntimeSource(proxyPort) {
       const response = await window.fetch(RETRY_STATUS_URL, { cache: 'no-store' });
       if (!response.ok) throw new Error('retry status http ' + response.status);
       const value = await response.json();
+      applyRetrySnapshot(value, 'renderer-fetch');
       const retry = state.retry;
-      retry.statusAvailable = true;
-      retry.active = value && value.active === true;
-      retry.activeCount = Number(value && value.activeCount) || 0;
-      retry.attempt = Number(value && value.attempt) || 0;
-      retry.maxRetries = Number(value && value.maxRetries) || 0;
-      retry.infinite = value && value.infinite === true;
-      retry.elapsedMs = Number(value && value.elapsedMs) || 0;
-      retry.maxDurationMs = Number(value && value.maxDurationMs) || 0;
-      retry.delayMs = Number(value && value.delayMs) || 0;
-      retry.provider = String((value && value.provider) || '');
-      retry.reason = String((value && value.reason) || '');
       nextDelay = retry.active ? 200 : ((retry.maxRetries > 0 || retry.infinite) ? 700 : 2000);
       schedule(0);
-    } catch {
-      state.retry.statusAvailable = false;
-      state.retry.active = false;
+    } catch (error) {
+      const bridged = globalThis.__casTransferRetryBridge;
+      const bridgedOk = !!(bridged && bridged.value && applyRetrySnapshot(bridged.value, bridged.transport || 'main-process-loopback'));
+      if (!bridgedOk) {
+        state.retry.statusAvailable = false;
+        state.retry.active = false;
+        state.retry.transport = bridged && bridged.transport ? String(bridged.transport) : 'renderer-fetch';
+        state.retry.lastError = String(
+          (bridged && bridged.error) ||
+          (error && error.message) ||
+          error ||
+          'retry status unavailable'
+        ).slice(0, 240);
+      }
       schedule(0);
-      nextDelay = 2000;
+      nextDelay = bridgedOk ? (state.retry.active ? 200 : 700) : 2000;
     } finally {
       state.retryTimer = setTimeout(pollTransferRetryStatus, nextDelay);
     }
@@ -666,7 +688,12 @@ function outputTelemetryRuntimeSource(proxyPort) {
 
   state.rescan = scan;
   state.cleanup = cleanup;
+  state.applyRetrySnapshot = applyRetrySnapshot;
   window[ROOT_KEY] = state;
+  const bridgedAtInit = globalThis.__casTransferRetryBridge;
+  if (bridgedAtInit && bridgedAtInit.value) {
+    try { applyRetrySnapshot(bridgedAtInit.value, bridgedAtInit.transport || 'main-process-loopback'); } catch {}
+  }
   ensureStyle();
   installFetchObserver();
   installTransferRetryPoll();
@@ -679,6 +706,10 @@ function outputTelemetryRuntimeSource(proxyPort) {
 function stubExpression(expectedPid, expectedExecutable) {
   const expectedPath = JSON.stringify(normalizedExecutable(expectedExecutable));
   const telemetrySource = JSON.stringify(outputTelemetryRuntimeSource(transferProxyPort));
+  const retryBridgeUrl =
+    Number.isInteger(transferProxyPort) && transferProxyPort > 0 && transferProxyPort <= 65535
+      ? JSON.stringify(`http://127.0.0.1:${transferProxyPort}/_cas/transfer-retry-status`)
+      : "null";
   return String.raw`
 (() => {
   const actualPath = String(process.execPath || "").replaceAll("\\", "/").toLowerCase();
@@ -692,6 +723,7 @@ function stubExpression(expectedPid, expectedExecutable) {
   const Module = process.getBuiltinModule("module");
   const originalLoad = Module._load;
   const telemetrySource = ${telemetrySource};
+  const retryStatusUrl = ${retryBridgeUrl};
   const isInspectorArgument = (argument) =>
     typeof argument === "string" && /^--inspect(?:-brk)?(?:=|$)/.test(argument);
 
@@ -751,7 +783,105 @@ function stubExpression(expectedPid, expectedExecutable) {
   };
 
   let outputTelemetryArmed = false;
+  let retryBridgeArmed = false;
+  let retryBridgeTimer = null;
+  let retryBridgeElectron = null;
   const telemetryBoundContents = new WeakSet();
+
+  // CAS-R94-1-TRANSFER-RETRY-MAIN-BRIDGE
+  // Renderer-origin fetches to 127.0.0.1 can be blocked by Chromium CSP /
+  // Local Network Access policy. Poll from Electron main with Node http instead,
+  // then push the privacy-bounded snapshot into each Codex renderer.
+  const readRetryStatusFromMain = () => new Promise((resolve, reject) => {
+    if (!retryStatusUrl) {
+      reject(new Error("retry status URL disabled"));
+      return;
+    }
+    let request;
+    try {
+      const http = process.getBuiltinModule("http");
+      request = http.get(retryStatusUrl, { headers: { accept: "application/json" } }, (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          body += String(chunk);
+          if (body.length > 65536) {
+            request.destroy(new Error("retry status response too large"));
+          }
+        });
+        response.on("end", () => {
+          if (response.statusCode !== 200) {
+            reject(new Error("retry status HTTP " + String(response.statusCode || 0)));
+            return;
+          }
+          try { resolve(JSON.parse(body)); }
+          catch (error) { reject(error); }
+        });
+      });
+      request.setTimeout(800, () => request.destroy(new Error("retry status timeout")));
+      request.on("error", reject);
+    } catch (error) {
+      try { request && request.destroy(); } catch {}
+      reject(error);
+    }
+  });
+
+  const broadcastRetryPacket = (packet) => {
+    const electron = retryBridgeElectron;
+    if (!electron?.webContents) return;
+    const source =
+      "(() => { const packet = " + JSON.stringify(packet) + ";" +
+      "globalThis.__casTransferRetryBridge = packet;" +
+      "try { const runtime = globalThis.__casOutputTelemetryRuntime;" +
+      "if (packet.value && runtime && typeof runtime.applyRetrySnapshot === 'function') {" +
+      "runtime.applyRetrySnapshot(packet.value, packet.transport || 'main-process-loopback');" +
+      "if (typeof runtime.refresh === 'function') runtime.refresh();" +
+      "else if (typeof runtime.rescan === 'function') runtime.rescan();" +
+      "}} catch {} })()";
+    try {
+      electron.webContents.getAllWebContents().forEach((contents) => {
+        try {
+          const type = contents.getType?.();
+          if (type && type !== "window" && type !== "webview") return;
+          if (contents.isDestroyed?.()) return;
+          contents.executeJavaScript?.(source, true)?.catch?.(() => {});
+        } catch {}
+      });
+    } catch {}
+  };
+
+  const pollRetryBridge = async () => {
+    let nextDelay = 1500;
+    try {
+      const value = await readRetryStatusFromMain();
+      broadcastRetryPacket({
+        value,
+        error: "",
+        transport: "main-process-loopback",
+        receivedAt: Date.now(),
+      });
+      nextDelay = value && value.active === true ? 200 :
+        ((Number(value && value.maxRetries) > 0 || value && value.infinite === true) ? 700 : 1500);
+    } catch (error) {
+      broadcastRetryPacket({
+        value: null,
+        error: String(error && error.message || error || "retry bridge unavailable").slice(0, 240),
+        transport: "main-process-loopback",
+        receivedAt: Date.now(),
+      });
+      nextDelay = 1500;
+    } finally {
+      retryBridgeTimer = setTimeout(pollRetryBridge, nextDelay);
+    }
+  };
+
+  const armRetryBridge = (electron) => {
+    retryBridgeElectron = electron;
+    if (retryBridgeArmed || !retryStatusUrl) return;
+    retryBridgeArmed = true;
+    globalThis.__CODEX_TRANSFER_RETRY_MAIN_BRIDGE_R94_1__ = true;
+    retryBridgeTimer = setTimeout(pollRetryBridge, 50);
+  };
   const attachOutputTelemetry = (contents) => {
     if (!contents || telemetryBoundContents.has(contents)) return;
     try {
@@ -783,6 +913,7 @@ function stubExpression(expectedPid, expectedExecutable) {
       if (electron.app.isReady?.()) attachExisting();
       else electron.app.whenReady?.().then(attachExisting).catch(() => {});
     } catch {}
+    try { armRetryBridge(electron); } catch {}
   };
 
   Module._load = function codexMicroDisabledLoader(request, parent, isMain) {

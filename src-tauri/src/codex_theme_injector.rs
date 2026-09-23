@@ -1341,7 +1341,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const outputEventDiag = window.__casR94OutputEventDiagnostics && typeof window.__casR94OutputEventDiagnostics === 'object'
       ? window.__casR94OutputEventDiagnostics
       : {};
-    const rolloutTpsChips = document.querySelectorAll('[data-cas-metric-source="exact-rollout-token-interval"]').length;
+    const rolloutTpsChips = document.querySelectorAll('[data-cas-metric-source="rollout-token-interval"]').length;
     const statusEditorLeaks = statusNodes.filter((node) =>
       node instanceof Element &&
       !!node.closest('.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]')
@@ -1594,7 +1594,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         ' · orphan=' + s.tsOrphanSegments +
         ' · itemExact=' + s.tsExactItemBindings +
         ' · outMeta=' + s.outputEventCount +
-        ' · tpsExact=' + s.rolloutTpsChips +
+        ' · tpsRollout=' + s.rolloutTpsChips +
         (s.tsSegmentSource ? ' · source=' + escapeHtml(s.tsSegmentSource) : '') + '</div>',
       '<div>TL meta=' + s.timelineEntries +
         ' · customMarkers=' + s.timelineMarkers +
@@ -2273,10 +2273,10 @@ mod tests {
         assert!(script.contains("retryRemainingMs"));
         assert!(script.contains("__casR94LocalUsageCollectorDiagnostics"));
         assert!(script.contains("__casR94OutputEventDiagnostics"));
-        assert!(script.contains("exact-rollout-token-interval"));
+        assert!(script.contains("rollout-token-interval"));
         assert!(script.contains("SEG stamp/badge/cache"));
         assert!(script.contains("outMeta="));
-        assert!(script.contains("tpsExact="));
+        assert!(script.contains("tpsRollout="));
         assert!(script.contains("nativeRail='"));
         assert!(script.contains("launchMode"));
         assert!(!script.contains("__CAS_DEBUG_META__"));

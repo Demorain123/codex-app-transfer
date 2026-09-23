@@ -66,6 +66,8 @@ foreach ($Check in @(
     @{ Text = $RetryForwardText; Marker = 'mode=infinite' },
     @{ Text = $RetryServerText; Marker = '/_cas/transfer-retry-status' },
     @{ Text = $RetryServerText; Marker = '"maxDurationMs"' },
+    @{ Text = $RetryServerText; Marker = 'transfer_retry_status_options_handler' },
+    @{ Text = $RetryServerText; Marker = 'access-control-allow-private-network' },
     @{ Text = $RetrySettingsText; Marker = 'upstreamConnectRetryInfinite' },
     @{ Text = $RetrySettingsText; Marker = 'upstreamConnectRetryMaxHours' },
     @{ Text = $RetrySettingsPageText; Marker = "persist({ upstreamConnectRetries: value })" },
@@ -79,14 +81,24 @@ foreach ($Check in @(
     @{ Text = $RetryLauncherText; Marker = 'retryRemainingMs' },
     @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY READY ' },
     @{ Text = $RetryLauncherText; Marker = 'statusAvailable' },
+    @{ Text = $RetryLauncherText; Marker = 'CAS-R94-1-TRANSFER-RETRY-MAIN-BRIDGE' },
+    @{ Text = $RetryLauncherText; Marker = 'process.getBuiltinModule("http")' },
+    @{ Text = $RetryLauncherText; Marker = '__casTransferRetryBridge' },
+    @{ Text = $RetryLauncherText; Marker = 'applyRetrySnapshot' },
+    @{ Text = $RetryLauncherText; Marker = 'main-process-loopback' },
     @{ Text = $OutputUiText; Marker = 'CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY' },
     @{ Text = $OutputUiText; Marker = "retry && retry.infinite ? '∞'" },
     @{ Text = $OutputUiText; Marker = 'retry.maxDurationMs' },
     @{ Text = $OutputUiText; Marker = 'retryRemainingMs' },
     @{ Text = $OutputUiText; Marker = 'TRANSFER RETRY READY ' },
     @{ Text = $OutputUiText; Marker = 'statusAvailable' },
+    @{ Text = $OutputUiText; Marker = '__casTransferRetryBridge' },
+    @{ Text = $OutputUiText; Marker = 'applyRetrySnapshot' },
+    @{ Text = $OutputUiText; Marker = 'main-process-loopback' },
     @{ Text = $OutputUiText; Marker = 'R74_TRANSFER_RETRY_GENERATED_CARRY_PASS' },
-    @{ Text = $OutputUiText; Marker = 'function outputTelemetryRuntimeSource(proxyPort)' }
+    @{ Text = $OutputUiText; Marker = 'function outputTelemetryRuntimeSource(proxyPort)' },
+    @{ Text = $ThemeText; Marker = 'retryBridgeError' },
+    @{ Text = $ThemeText; Marker = 'retryTransport' }
 )) {
     if (-not $Check.Text.Contains($Check.Marker)) {
         throw "r94.1 Transfer retry contract missing: $($Check.Marker)"

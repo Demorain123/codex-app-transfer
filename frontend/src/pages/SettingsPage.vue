@@ -600,12 +600,16 @@ function onUpstreamConnectRetries(e: Event) {
   void persist({ upstreamConnectRetries: value })
 }
 
-function onUpstreamConnectRetryMaxHours(e: Event) {
+function onUpstreamConnectRetryDurationPart(
+  key: 'upstreamConnectRetryMaxHours' | 'upstreamConnectRetryMaxMinutes',
+  e: Event,
+) {
   const input = e.target as HTMLInputElement
-  const raw = Number(input.value)
-  const value = Number.isFinite(raw) && raw > 0 ? raw : 1.5
-  input.value = String(value)
-  void persist({ upstreamConnectRetryMaxHours: value })
+  const raw = input.value.trim() === '' ? 0 : Number(input.value)
+  let value = Number.isFinite(raw) && raw >= 0 ? Math.trunc(raw) : 0
+  if (key === 'upstreamConnectRetryMaxMinutes') value = Math.min(59, value)
+  input.value = value === 0 ? '' : String(value)
+  void persist({ [key]: value })
 }
 
 // WorkBuddy 账号池配额守护阈值:剩余积分低于此值自动切换账号(默认 20)。
@@ -736,17 +740,32 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
       </SettingsRow>
       <SettingsRow
         v-if="upstreamConnectRetryInfinite"
-        :title="t('settings.upstreamConnectRetryMaxHours')"
-        :description="t('settings.upstreamConnectRetryMaxHoursHint')"
+        :title="t('settings.upstreamConnectRetryMaxDuration')"
+        :description="t('settings.upstreamConnectRetryMaxDurationHint')"
       >
-        <input
-          type="number"
-          class="settings-num"
-          :value="store.num('upstreamConnectRetryMaxHours', 1.5)"
-          min="0.01"
-          step="0.1"
-          @change="onUpstreamConnectRetryMaxHours"
-        />
+        <div class="retry-duration-inputs">
+          <input
+            type="number"
+            class="settings-num retry-duration-num"
+            :value="store.num('upstreamConnectRetryMaxHours', 0) || ''"
+            min="0"
+            step="1"
+            :placeholder="t('settings.upstreamConnectRetryHoursPlaceholder')"
+            @change="onUpstreamConnectRetryDurationPart('upstreamConnectRetryMaxHours', $event)"
+          />
+          <span class="retry-duration-unit">{{ t('settings.upstreamConnectRetryHoursUnit') }}</span>
+          <input
+            type="number"
+            class="settings-num retry-duration-num"
+            :value="store.num('upstreamConnectRetryMaxMinutes', 0) || ''"
+            min="0"
+            max="59"
+            step="1"
+            :placeholder="t('settings.upstreamConnectRetryMinutesPlaceholder')"
+            @change="onUpstreamConnectRetryDurationPart('upstreamConnectRetryMaxMinutes', $event)"
+          />
+          <span class="retry-duration-unit">{{ t('settings.upstreamConnectRetryMinutesUnit') }}</span>
+        </div>
       </SettingsRow>
       <SettingsRow :title="t('settings.webFetchBackend')" :description="t('settings.webFetchBackendHint')">
         <SegmentedControl
@@ -1058,4 +1077,21 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
   flex-shrink: 0;
   color: var(--text-muted);
 }
+.retry-duration-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.retry-duration-num {
+  width: 88px;
+}
+
+.retry-duration-unit {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 </style>

@@ -154,9 +154,15 @@ pub fn upstream_connect_retry_limit() -> u8 {
 
 pub fn transfer_retry_status_snapshot() -> TransferRetryStatusSnapshot {
     let configured = upstream_connect_retry_limit();
-    let guard = transfer_retry_activities()
+    let now = now_epoch_ms();
+    let mut guard = transfer_retry_activities()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // A cancelled client future can drop while sleeping/connecting before the
+    // explicit finish path runs. Never leave a permanent "retrying" indicator.
+    // Active connect attempts update at least once per retry and the reqwest
+    // connect timeout is 10s, so 30s is comfortably above a live attempt.
+    guard.retain(|_, activity| now.saturating_sub(activity.updated_at_ms) <= 30_000);
     let active_count = guard.len();
     let latest = guard.values().max_by_key(|activity| activity.updated_at_ms);
     match latest {

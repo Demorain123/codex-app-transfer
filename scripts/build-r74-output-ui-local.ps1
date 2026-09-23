@@ -80,7 +80,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
   const RETRY_MARKER = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY';
 
   const old = window[ROOT_KEY];
-  if (old && old.version === VERSION) {
+  if (old && old.version === VERSION && old.retryFeature === RETRY_MARKER) {
     try { old.refresh && old.refresh(); } catch {}
     return { ok: true, version: VERSION, reused: true };
   }

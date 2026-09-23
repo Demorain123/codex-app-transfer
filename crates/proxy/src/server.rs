@@ -122,7 +122,19 @@ fn build_router_with_state(state: ProxyState) -> Router {
 }
 
 async fn transfer_retry_status_handler() -> Response {
-    let mut response = Json(transfer_retry_status_snapshot()).into_response();
+    let status = transfer_retry_status_snapshot();
+    // Browser-readable loopback endpoint: deliberately omit provider IDs and
+    // every request/header/body field. The Codex overlay needs only progress.
+    let mut response = Json(json!({
+        "active": status.active,
+        "activeCount": status.active_count,
+        "attempt": status.attempt,
+        "maxRetries": status.max_retries,
+        "delayMs": status.delay_ms,
+        "reason": status.reason,
+        "updatedAtMs": status.updated_at_ms,
+    }))
+    .into_response();
     response.headers_mut().insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),

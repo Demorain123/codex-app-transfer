@@ -95,6 +95,22 @@ foreach ($Forbidden in @(
         throw "r94.1 Transfer-only retry contract violated: $Forbidden"
     }
 }
+foreach ($StaleRetryCap in @(
+    'MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES',
+    'between 0 and 15',
+    'max="15"',
+    '1–15'
+)) {
+    if (
+        $RetryForwardText.Contains($StaleRetryCap) -or
+        $RetrySettingsText.Contains($StaleRetryCap) -or
+        $RetrySettingsPageText.Contains($StaleRetryCap)
+    ) {
+        throw "r94.1 stale retry cap reintroduced: $StaleRetryCap"
+    }
+}
+Write-Host 'R94_1_NO_STALE_RETRY_CAP_PASS' -ForegroundColor Green
+
 Write-Host 'R94_1_TRANSFER_RETRY_CONTRACT_PASS' -ForegroundColor Green
 
 & node --check $RetryLauncher

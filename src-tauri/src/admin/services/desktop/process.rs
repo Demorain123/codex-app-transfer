@@ -986,22 +986,6 @@ fn read_theme_settings() -> Option<String> {
 
 fn open_codex_app(platform: &str) -> Result<(), String> {
     sync_codex_pet_state();
-
-    // CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY
-    // Stock Codex ignores configured fields that collide with the built-in
-    // "openai" provider. When r94.1 has staged a portable provider-policy
-    // overlay, only No-Lagging B can attach the version-matched patched runtime.
-    // Normal MSIX activation must fail closed instead of silently returning to
-    // the stock retry budget (for example Reconnecting x/5).
-    if platform == "windows"
-        && super::no_micro::r94_1_openai_policy_overlay_active()
-    {
-        return Err(
-            "r94.1 检测到 built-in openai provider policy overlay；请使用 No Lagging 启动 (B)，标准 MSIX 启动无法让这些参数真实生效"
-                .to_owned(),
-        );
-    }
-
     // [MOC-285] Codex 启动前补齐 enabled-reasoning-efforts 持久 atom,让 GLM 等的 none/max 档
     // 在 reasoning 选择器正常显示(Codex 26.623+ 默认启用集不含这两档)。
     sync_codex_reasoning_efforts_state();

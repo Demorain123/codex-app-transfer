@@ -47,7 +47,11 @@ if ([string]::IsNullOrWhiteSpace($VisibleRevisionOverride) -xor
 # The r74 renderer runtime is deliberately injected only through the existing No-Lagging B path.
 # It does not patch app.asar, session JSONL, prompts, responses, auth or provider traffic.
 $NewTelemetryFunction = @'
-function outputTelemetryRuntimeSource() {
+function outputTelemetryRuntimeSource(proxyPort) {
+  const retryStatusUrl =
+    Number.isInteger(proxyPort) && proxyPort > 0 && proxyPort <= 65535
+      ? JSON.stringify(`http://127.0.0.1:${proxyPort}/_cas/transfer-retry-status`)
+      : "null";
   return String.raw`
 (() => {
   'use strict';
@@ -67,6 +71,14 @@ function outputTelemetryRuntimeSource() {
   const SAMPLE_INTERVAL_MS = 10000;
   const CACHE_LIMIT = 800;
 
+  // CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY
+  // Generated-chain owner for the Transfer-only retry indicator. This survives
+  // r75-r94 telemetry transforms instead of being lost when r74 replaces the
+  // tracked launcher telemetry function.
+  const RETRY_STATUS_URL = ${retryStatusUrl};
+  const RETRY_ID = 'cas-transfer-retry-status-chip';
+  const RETRY_MARKER = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY';
+
   const old = window[ROOT_KEY];
   if (old && old.version === VERSION) {
     try { old.refresh && old.refresh(); } catch {}
@@ -80,6 +92,16 @@ function outputTelemetryRuntimeSource() {
     timer: null,
     pollTimer: null,
     sampleTimer: null,
+    retryTimer: null,
+    retryFeature: RETRY_MARKER,
+    retry: {
+      active: false,
+      activeCount: 0,
+      attempt: 0,
+      maxRetries: 0,
+      delayMs: 0,
+      reason: '',
+    },
     baselineKeys: new Set(),
     metrics: {
       seen: false,
@@ -804,6 +826,73 @@ function outputTelemetryRuntimeSource() {
     }
   }
 
+  function renderTransferRetry() {
+    let chip = document.getElementById(RETRY_ID);
+    const retry = state.retry;
+    if (!retry || !retry.active) {
+      if (chip) chip.remove();
+      return;
+    }
+
+    const bars = Array.from(document.querySelectorAll(
+      '[data-cas-status-inside-composer="true"][data-cas-status-owner="r94-inline-safe"]'
+    ));
+    const inline = bars.length === 1 && bars[0] instanceof Element;
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.id = RETRY_ID;
+      chip.setAttribute('aria-label', 'Transfer upstream retry');
+      chip.style.cssText =
+        'display:inline-flex;align-items:center;padding:2px 7px;border:1px solid rgba(230,167,0,.62);' +
+        'border-radius:999px;background:rgba(90,67,0,.88);color:#ffe08a;' +
+        'font:700 9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;' +
+        'white-space:nowrap;pointer-events:none;z-index:2147483646;';
+    }
+    chip.textContent =
+      'TRANSFER RETRY ' + retry.attempt + '/' + retry.maxRetries +
+      (retry.activeCount > 1 ? ' · active ' + retry.activeCount : '') +
+      (retry.delayMs ? ' · wait ' + retry.delayMs + 'ms' : '');
+    chip.title =
+      'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.';
+
+    if (inline) {
+      chip.style.position = 'static';
+      chip.style.marginLeft = '8px';
+      if (chip.parentElement !== bars[0]) bars[0].appendChild(chip);
+    } else {
+      chip.style.position = 'fixed';
+      chip.style.right = '18px';
+      chip.style.bottom = '72px';
+      chip.style.marginLeft = '0';
+      if (chip.parentElement !== document.body && document.body) document.body.appendChild(chip);
+    }
+  }
+
+  async function pollTransferRetryStatus() {
+    if (!RETRY_STATUS_URL) return;
+    let nextDelay = 1500;
+    try {
+      const response = await window.fetch(RETRY_STATUS_URL, { cache: 'no-store' });
+      if (!response.ok) throw new Error('retry status http ' + response.status);
+      const value = await response.json();
+      const retry = state.retry;
+      retry.active = value && value.active === true;
+      retry.activeCount = Number(value && value.activeCount) || 0;
+      retry.attempt = Number(value && value.attempt) || 0;
+      retry.maxRetries = Number(value && value.maxRetries) || 0;
+      retry.delayMs = Number(value && value.delayMs) || 0;
+      retry.reason = String((value && value.reason) || '');
+      nextDelay = retry.active ? 200 : (retry.maxRetries > 0 ? 700 : 2000);
+      renderTransferRetry();
+    } catch {
+      state.retry.active = false;
+      renderTransferRetry();
+      nextDelay = 2000;
+    } finally {
+      state.retryTimer = setTimeout(pollTransferRetryStatus, nextDelay);
+    }
+  }
+
   function refreshUi() {
     ensureStyle();
     readModelLabel();
@@ -825,6 +914,9 @@ function outputTelemetryRuntimeSource() {
     if (state.timer) clearTimeout(state.timer);
     if (state.pollTimer) clearTimeout(state.pollTimer);
     if (state.sampleTimer) clearTimeout(state.sampleTimer);
+    if (state.retryTimer) clearTimeout(state.retryTimer);
+    const retryChip = document.getElementById(RETRY_ID);
+    if (retryChip) retryChip.remove();
     document.querySelectorAll('[' + BADGE_ATTR + ']').forEach(function(node) { node.remove(); });
     document.querySelectorAll('[' + HOST_ATTR + ']').forEach(function(node) {
       node.removeAttribute(HOST_ATTR);
@@ -843,6 +935,9 @@ function outputTelemetryRuntimeSource() {
   installFetchObserver();
   installOutputObserver();
   ensureAnalytics();
+  if (RETRY_STATUS_URL) {
+    state.retryTimer = setTimeout(pollTransferRetryStatus, 50);
+  }
   poll();
   document.addEventListener('click', function(event) {
     const panel = document.getElementById(ANALYTICS_ID);
@@ -923,15 +1018,27 @@ try {
     # --- Replace only the renderer telemetry runtime, keep the proven No-Lagging guard ---
     $Launcher = $Original[$LauncherPath]
     $Launcher = $Launcher.Replace('const OUTPUT_TELEMETRY_RUNTIME = "r73.1";', 'const OUTPUT_TELEMETRY_RUNTIME = "r74.0";')
-    $Start = $Launcher.IndexOf('function outputTelemetryRuntimeSource() {')
+    $Start = $Launcher.IndexOf('function outputTelemetryRuntimeSource')
+    if ($Start -lt 0) { throw 'r74 could not locate telemetry runtime function start' }
     $End = $Launcher.IndexOf('function stubExpression(', $Start)
-    if ($Start -lt 0 -or $End -le $Start) { throw 'r74 could not locate telemetry runtime function boundaries' }
+    if ($End -le $Start) { throw 'r74 could not locate telemetry runtime function end' }
     $Launcher = $Launcher.Substring(0, $Start) + $NewTelemetryFunction + "`r`n`r`n" + $Launcher.Substring($End)
     $Launcher = $Launcher.Replace('globalThis.__CODEX_MICRO_DISABLED_LOCAL__ === true && globalThis.__CODEX_OUTPUT_TELEMETRY_R73__ === true', 'globalThis.__CODEX_MICRO_DISABLED_LOCAL__ === true')
     $Launcher = $Launcher.Replace('global No Lagging / output telemetry marker was not set', 'global No Lagging marker was not set')
     $Launcher = $Launcher.Replace('status: "armed",', 'status: "best-effort-armed",')
     $Launcher = $Launcher.Replace('timestampMode: "per-assistant-output",', 'timestampMode: "live-output-segment + single-final-answer",')
     $Launcher = $Launcher.Replace('metricMode: "best-effort-live-stream",', 'metricMode: "responsive-mirror + composer-status + local-history",')
+    foreach ($Marker in @(
+        'CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY',
+        '/_cas/transfer-retry-status',
+        'TRANSFER RETRY ',
+        'pollTransferRetryStatus'
+    )) {
+        if (-not $Launcher.Contains($Marker)) {
+            throw "r74 generated retry carry-forward missing: $Marker"
+        }
+    }
+    Write-Host 'R74_TRANSFER_RETRY_GENERATED_CARRY_PASS' -ForegroundColor Green
     Write-Utf8NoBom $LauncherPath $Launcher
 
     Write-Host '[r74] local source finalization applied'

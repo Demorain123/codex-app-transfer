@@ -361,9 +361,11 @@
       const nextStatus = String(turn.status || current.status || '') || null;
       const nextStartedAt = Number.isFinite(started) ? started : current.startedAt;
       const nextCompletedAt = Number.isFinite(completed) ? completed : current.completedAt;
+      const ttft = Number(turn.timeToFirstTokenMs ?? turn.time_to_first_token_ms);
       const nextDurationMs = Number.isFinite(duration) ? duration : current.durationMs;
+      const nextTimeToFirstTokenMs = Number.isFinite(ttft) ? ttft : current.timeToFirstTokenMs;
       const lifecycleFingerprint = [
-        nextStatus, nextStartedAt, nextCompletedAt, nextDurationMs,
+        nextStatus, nextStartedAt, nextCompletedAt, nextDurationMs, nextTimeToFirstTokenMs,
       ].join('|');
 
       if (current.lifecycleFingerprint === lifecycleFingerprint) return current;
@@ -372,6 +374,7 @@
       current.startedAt = nextStartedAt;
       current.completedAt = nextCompletedAt;
       current.durationMs = nextDurationMs;
+      current.timeToFirstTokenMs = nextTimeToFirstTokenMs;
       current.lifecycleFingerprint = lifecycleFingerprint;
       current.capabilitySequence = ++capabilitySequence;
       if (ids.threadId) latestKeyByThread.set(ids.threadId, ids.key);
@@ -500,6 +503,14 @@
         : '';
       const outerMethod = String(value.method || value.type || '');
       const method = outerMethod === 'event_msg' && nestedMethod ? nestedMethod : (outerMethod || nestedMethod);
+      // R94_APP_SERVER_EMITTED_AT_RUNTIME
+      // ServerNotification.emittedAtMs is an official app-server emission
+      // timestamp. Use it only as a missing lifecycle timestamp fallback.
+      const emittedAtMs = Number(
+        value.emittedAtMs ?? value.emitted_at_ms ??
+        params.emittedAtMs ?? params.emitted_at_ms
+      );
+      const emittedEpoch = Number.isFinite(emittedAtMs) && emittedAtMs > 0 ? emittedAtMs : null;
       if (method === 'turn/completed' || method === 'turn_completed' || method === 'task_complete') {
         const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
@@ -508,8 +519,9 @@
               id: params.turnId || params.turn_id,
               status: params.status,
               startedAt: params.startedAt ?? params.started_at,
-              completedAt: params.completedAt ?? params.completed_at,
+              completedAt: params.completedAt ?? params.completed_at ?? emittedEpoch,
               durationMs: params.durationMs ?? params.duration_ms,
+              timeToFirstTokenMs: params.timeToFirstTokenMs ?? params.time_to_first_token_ms,
             };
         return !!rememberLifecycle(threadId, turn);
       }
@@ -520,7 +532,7 @@
           : {
               id: params.turnId || params.turn_id,
               status: params.status || 'inProgress',
-              startedAt: params.startedAt ?? params.started_at,
+              startedAt: params.startedAt ?? params.started_at ?? emittedEpoch,
             };
         return !!rememberLifecycle(threadId, turn);
       }
@@ -529,7 +541,7 @@
           params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null,
           params.turnId || params.turn_id,
           params.item && typeof params.item === 'object' ? params.item : (value.item && typeof value.item === 'object' ? value.item : null),
-          params.startedAtMs ?? params.started_at_ms ?? value.startedAtMs ?? value.started_at_ms,
+          params.startedAtMs ?? params.started_at_ms ?? value.startedAtMs ?? value.started_at_ms ?? emittedEpoch,
           'started'
         );
       }
@@ -538,7 +550,7 @@
           params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null,
           params.turnId || params.turn_id,
           params.item && typeof params.item === 'object' ? params.item : (value.item && typeof value.item === 'object' ? value.item : null),
-          params.completedAtMs ?? params.completed_at_ms ?? value.completedAtMs ?? value.completed_at_ms,
+          params.completedAtMs ?? params.completed_at_ms ?? value.completedAtMs ?? value.completed_at_ms ?? emittedEpoch,
           'completed'
         );
       }

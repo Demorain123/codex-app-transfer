@@ -138,8 +138,12 @@ fn now_epoch_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
+fn clamp_upstream_connect_retry_limit(limit: u8) -> u8 {
+    limit.min(MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES)
+}
+
 pub fn set_upstream_connect_retry_limit(limit: u8) -> u8 {
-    let clamped = limit.min(MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES);
+    let clamped = clamp_upstream_connect_retry_limit(limit);
     TRANSFER_UPSTREAM_CONNECT_RETRIES.store(clamped, Ordering::Relaxed);
     clamped
 }
@@ -5427,5 +5431,22 @@ mod tests {
         assert_eq!(fp("Bearer tok_abc"), fp("Bearer tok_abc"));
         assert_ne!(fp("Bearer tok_abc"), 0);
         assert_ne!(fp("Bearer tok_abc"), fp("Bearer tok_xyz"));
+    }
+    // CAS-R94-1-TRANSFER-UPSTREAM-CONNECT-RETRY-TESTS
+    #[test]
+    fn r94_1_transfer_retry_limit_is_bounded_to_fifteen() {
+        assert_eq!(clamp_upstream_connect_retry_limit(0), 0);
+        assert_eq!(clamp_upstream_connect_retry_limit(7), 7);
+        assert_eq!(clamp_upstream_connect_retry_limit(15), 15);
+        assert_eq!(clamp_upstream_connect_retry_limit(99), 15);
+    }
+
+    #[test]
+    fn r94_1_transfer_retry_backoff_is_bounded() {
+        assert_eq!(transfer_retry_delay_ms(1), 250);
+        assert_eq!(transfer_retry_delay_ms(2), 500);
+        assert_eq!(transfer_retry_delay_ms(3), 1000);
+        assert_eq!(transfer_retry_delay_ms(4), 1500);
+        assert_eq!(transfer_retry_delay_ms(15), 1500);
     }
 }

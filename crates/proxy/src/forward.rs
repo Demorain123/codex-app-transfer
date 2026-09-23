@@ -3845,7 +3845,7 @@ async fn build_and_send_upstream(
                     proxy_telemetry().logs.add(
                         "INFO",
                         format!(
-                            "[transfer-upstream-retry-success] provider={} retries_used={retries_used}/{retry_limit}",
+                            "[transfer-upstream-retry-success] provider={} retries_used={retries_used} max_retries={retry_limit}",
                             resolved.provider_id
                         ),
                     );
@@ -3865,7 +3865,7 @@ async fn build_and_send_upstream(
                 proxy_telemetry().logs.add(
                     "WARN",
                     format!(
-                        "[transfer-upstream-retry] provider={} attempt={retries_used}/{retry_limit} delay_ms={delay_ms} reason=connect_error",
+                        "[transfer-upstream-retry] provider={} attempt={retries_used} max_retries={retry_limit} delay_ms={delay_ms} reason=connect_error",
                         resolved.provider_id
                     ),
                 );
@@ -3881,7 +3881,7 @@ async fn build_and_send_upstream(
                     proxy_telemetry().logs.add(
                         "ERROR",
                         format!(
-                            "[transfer-upstream-retry-{terminal}] provider={} retries_used={retries_used}/{retry_limit}",
+                            "[transfer-upstream-retry-{terminal}] provider={} retries_used={retries_used} max_retries={retry_limit}",
                             resolved.provider_id
                         ),
                     );

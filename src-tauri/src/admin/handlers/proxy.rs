@@ -230,6 +230,7 @@ pub async fn proxy_status(State(state): State<AdminState>) -> impl IntoResponse 
         "running": s.running,
         "port": port,
         "stats": proxy_telemetry().stats.snapshot(),
+        "transferRetry": codex_app_transfer_proxy::transfer_retry_status_snapshot(),
         "hybridDirectMode": crate::admin::services::desktop::hybrid_direct::enabled_from_config(&cfg),
     }))
     .into_response()

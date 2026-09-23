@@ -1376,6 +1376,87 @@
     return null;
   }
 
+  // R94_PANE_NATIVE_SHORT_TIME_COVER_RUNTIME
+  // Split-pane/sub-agent final timestamps can live outside the canonical turn
+  // wrapper. Bind a visible short native clock to the latest exact terminal
+  // lifecycle for that pane, but only when hour/minute agree.
+  function r94NativeClockMatchesEpoch(node, epoch) {
+    if (!(node instanceof Element) || !Number.isFinite(epoch)) return false;
+    const text = normalizedText(node);
+    const match = text.match(/(?:^|\b)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?(?:\b|$)/i);
+    if (!match) return false;
+    let hour = Number(match[1]);
+    const minute = Number(match[2]);
+    const second = match[3] ? Number(match[3]) : null;
+    const meridiem = String(match[4] || '').toUpperCase();
+    if (meridiem === 'PM' && hour < 12) hour += 12;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+    const d = new Date(epoch);
+    if (!Number.isFinite(d.getTime())) return false;
+    if (d.getHours() !== hour || d.getMinutes() !== minute) return false;
+    return second == null || d.getSeconds() === second;
+  }
+
+  function r94CoverPaneNativeShortTimes(root, capability, overlayRoot, entryByTurn, visibleEntries, diagnostics) {
+    const element = root instanceof Element ? root : root && root.parentElement;
+    if (!(element instanceof Element) || !capability) return;
+    const nodes = [];
+    const add = function(node) {
+      if (!(node instanceof Element) || nodes.includes(node)) return;
+      nodes.push(node);
+    };
+    if (element.matches(R94_NATIVE_TIME_SELECTOR)) add(element);
+    element.querySelectorAll(R94_NATIVE_TIME_SELECTOR).forEach(add);
+
+    for (const node of nodes) {
+      if (!node.isConnected || !isVisible(node) || insideOwnUi(node) || insideComposer(node)) continue;
+      const text = normalizedText(node);
+      if (/\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b/.test(text)) continue;
+      const threadId = String(r94ThreadIdForNode(node) || '').replace(/^local:/i, '').trim().toLowerCase();
+      if (!threadId) continue;
+      const latest = capability.latestForThread(threadId);
+      const turnId = r94NormalizeTurnId(latest && latest.turnId);
+      if (!turnId) continue;
+      const status = String(latest && latest.status || '').toLowerCase();
+      if (!/completed|failed|interrupted|cancelled|canceled/.test(status)) continue;
+      const completedEpoch = r94EpochMillis(latest && latest.completedAt);
+      const finalEpoch = r94LatestFinalOutputEpoch(threadId, turnId);
+      const epoch = Number.isFinite(completedEpoch) ? completedEpoch : finalEpoch;
+      if (!Number.isFinite(epoch) || !r94NativeClockMatchesEpoch(node, epoch)) continue;
+
+      const record = {
+        epoch,
+        label: r94LocalDateTimeStamp(epoch),
+        title: r94FullTimestampTitle(epoch, Number.isFinite(completedEpoch)
+          ? 'exact: pane Codex turn/completed'
+          : 'exact: pane Codex final assistant rollout row'),
+        source: 'pane-native-time-full-format-overlay',
+      };
+      let entry = entryByTurn.get(node);
+      if (!entry) {
+        entry = { turn: node, ids: { threadId, turnId }, record, anchor: node, mode: 'native-time-cover', badge: null };
+        entryByTurn.set(node, entry);
+      } else {
+        entry.ids = { threadId, turnId };
+        entry.record = record;
+        entry.anchor = node;
+        entry.mode = 'native-time-cover';
+      }
+      if (!entry.badge || !entry.badge.isConnected) entry.badge = r94CreateBadge(overlayRoot, record);
+      else {
+        entry.badge.textContent = record.label;
+        entry.badge.title = record.title;
+      }
+      entry.badge.setAttribute('data-cas-native-time-cover','true');
+      entry.badge.style.background = 'Canvas';
+      entry.badge.style.padding = '0 1px';
+      entry.badge.style.opacity = '1';
+      visibleEntries.add(entry);
+      diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
+      diagnostics.lastSource = record.source;
+    }
+  }
+
   function installOutputObserver() {
     if (!document.body) {
       setTimeout(installOutputObserver, 120);
@@ -2566,6 +2647,7 @@
           // siblings of canonical turn wrappers. Timestamp those newly-added
           // live semantic surfaces before the canonical-turn fast path.
           try { r94StampOrphanSemanticRoot(element); } catch {}
+          try { r94CoverPaneNativeShortTimes(element, capability, overlayRoot, entryByTurn, visibleEntries, diagnostics); } catch {}
 
           const owner = r94CanonicalTurn(element);
           if (owner) {
@@ -2612,6 +2694,7 @@
 
     function r94HandleCapabilityUpdate(event) {
       r94RetryPendingOrphanSegments();
+      try { r94CoverPaneNativeShortTimes(document.documentElement, capability, overlayRoot, entryByTurn, visibleEntries, diagnostics); } catch {}
       const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : null;
       const turnId = r94NormalizeTurnId(detail && detail.turnId);
       if (!turnId) return;

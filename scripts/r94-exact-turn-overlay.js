@@ -1696,7 +1696,27 @@
       const ids = r94IdsForTurn(turn);
       if (!ids) return;
       r94EnsureUserBadge(turn, ids);
-      const exact = capability.getForTurn(turn, ids);
+      let exact = capability.getForTurn(turn, ids);
+      // R94_SHORT_NATIVE_TIME_LIFECYCLE_UPGRADE_RUNTIME
+      // A visible native sent-time can be time-only ("8:30 PM"). If the same
+      // turn has an exact app-server completion epoch, upgrade the presentation
+      // record before either the native-visibility or generic overlay branch.
+      // This keeps the React DOM read-only and avoids guessing a calendar date.
+      if (exact && exact.record && !Number.isFinite(r94EpochMillis(exact.record.epoch))) {
+        const lifecycleRecord = capability.getRecord(ids.threadId, ids.turnId);
+        const completedEpoch = r94EpochMillis(lifecycleRecord && lifecycleRecord.completedAt);
+        if (Number.isFinite(completedEpoch)) {
+          exact = {
+            record: {
+              epoch: completedEpoch,
+              label: r94LocalDateTimeStamp(completedEpoch),
+              title: r94FullTimestampTitle(completedEpoch, 'exact: Codex turn/completed'),
+              source: 'turn/completed-full-format',
+            },
+            sourceElement: exact.sourceElement instanceof Element ? exact.sourceElement : null,
+          };
+        }
+      }
       r94RegisterTurnTimeline(turn, ids, exact);
       if (!exact || !exact.record || !exact.record.label) {
         r94RemoveTurnBadge(turn);

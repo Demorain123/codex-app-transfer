@@ -19,8 +19,10 @@ use axum::{
     response::Response,
 };
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use codex_app_transfer_adapters::{
@@ -29,6 +31,7 @@ use codex_app_transfer_adapters::{
 use codex_app_transfer_registry::strip_internal_model_suffix;
 use futures_core::Stream;
 use futures_util::{StreamExt, TryStreamExt};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::diagnostics::{
@@ -83,6 +86,143 @@ pub struct ProxyState {
 /// UA 又被 `is_strip_on_forward` 剔除后兜底用,**绝不能含 codex/openai/codex_cli
 /// 等关键字**(否则等于把 strip 的 UA 又自己写回来)。
 const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("CARGO_PKG_VERSION"));
+
+// CAS-R94-1-TRANSFER-UPSTREAM-CONNECT-RETRY
+// Transfer-only retry budget. This intentionally does NOT alter Codex's built-in
+// provider/retry settings and does not patch/replace Codex binaries.
+//
+// Safety boundary: only reqwest errors classified as connect-stage failures are
+// retried here, before any HTTP response object exists. We deliberately do not
+// replay ordinary HTTP 4xx/5xx responses, response-header timeouts, or SSE body
+// failures because those may correspond to an upstream request that already
+// started processing/billing.
+const MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES: u8 = 15;
+static TRANSFER_UPSTREAM_CONNECT_RETRIES: AtomicU8 = AtomicU8::new(0);
+static TRANSFER_RETRY_NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferRetryStatusSnapshot {
+    pub active: bool,
+    pub active_count: usize,
+    pub attempt: u8,
+    pub max_retries: u8,
+    pub delay_ms: u64,
+    pub provider: String,
+    pub reason: String,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct TransferRetryActivity {
+    attempt: u8,
+    max_retries: u8,
+    delay_ms: u64,
+    provider: String,
+    reason: String,
+    updated_at_ms: u64,
+}
+
+static TRANSFER_RETRY_ACTIVITIES: OnceLock<Mutex<std::collections::HashMap<u64, TransferRetryActivity>>> =
+    OnceLock::new();
+
+fn transfer_retry_activities() -> &'static Mutex<std::collections::HashMap<u64, TransferRetryActivity>> {
+    TRANSFER_RETRY_ACTIVITIES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn now_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+pub fn set_upstream_connect_retry_limit(limit: u8) -> u8 {
+    let clamped = limit.min(MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES);
+    TRANSFER_UPSTREAM_CONNECT_RETRIES.store(clamped, Ordering::Relaxed);
+    clamped
+}
+
+pub fn upstream_connect_retry_limit() -> u8 {
+    TRANSFER_UPSTREAM_CONNECT_RETRIES.load(Ordering::Relaxed)
+}
+
+pub fn transfer_retry_status_snapshot() -> TransferRetryStatusSnapshot {
+    let configured = upstream_connect_retry_limit();
+    let guard = transfer_retry_activities()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let active_count = guard.len();
+    let latest = guard.values().max_by_key(|activity| activity.updated_at_ms);
+    match latest {
+        Some(activity) => TransferRetryStatusSnapshot {
+            active: true,
+            active_count,
+            attempt: activity.attempt,
+            max_retries: activity.max_retries,
+            delay_ms: activity.delay_ms,
+            provider: activity.provider.clone(),
+            reason: activity.reason.clone(),
+            updated_at_ms: activity.updated_at_ms,
+        },
+        None => TransferRetryStatusSnapshot {
+            active: false,
+            active_count: 0,
+            attempt: 0,
+            max_retries: configured,
+            delay_ms: 0,
+            provider: String::new(),
+            reason: String::new(),
+            updated_at_ms: now_epoch_ms(),
+        },
+    }
+}
+
+fn begin_transfer_retry(provider: &str, max_retries: u8) -> u64 {
+    let id = TRANSFER_RETRY_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let activity = TransferRetryActivity {
+        attempt: 0,
+        max_retries,
+        delay_ms: 0,
+        provider: provider.to_owned(),
+        reason: "connect_error".to_owned(),
+        updated_at_ms: now_epoch_ms(),
+    };
+    transfer_retry_activities()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(id, activity);
+    id
+}
+
+fn update_transfer_retry(id: u64, attempt: u8, delay_ms: u64) {
+    if let Some(activity) = transfer_retry_activities()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_mut(&id)
+    {
+        activity.attempt = attempt;
+        activity.delay_ms = delay_ms;
+        activity.updated_at_ms = now_epoch_ms();
+    }
+}
+
+fn finish_transfer_retry(id: u64) {
+    transfer_retry_activities()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&id);
+}
+
+fn transfer_retry_delay_ms(attempt: u8) -> u64 {
+    match attempt {
+        0 | 1 => 250,
+        2 => 500,
+        3 => 1000,
+        _ => 1500,
+    }
+}
 
 // CAS-APPS-MCP-AUTH-R25-REDIRECT-HELPER
 fn apps_mcp_redirect_target_allowed(origin: &reqwest::Url, next: &reqwest::Url) -> bool {
@@ -3664,8 +3804,95 @@ async fn build_and_send_upstream(
     }
     let req = up.build()?;
     let outbound_headers_snapshot = req.headers().clone();
-    let resp = state.http.execute(req).await?;
-    Ok((resp, outbound_headers_snapshot))
+    let retry_limit = upstream_connect_retry_limit();
+
+    if retry_limit == 0 {
+        let resp = state.http.execute(req).await?;
+        return Ok((resp, outbound_headers_snapshot));
+    }
+
+    // Request::try_clone succeeds for the Bytes-backed request bodies used by
+    // this proxy. If a future adapter introduces a non-cloneable streaming body,
+    // fail safe to the old single-send behavior instead of buffering/replaying it.
+    let Some(template) = req.try_clone() else {
+        proxy_telemetry().logs.add(
+            "WARN",
+            format!(
+                "[transfer-upstream-retry-skip] provider={} reason=non_cloneable_request configured={retry_limit}",
+                resolved.provider_id
+            ),
+        );
+        let resp = state.http.execute(req).await?;
+        return Ok((resp, outbound_headers_snapshot));
+    };
+
+    let mut retry_activity_id: Option<u64> = None;
+    let mut retries_used: u8 = 0;
+
+    loop {
+        let Some(attempt_request) = template.try_clone() else {
+            if let Some(id) = retry_activity_id.take() {
+                finish_transfer_retry(id);
+            }
+            return Err(ForwardError::BadRequest(
+                "Transfer retry template unexpectedly became non-cloneable".to_owned(),
+            ));
+        };
+
+        match state.http.execute(attempt_request).await {
+            Ok(resp) => {
+                if retries_used > 0 {
+                    proxy_telemetry().logs.add(
+                        "INFO",
+                        format!(
+                            "[transfer-upstream-retry-success] provider={} retries_used={retries_used}/{retry_limit}",
+                            resolved.provider_id
+                        ),
+                    );
+                }
+                if let Some(id) = retry_activity_id.take() {
+                    finish_transfer_retry(id);
+                }
+                return Ok((resp, outbound_headers_snapshot));
+            }
+            Err(error) if error.is_connect() && retries_used < retry_limit => {
+                retries_used = retries_used.saturating_add(1);
+                let delay_ms = transfer_retry_delay_ms(retries_used);
+                let id = *retry_activity_id.get_or_insert_with(|| {
+                    begin_transfer_retry(&resolved.provider_id, retry_limit)
+                });
+                update_transfer_retry(id, retries_used, delay_ms);
+                proxy_telemetry().logs.add(
+                    "WARN",
+                    format!(
+                        "[transfer-upstream-retry] provider={} attempt={retries_used}/{retry_limit} delay_ms={delay_ms} reason=connect_error",
+                        resolved.provider_id
+                    ),
+                );
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+            Err(error) => {
+                if retries_used > 0 {
+                    let terminal = if error.is_connect() && retries_used >= retry_limit {
+                        "exhausted"
+                    } else {
+                        "aborted_non_connect_error"
+                    };
+                    proxy_telemetry().logs.add(
+                        "ERROR",
+                        format!(
+                            "[transfer-upstream-retry-{terminal}] provider={} retries_used={retries_used}/{retry_limit}",
+                            resolved.provider_id
+                        ),
+                    );
+                }
+                if let Some(id) = retry_activity_id.take() {
+                    finish_transfer_retry(id);
+                }
+                return Err(ForwardError::Upstream(error));
+            }
+        }
+    }
 }
 
 /// QoderWork Cosy 出站:选服务账号(池 + 续期)→ 拉 userinfo → 客户端 chat 请求转私有

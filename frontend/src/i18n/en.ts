@@ -649,7 +649,13 @@ export default {
   "settings.codexQuotaEnabledHint": "Shows a usage panel in Codex (context, token rate/total, quota). Only when Codex is launched from this app.",
   "settings.upstreamConnectRetries": "Transfer upstream connect retries",
   "settings.upstreamConnectRetriesHint":
-    "0 = off; 1–15 = extra Transfer retries for connect-stage failures before any HTTP response exists. This does not change Codex's native Reconnecting x/5 and never replays ordinary 4xx/5xx responses or an SSE stream that already started. No Lagging launches show Transfer Retry status inside Codex.",
+    "Finite-count mode. 0 = off; positive integers are not capped at 15, so values such as 20, 99, or 500 are allowed. Only connect-stage failures before any HTTP response exists are retried. Codex's native Reconnecting x/5 is unchanged, and ordinary 4xx/5xx responses or an SSE stream that already started are never replayed.",
+  "settings.upstreamConnectRetryInfinite": "Unlimited retry count",
+  "settings.upstreamConnectRetryInfiniteHint":
+    "When enabled, the finite count above is ignored and Transfer keeps retrying until the time limit is reached. Logs and the No Lagging Codex status show the accumulated retry count and elapsed time.",
+  "settings.upstreamConnectRetryMaxHours": "Maximum unlimited-retry duration (hours)",
+  "settings.upstreamConnectRetryMaxHoursHint":
+    "Must be greater than 0 and may be fractional; for example, 1.5 means 1 hour 30 minutes. When the time limit is reached, Transfer stops retrying and returns the final error to Codex.",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy account-switch threshold",
   "settings.workbuddyQuotaGuardThresholdHint":
     "Auto-switch to the next WorkBuddy account when the active one's remaining credits drop below this value (default 20).",

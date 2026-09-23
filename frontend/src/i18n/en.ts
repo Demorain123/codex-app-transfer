@@ -655,7 +655,7 @@ export default {
     "When enabled, the finite count above is ignored and Transfer keeps retrying until the time limit is reached. Logs and the No Lagging Codex status show the accumulated retry count and elapsed time.",
   "settings.upstreamConnectRetryMaxHours": "Maximum unlimited-retry duration (hours)",
   "settings.upstreamConnectRetryMaxHoursHint":
-    "Must be greater than 0 and may be fractional; for example, 1.5 means 1 hour 30 minutes. When the time limit is reached, Transfer stops retrying and returns the final error to Codex.",
+    "Must be greater than 0 and may be fractional; for example, 1.5 means 1 hour 30 minutes. When the retry window ends, Transfer starts no new retry attempt; a request already in flight is not force-cancelled, avoiding duplicate execution or billing risk.",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy account-switch threshold",
   "settings.workbuddyQuotaGuardThresholdHint":
     "Auto-switch to the next WorkBuddy account when the active one's remaining credits drop below this value (default 20).",

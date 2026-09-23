@@ -514,7 +514,10 @@
       if (method === 'turn/completed' || method === 'turn_completed' || method === 'task_complete') {
         const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
-          ? params.turn
+          ? Object.assign({}, params.turn, {
+              completedAt: params.turn.completedAt ?? params.turn.completed_at ?? emittedEpoch,
+              timeToFirstTokenMs: params.turn.timeToFirstTokenMs ?? params.turn.time_to_first_token_ms,
+            })
           : {
               id: params.turnId || params.turn_id,
               status: params.status,
@@ -528,7 +531,9 @@
       if (method === 'turn/started' || method === 'turn_started' || method === 'task_started') {
         const threadId = params.threadId || params.thread_id || value.threadId || value.thread_id || r94NotificationFallbackThreadId() || null;
         const turn = params.turn && typeof params.turn === 'object'
-          ? params.turn
+          ? Object.assign({}, params.turn, {
+              startedAt: params.turn.startedAt ?? params.turn.started_at ?? emittedEpoch,
+            })
           : {
               id: params.turnId || params.turn_id,
               status: params.status || 'inProgress',

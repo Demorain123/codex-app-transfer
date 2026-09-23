@@ -149,6 +149,21 @@ foreach ($MisleadingIdleRetryUi in @(
 }
 Write-Host 'R94_1_RETRY_INCIDENT_ONLY_UI_PASS' -ForegroundColor Green
 
+foreach ($CoreUiTruthMarker in @(
+    'CAS-R94-1-STATUS-COVERAGE-TRUTH',
+    'statusCoverageOk',
+    'coveredVisibleEditables',
+    'timestampHealthy',
+    'segmentEvidence',
+    "' · coverage='",
+    "'<div>TS health='"
+)) {
+    if (-not $ThemeText.Contains($CoreUiTruthMarker)) {
+        throw "r94.1 timestamp/status truth gate missing: $CoreUiTruthMarker"
+    }
+}
+Write-Host 'R94_1_TIMESTAMP_STATUS_TRUTH_GATE_PASS' -ForegroundColor Green
+
 if ($RetryForwardText.Contains('tokio::time::timeout')) {
     throw 'r94.1 retry safety contract violated: request attempts must not be hard-cancelled by the retry window'
 }

@@ -68,7 +68,10 @@ foreach ($Check in @(
     @{ Text = $RetrySettingsPageText; Marker = 'max="15"' },
     @{ Text = $RetryNoMicroText; Marker = 'CAS_TRANSFER_PROXY_PORT' },
     @{ Text = $RetryLauncherText; Marker = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY' },
-    @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY ' }
+    @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY ' },
+    @{ Text = $OutputUiText; Marker = 'CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY' },
+    @{ Text = $OutputUiText; Marker = 'R74_TRANSFER_RETRY_GENERATED_CARRY_PASS' },
+    @{ Text = $OutputUiText; Marker = 'function outputTelemetryRuntimeSource(proxyPort)' }
 )) {
     if (-not $Check.Text.Contains($Check.Marker)) {
         throw "r94.1 Transfer retry contract missing: $($Check.Marker)"
@@ -90,6 +93,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "r94.1 No Lagging retry overlay JavaScript syntax failed: $LASTEXITCODE"
 }
 Write-Host 'R94_1_TRANSFER_RETRY_JS_SYNTAX_PASS' -ForegroundColor Green
+
+$R74Start = $RetryLauncherText.IndexOf('function outputTelemetryRuntimeSource')
+if ($R74Start -lt 0) {
+    throw 'r94.1 r74 launcher-boundary preflight could not locate telemetry function start'
+}
+$R74End = $RetryLauncherText.IndexOf('function stubExpression(', $R74Start)
+if ($R74End -le $R74Start) {
+    throw 'r94.1 r74 launcher-boundary preflight could not locate telemetry function end'
+}
+Write-Host 'R94_1_R74_LAUNCHER_BOUNDARY_PREFLIGHT_PASS' -ForegroundColor Green
 
 $WorkspaceCargo = Join-Path $RepoRoot 'Cargo.toml'
 & cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration --lib r94_1_

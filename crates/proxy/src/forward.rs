@@ -19,7 +19,7 @@ use axum::{
     response::Response,
 };
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -96,17 +96,35 @@ const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("C
 // replay ordinary HTTP 4xx/5xx responses, response-header timeouts, or SSE body
 // failures because those may correspond to an upstream request that already
 // started processing/billing.
-const MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES: u8 = 15;
-static TRANSFER_UPSTREAM_CONNECT_RETRIES: AtomicU8 = AtomicU8::new(0);
+//
+// Finite mode has no product-level retry cap: the persisted u64 value is used as
+// supplied (0 = disabled). Infinite mode ignores the count and is bounded by an
+// explicit wall-clock retry window so it can never run forever accidentally.
+const DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS: u64 = 5_400_000; // 1.5 hours
+static TRANSFER_UPSTREAM_CONNECT_RETRIES: AtomicU64 = AtomicU64::new(0);
+static TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE: AtomicBool = AtomicBool::new(false);
+static TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS: AtomicU64 =
+    AtomicU64::new(DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS);
 static TRANSFER_RETRY_NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferRetryPolicySnapshot {
+    pub retries: u64,
+    pub infinite: bool,
+    pub max_duration_ms: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRetryStatusSnapshot {
     pub active: bool,
     pub active_count: usize,
-    pub attempt: u8,
-    pub max_retries: u8,
+    pub attempt: u64,
+    pub max_retries: u64,
+    pub infinite: bool,
+    pub elapsed_ms: u64,
+    pub max_duration_ms: u64,
     pub delay_ms: u64,
     pub provider: String,
     pub reason: String,
@@ -115,18 +133,23 @@ pub struct TransferRetryStatusSnapshot {
 
 #[derive(Debug, Clone)]
 struct TransferRetryActivity {
-    attempt: u8,
-    max_retries: u8,
+    attempt: u64,
+    max_retries: u64,
+    infinite: bool,
+    started_at_ms: u64,
+    max_duration_ms: u64,
     delay_ms: u64,
     provider: String,
     reason: String,
     updated_at_ms: u64,
 }
 
-static TRANSFER_RETRY_ACTIVITIES: OnceLock<Mutex<std::collections::HashMap<u64, TransferRetryActivity>>> =
-    OnceLock::new();
+static TRANSFER_RETRY_ACTIVITIES: OnceLock<
+    Mutex<std::collections::HashMap<u64, TransferRetryActivity>>,
+> = OnceLock::new();
 
-fn transfer_retry_activities() -> &'static Mutex<std::collections::HashMap<u64, TransferRetryActivity>> {
+fn transfer_retry_activities(
+) -> &'static Mutex<std::collections::HashMap<u64, TransferRetryActivity>> {
     TRANSFER_RETRY_ACTIVITIES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -138,30 +161,54 @@ fn now_epoch_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-fn clamp_upstream_connect_retry_limit(limit: u8) -> u8 {
-    limit.min(MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES)
+pub fn set_upstream_connect_retry_policy(
+    retries: u64,
+    infinite: bool,
+    max_duration_ms: u64,
+) -> TransferRetryPolicySnapshot {
+    let duration = if max_duration_ms == 0 {
+        DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS
+    } else {
+        max_duration_ms
+    };
+    TRANSFER_UPSTREAM_CONNECT_RETRIES.store(retries, Ordering::Relaxed);
+    TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE.store(infinite, Ordering::Relaxed);
+    TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS.store(duration, Ordering::Relaxed);
+    TransferRetryPolicySnapshot {
+        retries,
+        infinite,
+        max_duration_ms: duration,
+    }
 }
 
-pub fn set_upstream_connect_retry_limit(limit: u8) -> u8 {
-    let clamped = clamp_upstream_connect_retry_limit(limit);
-    TRANSFER_UPSTREAM_CONNECT_RETRIES.store(clamped, Ordering::Relaxed);
-    clamped
+pub fn upstream_connect_retry_policy() -> TransferRetryPolicySnapshot {
+    TransferRetryPolicySnapshot {
+        retries: TRANSFER_UPSTREAM_CONNECT_RETRIES.load(Ordering::Relaxed),
+        infinite: TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE.load(Ordering::Relaxed),
+        max_duration_ms: TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS.load(Ordering::Relaxed),
+    }
 }
 
-pub fn upstream_connect_retry_limit() -> u8 {
+// Compatibility helpers for callers that only care about finite-count mode.
+pub fn set_upstream_connect_retry_limit(limit: u64) -> u64 {
+    let duration = TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS.load(Ordering::Relaxed);
+    set_upstream_connect_retry_policy(limit, false, duration).retries
+}
+
+pub fn upstream_connect_retry_limit() -> u64 {
     TRANSFER_UPSTREAM_CONNECT_RETRIES.load(Ordering::Relaxed)
 }
 
 pub fn transfer_retry_status_snapshot() -> TransferRetryStatusSnapshot {
-    let configured = upstream_connect_retry_limit();
+    let policy = upstream_connect_retry_policy();
     let now = now_epoch_ms();
     let mut guard = transfer_retry_activities()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     // A cancelled client future can drop while sleeping/connecting before the
-    // explicit finish path runs. Never leave a permanent "retrying" indicator.
-    // Active connect attempts update at least once per retry and the reqwest
-    // connect timeout is 10s, so 30s is comfortably above a live attempt.
+    // explicit finish path runs. A live connect attempt updates at least once
+    // every normal reqwest connect timeout/backoff cycle, so 30s is a stale
+    // indicator guard, not the user's retry-window limit.
     guard.retain(|_, activity| now.saturating_sub(activity.updated_at_ms) <= 30_000);
     let active_count = guard.len();
     let latest = guard.values().max_by_key(|activity| activity.updated_at_ms);
@@ -171,6 +218,9 @@ pub fn transfer_retry_status_snapshot() -> TransferRetryStatusSnapshot {
             active_count,
             attempt: activity.attempt,
             max_retries: activity.max_retries,
+            infinite: activity.infinite,
+            elapsed_ms: now.saturating_sub(activity.started_at_ms),
+            max_duration_ms: activity.max_duration_ms,
             delay_ms: activity.delay_ms,
             provider: activity.provider.clone(),
             reason: activity.reason.clone(),
@@ -180,24 +230,34 @@ pub fn transfer_retry_status_snapshot() -> TransferRetryStatusSnapshot {
             active: false,
             active_count: 0,
             attempt: 0,
-            max_retries: configured,
+            max_retries: policy.retries,
+            infinite: policy.infinite,
+            elapsed_ms: 0,
+            max_duration_ms: policy.max_duration_ms,
             delay_ms: 0,
             provider: String::new(),
             reason: String::new(),
-            updated_at_ms: now_epoch_ms(),
+            updated_at_ms: now,
         },
     }
 }
 
-fn begin_transfer_retry(provider: &str, max_retries: u8) -> u64 {
+fn begin_transfer_retry(
+    provider: &str,
+    policy: &TransferRetryPolicySnapshot,
+    started_at_ms: u64,
+) -> u64 {
     let id = TRANSFER_RETRY_NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let activity = TransferRetryActivity {
         attempt: 0,
-        max_retries,
+        max_retries: policy.retries,
+        infinite: policy.infinite,
+        started_at_ms,
+        max_duration_ms: policy.max_duration_ms,
         delay_ms: 0,
         provider: provider.to_owned(),
         reason: "connect_error".to_owned(),
-        updated_at_ms: now_epoch_ms(),
+        updated_at_ms: started_at_ms,
     };
     transfer_retry_activities()
         .lock()
@@ -206,7 +266,7 @@ fn begin_transfer_retry(provider: &str, max_retries: u8) -> u64 {
     id
 }
 
-fn update_transfer_retry(id: u64, attempt: u8, delay_ms: u64) {
+fn update_transfer_retry(id: u64, attempt: u64, delay_ms: u64) {
     if let Some(activity) = transfer_retry_activities()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -225,7 +285,7 @@ fn finish_transfer_retry(id: u64) {
         .remove(&id);
 }
 
-fn transfer_retry_delay_ms(attempt: u8) -> u64 {
+fn transfer_retry_delay_ms(attempt: u64) -> u64 {
     match attempt {
         0 | 1 => 250,
         2 => 500,
@@ -379,6 +439,13 @@ pub enum ForwardError {
     Adapter(#[from] AdapterError),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error(
+        "Transfer upstream retry time limit reached after {elapsed_ms} ms (limit {max_duration_ms} ms)"
+    )]
+    RetryWindowElapsed {
+        elapsed_ms: u64,
+        max_duration_ms: u64,
+    },
     /// OAuth bearer 不可用(用户没登过 / refresh 失败 / token 文件 IO 错)。
     /// 跟 generic Header 错误区分,IntoResponse 走 401 + 结构化 code 提示用户
     /// 重新登录,**不**走 502 generic 错误体(2026-05-11 silent-failure 修)。
@@ -3814,9 +3881,9 @@ async fn build_and_send_upstream(
     }
     let req = up.build()?;
     let outbound_headers_snapshot = req.headers().clone();
-    let retry_limit = upstream_connect_retry_limit();
+    let retry_policy = upstream_connect_retry_policy();
 
-    if retry_limit == 0 {
+    if !retry_policy.infinite && retry_policy.retries == 0 {
         let resp = state.http.execute(req).await?;
         return Ok((resp, outbound_headers_snapshot));
     }
@@ -3828,8 +3895,11 @@ async fn build_and_send_upstream(
         proxy_telemetry().logs.add(
             "WARN",
             format!(
-                "[transfer-upstream-retry-skip] provider={} reason=non_cloneable_request configured={retry_limit}",
-                resolved.provider_id
+                "[transfer-upstream-retry-skip] provider={} reason=non_cloneable_request mode={} configured={} max_duration_ms={}",
+                resolved.provider_id,
+                if retry_policy.infinite { "infinite" } else { "finite" },
+                retry_policy.retries,
+                retry_policy.max_duration_ms,
             ),
         );
         let resp = state.http.execute(req).await?;
@@ -3837,9 +3907,34 @@ async fn build_and_send_upstream(
     };
 
     let mut retry_activity_id: Option<u64> = None;
-    let mut retries_used: u8 = 0;
+    let mut retries_used: u64 = 0;
+    let mut retry_started_at: Option<Instant> = None;
+    let mut retry_started_epoch_ms: u64 = 0;
 
     loop {
+        if retry_policy.infinite {
+            if let Some(started) = retry_started_at {
+                let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                if elapsed_ms >= retry_policy.max_duration_ms {
+                    if let Some(id) = retry_activity_id.take() {
+                        proxy_telemetry().logs.add(
+                            "ERROR",
+                            format!(
+                                "[transfer-upstream-retry-time-limit] retry_id={id} provider={} mode=infinite retries_used={retries_used} elapsed_ms={elapsed_ms} max_duration_ms={}",
+                                resolved.provider_id,
+                                retry_policy.max_duration_ms,
+                            ),
+                        );
+                        finish_transfer_retry(id);
+                    }
+                    return Err(ForwardError::RetryWindowElapsed {
+                        elapsed_ms,
+                        max_duration_ms: retry_policy.max_duration_ms,
+                    });
+                }
+            }
+        }
+
         let Some(attempt_request) = template.try_clone() else {
             if let Some(id) = retry_activity_id.take() {
                 finish_transfer_retry(id);
@@ -3849,53 +3944,145 @@ async fn build_and_send_upstream(
             ));
         };
 
-        match state.http.execute(attempt_request).await {
+        let execute_result = if retry_policy.infinite {
+            if let Some(started) = retry_started_at {
+                let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                let remaining_ms = retry_policy.max_duration_ms.saturating_sub(elapsed_ms);
+                match tokio::time::timeout(
+                    Duration::from_millis(remaining_ms.max(1)),
+                    state.http.execute(attempt_request),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX))
+                            as u64;
+                        if let Some(id) = retry_activity_id.take() {
+                            proxy_telemetry().logs.add(
+                                "ERROR",
+                                format!(
+                                    "[transfer-upstream-retry-time-limit] retry_id={id} provider={} mode=infinite retries_used={retries_used} elapsed_ms={elapsed_ms} max_duration_ms={}",
+                                    resolved.provider_id,
+                                    retry_policy.max_duration_ms,
+                                ),
+                            );
+                            finish_transfer_retry(id);
+                        }
+                        return Err(ForwardError::RetryWindowElapsed {
+                            elapsed_ms,
+                            max_duration_ms: retry_policy.max_duration_ms,
+                        });
+                    }
+                }
+            } else {
+                state.http.execute(attempt_request).await
+            }
+        } else {
+            state.http.execute(attempt_request).await
+        };
+
+        match execute_result {
             Ok(resp) => {
                 if let Some(id) = retry_activity_id.take() {
+                    let elapsed_ms = retry_started_at
+                        .map(|started| {
+                            started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+                        })
+                        .unwrap_or(0);
                     proxy_telemetry().logs.add(
                         "INFO",
                         format!(
-                            "[transfer-upstream-retry-success] retry_id={id} provider={} retries_used={retries_used} max_retries={retry_limit}",
-                            resolved.provider_id
+                            "[transfer-upstream-retry-success] retry_id={id} provider={} mode={} retries_used={retries_used} max_retries={} elapsed_ms={elapsed_ms} max_duration_ms={}",
+                            resolved.provider_id,
+                            if retry_policy.infinite { "infinite" } else { "finite" },
+                            retry_policy.retries,
+                            retry_policy.max_duration_ms,
                         ),
                     );
                     finish_transfer_retry(id);
                 }
                 return Ok((resp, outbound_headers_snapshot));
             }
-            Err(error) if error.is_connect() && retries_used < retry_limit => {
+            Err(error) => {
+                if !error.is_connect() {
+                    if let Some(id) = retry_activity_id.take() {
+                        let elapsed_ms = retry_started_at
+                            .map(|started| {
+                                started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+                            })
+                            .unwrap_or(0);
+                        proxy_telemetry().logs.add(
+                            "ERROR",
+                            format!(
+                                "[transfer-upstream-retry-aborted-non-connect-error] retry_id={id} provider={} mode={} retries_used={retries_used} max_retries={} elapsed_ms={elapsed_ms} max_duration_ms={}",
+                                resolved.provider_id,
+                                if retry_policy.infinite { "infinite" } else { "finite" },
+                                retry_policy.retries,
+                                retry_policy.max_duration_ms,
+                            ),
+                        );
+                        finish_transfer_retry(id);
+                    }
+                    return Err(ForwardError::Upstream(error));
+                }
+
+                if !retry_policy.infinite && retries_used >= retry_policy.retries {
+                    if let Some(id) = retry_activity_id.take() {
+                        proxy_telemetry().logs.add(
+                            "ERROR",
+                            format!(
+                                "[transfer-upstream-retry-exhausted] retry_id={id} provider={} mode=finite retries_used={retries_used} max_retries={}",
+                                resolved.provider_id,
+                                retry_policy.retries,
+                            ),
+                        );
+                        finish_transfer_retry(id);
+                    }
+                    return Err(ForwardError::Upstream(error));
+                }
+
+                if retry_started_at.is_none() {
+                    retry_started_at = Some(Instant::now());
+                    retry_started_epoch_ms = now_epoch_ms();
+                }
                 retries_used = retries_used.saturating_add(1);
-                let delay_ms = transfer_retry_delay_ms(retries_used);
+                let mut delay_ms = transfer_retry_delay_ms(retries_used);
+                if retry_policy.infinite {
+                    if let Some(started) = retry_started_at {
+                        let elapsed_ms =
+                            started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                        let remaining_ms =
+                            retry_policy.max_duration_ms.saturating_sub(elapsed_ms);
+                        delay_ms = delay_ms.min(remaining_ms);
+                    }
+                }
                 let id = *retry_activity_id.get_or_insert_with(|| {
-                    begin_transfer_retry(&resolved.provider_id, retry_limit)
+                    begin_transfer_retry(
+                        &resolved.provider_id,
+                        &retry_policy,
+                        retry_started_epoch_ms,
+                    )
                 });
                 update_transfer_retry(id, retries_used, delay_ms);
+                let elapsed_ms = retry_started_at
+                    .map(|started| {
+                        started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+                    })
+                    .unwrap_or(0);
                 proxy_telemetry().logs.add(
                     "WARN",
                     format!(
-                        "[transfer-upstream-retry] retry_id={id} provider={} attempt={retries_used} max_retries={retry_limit} delay_ms={delay_ms} reason=connect_error",
-                        resolved.provider_id
+                        "[transfer-upstream-retry] retry_id={id} provider={} mode={} attempt={retries_used} max_retries={} elapsed_ms={elapsed_ms} max_duration_ms={} delay_ms={delay_ms} reason=connect_error",
+                        resolved.provider_id,
+                        if retry_policy.infinite { "infinite" } else { "finite" },
+                        retry_policy.retries,
+                        retry_policy.max_duration_ms,
                     ),
                 );
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-            }
-            Err(error) => {
-                let terminal = if error.is_connect() && retries_used >= retry_limit {
-                    "exhausted"
-                } else {
-                    "aborted_non_connect_error"
-                };
-                if let Some(id) = retry_activity_id.take() {
-                    proxy_telemetry().logs.add(
-                        "ERROR",
-                        format!(
-                            "[transfer-upstream-retry-{terminal}] retry_id={id} provider={} retries_used={retries_used} max_retries={retry_limit}",
-                            resolved.provider_id
-                        ),
-                    );
-                    finish_transfer_retry(id);
+                if delay_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                 }
-                return Err(ForwardError::Upstream(error));
             }
         }
     }
@@ -5436,11 +5623,23 @@ mod tests {
     }
     // CAS-R94-1-TRANSFER-UPSTREAM-CONNECT-RETRY-TESTS
     #[test]
-    fn r94_1_transfer_retry_limit_is_bounded_to_fifteen() {
-        assert_eq!(clamp_upstream_connect_retry_limit(0), 0);
-        assert_eq!(clamp_upstream_connect_retry_limit(7), 7);
-        assert_eq!(clamp_upstream_connect_retry_limit(15), 15);
-        assert_eq!(clamp_upstream_connect_retry_limit(99), 15);
+    fn r94_1_transfer_retry_finite_count_has_no_artificial_fifteen_cap() {
+        let policy = set_upstream_connect_retry_policy(99, false, 5_400_000);
+        assert_eq!(policy.retries, 99);
+        assert!(!policy.infinite);
+        assert_eq!(upstream_connect_retry_limit(), 99);
+        set_upstream_connect_retry_policy(0, false, 5_400_000);
+    }
+
+    #[test]
+    fn r94_1_transfer_retry_infinite_mode_is_time_bounded() {
+        let policy = set_upstream_connect_retry_policy(0, true, 5_400_000);
+        assert!(policy.infinite);
+        assert_eq!(policy.max_duration_ms, 5_400_000);
+        let status = transfer_retry_status_snapshot();
+        assert!(status.infinite);
+        assert_eq!(status.max_duration_ms, 5_400_000);
+        set_upstream_connect_retry_policy(0, false, 5_400_000);
     }
 
     #[test]
@@ -5449,6 +5648,6 @@ mod tests {
         assert_eq!(transfer_retry_delay_ms(2), 500);
         assert_eq!(transfer_retry_delay_ms(3), 1000);
         assert_eq!(transfer_retry_delay_ms(4), 1500);
-        assert_eq!(transfer_retry_delay_ms(15), 1500);
+        assert_eq!(transfer_retry_delay_ms(99), 1500);
     }
 }

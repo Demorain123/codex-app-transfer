@@ -3967,7 +3967,7 @@ async fn build_and_send_upstream(
                 proxy_telemetry().logs.add(
                     "WARN",
                     format!(
-                        "[transfer-upstream-retry-round-blocked] provider={} mode=finite reason=previous_round_exhausted connect_error={}",
+                        "[transfer-upstream-retry-round-blocked] provider={} mode=finite phase=codex-native reason=previous_round_exhausted connect_error={}",
                         resolved.provider_id,
                         error.is_connect(),
                     ),
@@ -4075,6 +4075,14 @@ async fn build_and_send_upstream(
                         );
                         finish_transfer_retry(id);
                     }
+                    proxy_telemetry().logs.add(
+                        "WARN",
+                        format!(
+                            "[transfer-upstream-retry-handoff] provider={} mode=finite next_layer=codex-native reason=retry_round_exhausted retries_used={retries_used} max_retries={}",
+                            resolved.provider_id,
+                            retry_policy.retries,
+                        ),
+                    );
                     return Err(ForwardError::Upstream(error));
                 }
 
@@ -4126,6 +4134,14 @@ async fn build_and_send_upstream(
                                 ),
                             );
                         }
+                        proxy_telemetry().logs.add(
+                            "WARN",
+                            format!(
+                                "[transfer-upstream-retry-handoff] provider={} mode=infinite next_layer=codex-native reason=time_limit elapsed_ms={elapsed_ms} max_duration_ms={}",
+                                resolved.provider_id,
+                                retry_policy.max_duration_ms,
+                            ),
+                        );
                         return Err(ForwardError::Upstream(error));
                     }
                     delay_ms = delay_ms.min(remaining_ms);

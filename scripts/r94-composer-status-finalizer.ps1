@@ -66,6 +66,18 @@ $R94ComposerSurfaceCompat = @'
     return null;
   }
 
+  function r94EditableForComposerScope(composer) {
+    // R94_PANE_SCOPED_STATUS_MOUNT_RUNTIME
+    // A pane-specific mount must never borrow another visible pane's editor.
+    // During React remounts a child pane can temporarily lose its editable;
+    // fail closed until that pane owns an editable again instead of falling
+    // back to the first document-global composer.
+    if (composer instanceof Element) {
+      return r94VisibleComposerEditable(composer);
+    }
+    return r94VisibleComposerEditable(null);
+  }
+
   function r94DirectChildOf(parent, node) {
     if (!(parent instanceof Element) || !(node instanceof Element) || !parent.contains(node) || parent === node) return null;
     let current = node;
@@ -155,8 +167,7 @@ $R94ComposerSurfaceCompat = @'
 
   function r93ComposerSurfaceFor(composer) {
     // R94_COMPOSER_SURFACE_COMPAT_RUNTIME
-    const scopedEditable = r94VisibleComposerEditable(composer instanceof Element ? composer : null);
-    const editable = scopedEditable || r94VisibleComposerEditable(null);
+    const editable = r94EditableForComposerScope(composer);
     const mount = r94SafeComposerSurface(editable);
     return mount && mount.node instanceof Element ? mount.node : null;
   }
@@ -208,10 +219,24 @@ $R94ComposerMountCompat = @'
       const fastEditable = fastSurface.querySelector(
         '.ProseMirror[contenteditable="true"],[role="textbox"][contenteditable="true"],textarea'
       );
+      const requestedEditable = r94EditableForComposerScope(composer);
+      const sameComposerScope = !(composer instanceof Element) ||
+        (
+          requestedEditable instanceof Element &&
+          composer.contains(requestedEditable) &&
+          fastSurface.contains(requestedEditable)
+        );
       const leaked = !!bar.closest(
         '.ProseMirror[contenteditable="true"],[contenteditable="true"],[role="textbox"][contenteditable="true"]'
       );
-      if (fastEditable instanceof Element && fastEditable.isConnected && !leaked) {
+      if (
+        fastEditable instanceof Element &&
+        fastEditable.isConnected &&
+        requestedEditable instanceof Element &&
+        requestedEditable.isConnected &&
+        sameComposerScope &&
+        !leaked
+      ) {
         diagnostics.fastReuses += 1;
         diagnostics.lastReason = 'mounted-safe-cached';
         return true;
@@ -221,8 +246,7 @@ $R94ComposerMountCompat = @'
     diagnostics.attempts += 1;
     r94RemoveUnsafeStatusNodes();
 
-    const editable = r94VisibleComposerEditable(composer instanceof Element ? composer : null) ||
-      r94VisibleComposerEditable(null);
+    const editable = r94EditableForComposerScope(composer);
     const mount = r94SafeComposerSurface(editable);
     const surface = mount && mount.node instanceof Element ? mount.node : null;
     const before = mount && mount.before instanceof Element ? mount.before : null;

@@ -10,8 +10,6 @@ const OUTPUT_TELEMETRY_RUNTIME = "r73.1";
 const fixDirectory = path.dirname(fileURLToPath(import.meta.url));
 const statusPath = process.env.CAS_NO_MICRO_STATUS_PATH || path.join(fixDirectory, "last-launch.json");
 const packageVersion = process.env.CAS_NO_MICRO_PACKAGE_VERSION || "unknown";
-const r941PolicyOverlayRequested = process.env.CAS_R94_1_OPENAI_POLICY_OVERLAY === "1";
-const r941PatchedRuntime = process.env.CAS_R94_1_CODEX_RUNTIME_EXE || "";
 const executable = process.argv[2];
 const extraArguments = process.argv.slice(3);
 
@@ -39,18 +37,6 @@ try {
   }
 
   phase = "stub-marker-verified";
-
-  let r941RuntimeEvidence = null;
-  if (r941PolicyOverlayRequested) {
-    phase = "r94.1-runtime-overlay-verify";
-    r941RuntimeEvidence = await waitForR941RuntimeOverlay(
-      inspectorUrl,
-      child,
-      r941PatchedRuntime,
-      12_000,
-    );
-  }
-
   await delay(700);
   if (!isPidAlive(child.pid)) {
     throw new Error(`Codex exited after resume (exit ${child.exitCode})`);
@@ -83,14 +69,6 @@ try {
       timestampMode: "per-assistant-output",
       metricMode: "best-effort-live-stream",
     },
-    openaiPolicyOverlay: r941PolicyOverlayRequested
-      ? {
-          status: "native-runtime-verified",
-          effectiveProvider: "openai",
-          runtime: r941PatchedRuntime,
-          evidence: r941RuntimeEvidence,
-        }
-      : { status: "not-required" },
     cleanup: "not-needed",
     statusFile: { status: "success" },
   };
@@ -123,13 +101,6 @@ try {
       status: "not-armed",
       runtime: OUTPUT_TELEMETRY_RUNTIME,
     },
-    openaiPolicyOverlay: r941PolicyOverlayRequested
-      ? {
-          status: "native-runtime-not-verified",
-          effectiveProvider: "openai",
-          runtime: r941PatchedRuntime,
-        }
-      : { status: "not-required" },
     cleanup,
     statusFile: { status: "success" },
   };
@@ -548,55 +519,6 @@ function stubExpression(expectedPid, expectedExecutable) {
   const Module = process.getBuiltinModule("module");
   const originalLoad = Module._load;
   const telemetrySource = ${telemetrySource};
-
-  // CAS-R94-1-CODEX-APP-SERVER-RUNTIME-OVERLAY
-  // The Desktop shell keeps its official executable and provider identity.
-  // Only child launches that are unambiguously "codex app-server" are swapped
-  // to the version-matched patched CLI when Transfer staged provider behavior.
-  const r941PolicyOverlayEnabled =
-    process.env.CAS_R94_1_OPENAI_POLICY_OVERLAY === "1";
-  const r941RuntimeExe = String(process.env.CAS_R94_1_CODEX_RUNTIME_EXE || "");
-  if (r941PolicyOverlayEnabled && !r941RuntimeExe) {
-    throw new Error("r94.1 openai policy overlay requested without patched runtime");
-  }
-
-  const childProcess = process.getBuiltinModule("child_process");
-  const pathModule = process.getBuiltinModule("path");
-  const isCodexAppServerLaunch = (file, args) => {
-    if (!r941PolicyOverlayEnabled || !file || !Array.isArray(args)) return false;
-    let base = "";
-    try { base = pathModule.basename(String(file)).toLowerCase(); } catch {}
-    if (base !== "codex.exe" && base !== "codex") return false;
-    return args.some((arg) => String(arg) === "app-server");
-  };
-  const installCodexRuntimeWrapper = (name) => {
-    const original = childProcess?.[name];
-    if (typeof original !== "function" || original.__casR941CodexRuntimeWrapper) return;
-    const wrapped = function(...args) {
-      if (isCodexAppServerLaunch(args[0], args[1])) {
-        args[0] = r941RuntimeExe;
-        globalThis.__CAS_R94_1_CODEX_RUNTIME_OVERLAY_LAST__ = {
-          method: name,
-          effectiveProvider: "openai",
-          runtime: r941RuntimeExe,
-        };
-      }
-      return Reflect.apply(original, this, args);
-    };
-    Object.defineProperty(wrapped, "__casR941CodexRuntimeWrapper", { value: true });
-    childProcess[name] = wrapped;
-  };
-  for (const name of ["spawn", "spawnSync", "execFile", "execFileSync"]) {
-    installCodexRuntimeWrapper(name);
-  }
-  if (r941PolicyOverlayEnabled) {
-    globalThis.__CAS_R94_1_CODEX_RUNTIME_OVERLAY__ = {
-      enabled: true,
-      effectiveProvider: "openai",
-      runtime: r941RuntimeExe,
-    };
-  }
-
   const isInspectorArgument = (argument) =>
     typeof argument === "string" && /^--inspect(?:-brk)?(?:=|$)/.test(argument);
 
@@ -703,7 +625,7 @@ function stubExpression(expectedPid, expectedExecutable) {
   globalThis.__CODEX_NO_LAGGING_MICRO_ACCESSORY_GUARD__ = true;
   setTimeout(() => {
     try { process.getBuiltinModule("inspector").close(); } catch {}
-  }, r941PolicyOverlayEnabled ? 15000 : 500);
+  }, 500);
   return "${EXPECTED_MARKER}";
 })()
 `;
@@ -904,88 +826,6 @@ async function installStub(webSocketUrl, expectedPid, expectedExecutable) {
       if (message.id === 6) finishSuccess();
     });
   });
-}
-
-// CAS-R94-1-CODEX-APP-SERVER-RUNTIME-VERIFY
-// "armed" is not sufficient: when a provider-policy overlay is active, launch
-// succeeds only after the Electron main process actually swaps a codex
-// app-server child to the version-matched patched runtime.
-async function readR941RuntimeOverlayEvidence(webSocketUrl, timeoutMs) {
-  return await new Promise((resolve, reject) => {
-    const socket = new WebSocket(webSocketUrl);
-    let settled = false;
-    const finish = (value, error = null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      try { socket.close(); } catch {}
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const timeout = setTimeout(
-      () => finish(null, new Error("runtime overlay inspector read timed out")),
-      timeoutMs,
-    );
-    socket.addEventListener("error", () => {
-      finish(null, new Error("runtime overlay inspector socket failed"));
-    }, { once: true });
-    socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ id: 91, method: "Runtime.enable" }));
-    }, { once: true });
-    socket.addEventListener("message", (event) => {
-      let message;
-      try {
-        message = JSON.parse(String(event.data));
-      } catch (error) {
-        finish(null, new Error("runtime overlay inspector JSON invalid: " + safeError(error)));
-        return;
-      }
-      if (message.error && message.id) {
-        finish(null, new Error("runtime overlay inspector command failed: " + safeError(message.error.message || message.error)));
-        return;
-      }
-      if (message.id === 91) {
-        socket.send(JSON.stringify({
-          id: 92,
-          method: "Runtime.evaluate",
-          params: {
-            expression: "globalThis.__CAS_R94_1_CODEX_RUNTIME_OVERLAY_LAST__ ?? null",
-            returnByValue: true,
-            silent: true,
-          },
-        }));
-        return;
-      }
-      if (message.id === 92) {
-        finish(message.result?.result?.value ?? null);
-      }
-    });
-  });
-}
-
-async function waitForR941RuntimeOverlay(webSocketUrl, childProcess, expectedRuntime, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = "codex app-server child has not been observed";
-  while (Date.now() < deadline) {
-    if (!isPidAlive(childProcess.pid)) {
-      throw new Error("Codex exited before the r94.1 runtime overlay was verified (exit " + childProcess.exitCode + ")");
-    }
-    try {
-      const evidence = await readR941RuntimeOverlayEvidence(webSocketUrl, 1200);
-      if (evidence && typeof evidence === "object") {
-        const provider = String(evidence.effectiveProvider || "");
-        const runtime = String(evidence.runtime || "");
-        if (provider === "openai" && runtime === expectedRuntime) {
-          return evidence;
-        }
-        lastError = "unexpected runtime overlay evidence provider=" + (provider || "<empty>") + " runtime=" + (runtime || "<empty>");
-      }
-    } catch (error) {
-      lastError = safeError(error);
-    }
-    await delay(125);
-  }
-  throw new Error("r94.1 native runtime overlay was armed but not observed: " + lastError);
 }
 
 function isPidAlive(pid) {

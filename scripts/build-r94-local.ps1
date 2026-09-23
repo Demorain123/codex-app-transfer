@@ -720,6 +720,7 @@ foreach ($Marker in @(
     'terminalTurn',
     'activeTurn',
     'R94_CODEX_TOKEN_DURATION_RUNTIME',
+    'R94_CODEX_NUMERIC_LIFECYCLE_EPOCH_RUNTIME',
     'R94_CODEX_ASSISTANT_OUTPUT_EVENT_RUNTIME',
     'safeEnvelope.recentOutputs',
     'R94_CODEX_TOKEN_DURATION_SAFE_ENVELOPE_RUNTIME',

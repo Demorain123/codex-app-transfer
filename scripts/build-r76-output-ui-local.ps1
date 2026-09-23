@@ -609,14 +609,35 @@ try {
         ($MainProcessCollector + '  const armOutputTelemetry = (electron) => {') `
         'main-process read-only JSONL collector'
 
-    $OldAttach = @'
+    # r94.1 adds the Transfer retry main-process bridge to this same Electron
+    # arm point. Preserve it and add the r76 read-only usage collector beside it.
+    # Keep the legacy form as a compatibility fallback for older generated chains.
+    $AttachWithRetryBridge = @'
+    try {
+      if (electron.app.isReady?.()) attachExisting();
+      else electron.app.whenReady?.().then(attachExisting).catch(() => {});
+    } catch {}
+    try { armRetryBridge(electron); } catch {}
+  };
+'@
+    $AttachWithRetryBridgeAndCollector = @'
+    try {
+      if (electron.app.isReady?.()) attachExisting();
+      else electron.app.whenReady?.().then(attachExisting).catch(() => {});
+    } catch {}
+    try { armRetryBridge(electron); } catch {}
+    try { armLocalUsageCollector(electron); } catch {}
+  };
+'@
+
+    $LegacyAttach = @'
     try {
       if (electron.app.isReady?.()) attachExisting();
       else electron.app.whenReady?.().then(attachExisting).catch(() => {});
     } catch {}
   };
 '@
-    $NewAttach = @'
+    $LegacyAttachAndCollector = @'
     try {
       if (electron.app.isReady?.()) attachExisting();
       else electron.app.whenReady?.().then(attachExisting).catch(() => {});
@@ -624,7 +645,21 @@ try {
     try { armLocalUsageCollector(electron); } catch {}
   };
 '@
-    $PatchedLauncher = Replace-Required $PatchedLauncher $OldAttach $NewAttach 'arm local usage collector with telemetry'
+
+    if ($PatchedLauncher.Contains('try { armRetryBridge(electron); } catch {}')) {
+        $PatchedLauncher = Replace-Required `
+            $PatchedLauncher `
+            $AttachWithRetryBridge `
+            $AttachWithRetryBridgeAndCollector `
+            'arm local usage collector beside retry bridge'
+    }
+    else {
+        $PatchedLauncher = Replace-Required `
+            $PatchedLauncher `
+            $LegacyAttach `
+            $LegacyAttachAndCollector `
+            'arm local usage collector with telemetry'
+    }
 
     # 2) Reuse the reviewed r75 finalizer, but generate r76 identity directly
     # from r74 so the visible package/version and builder PASS markers stay in

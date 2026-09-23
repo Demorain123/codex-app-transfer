@@ -549,9 +549,9 @@ $RuntimeDebugContracts = @(
     @{ Text = $ThemeInjectorRsText; Marker = 'CAS-R94-1-RUNTIME-DEBUG-COLLAPSE' },
     @{ Text = $ThemeInjectorRsText; Marker = 'data-cas-runtime-debug-draggable' },
     @{ Text = $ThemeInjectorRsText; Marker = 'data-cas-runtime-debug-collapsed' },
-    @{ Text = $ThemeInjectorRsText; Marker = 'data-cas-runtime-debug-toggle' },
-    @{ Text = $ThemeInjectorRsText; Marker = 'root.onclick' },
-    @{ Text = $ThemeInjectorRsText; Marker = 'Collapse/expand' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'DRAG_THRESHOLD_PX' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'dragState.dragging === false' },
+    @{ Text = $ThemeInjectorRsText; Marker = 'Click anywhere to collapse/expand' },
     @{ Text = $ThemeInjectorRsText; Marker = 'clampRootPosition' },
     @{ Text = $ThemeInjectorRsText; Marker = 'setPointerCapture' }
 )

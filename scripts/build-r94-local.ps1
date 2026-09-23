@@ -310,6 +310,7 @@ foreach ($Marker in @(
     'R94_ITEM_ID_DEDUPE_SPECIFICITY_RUNTIME',
     'function r94DirectItemIdForSurface(surface) {',
     'function r94CollectSemanticOutputSurfaces(turn) {',
+    'R94_NO_DESCENDANT_EXACT_BORROW_RUNTIME',
     'function r94ExactItemTimeForSurface(surface, turn, capability) {',
     'function r94ItemIdForSurface(surface) {',
     'function r94AssistantMessageSurface(node) {',
@@ -349,6 +350,7 @@ Write-Host 'R94_PER_OUTPUT_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - nested assistant message groups are timestamp units; explicit tool/agent/status surfaces remain independent'
 Write-Host '  - assistant prose surrounding embedded tool/agent/status cards keeps its own timestamp unit'
 Write-Host '  - nested wrapper item ids cannot steal the concrete tool/agent item timestamp'
+Write-Host '  - prose-bearing assistant wrappers never borrow an embedded tool item exact time'
 Write-Host '  - user-only wrappers are excluded from assistant timestamping'
 Write-Host '  - existing/remounted history is baselined and cannot receive a fresh host-now timestamp'
 Write-Host '  - native final sent-time wins; Transfer removes its final segment badge instead of duplicating Codex'

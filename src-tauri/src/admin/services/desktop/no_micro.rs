@@ -609,12 +609,23 @@ fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
     // Failure is reported but does not block the already-proven Micro/Accessory guard.
     let mcp_exit_guard = start_mcp_exit_guard(&executable);
 
+    let transfer_proxy_port = crate::admin::registry_io::load()
+        .ok()
+        .and_then(|cfg| {
+            cfg.get("settings")
+                .and_then(|settings| settings.get("proxyPort"))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u16::try_from(value).ok())
+        })
+        .unwrap_or(18080);
+
     let mut command = Command::new(&node);
     command
         .arg(&launcher)
         .arg(&executable)
         .args(extra_args)
         .env("CAS_NO_MICRO_STATUS_PATH", &status_path)
+        .env("CAS_TRANSFER_PROXY_PORT", transfer_proxy_port.to_string())
         .env(
             "CAS_NO_MICRO_PACKAGE_VERSION",
             report.package_version.as_deref().unwrap_or("unknown"),

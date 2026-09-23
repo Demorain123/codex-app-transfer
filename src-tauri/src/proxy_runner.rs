@@ -249,18 +249,34 @@ fn load_resolver_snapshot() -> Result<ResolverSnapshot, String> {
     }
 
     let cfg: Config = with_config_write(|raw| {
-        let retry_limit = raw
-            .get("settings")
+        let retry_settings = raw.get("settings");
+        let retry_count = retry_settings
             .and_then(|settings| settings.get("upstreamConnectRetries"))
             .and_then(serde_json::Value::as_u64)
-            .map(|value| value.min(15) as u8)
             .unwrap_or(0);
-        let applied_retry_limit =
-            codex_app_transfer_proxy::set_upstream_connect_retry_limit(retry_limit);
+        let retry_infinite = retry_settings
+            .and_then(|settings| settings.get("upstreamConnectRetryInfinite"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let retry_max_hours = retry_settings
+            .and_then(|settings| settings.get("upstreamConnectRetryMaxHours"))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|hours| hours.is_finite() && *hours > 0.0)
+            .unwrap_or(1.5);
+        let retry_max_duration_ms =
+            (retry_max_hours * 3_600_000.0).min(u64::MAX as f64).round().max(1.0) as u64;
+        let applied_retry_policy = codex_app_transfer_proxy::set_upstream_connect_retry_policy(
+            retry_count,
+            retry_infinite,
+            retry_max_duration_ms,
+        );
         codex_app_transfer_proxy::proxy_telemetry().logs.add(
             "INFO",
             format!(
-                "[transfer-upstream-retry-setting] configured={applied_retry_limit} source=proxy-start"
+                "[transfer-upstream-retry-setting] mode={} configured={} max_duration_ms={} source=proxy-start",
+                if applied_retry_policy.infinite { "infinite" } else { "finite" },
+                applied_retry_policy.retries,
+                applied_retry_policy.max_duration_ms,
             ),
         );
 

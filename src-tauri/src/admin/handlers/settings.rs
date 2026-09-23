@@ -73,19 +73,18 @@ pub(super) fn default_config_value() -> Value {
     })
 }
 
-fn retry_duration_to_ms(hours: u64, minutes: u64) -> Result<u64, String> {
+fn retry_duration_to_ms(hours: f64, minutes: u64) -> Result<u64, String> {
+    if !hours.is_finite() || hours < 0.0 {
+        return Err("upstreamConnectRetryMaxHours must be a non-negative number".to_owned());
+    }
     if minutes > 59 {
         return Err("upstreamConnectRetryMaxMinutes must be between 0 and 59".to_owned());
     }
-    let hours_ms = hours
-        .checked_mul(3_600_000)
-        .ok_or_else(|| "upstreamConnectRetryMaxHours is out of range".to_owned())?;
-    let minutes_ms = minutes
-        .checked_mul(60_000)
-        .ok_or_else(|| "upstreamConnectRetryMaxMinutes is out of range".to_owned())?;
-    hours_ms
-        .checked_add(minutes_ms)
-        .ok_or_else(|| "upstreamConnectRetry duration is out of range".to_owned())
+    let millis = hours * 3_600_000.0 + minutes as f64 * 60_000.0;
+    if !millis.is_finite() || millis < 0.0 || millis > u64::MAX as f64 {
+        return Err("upstreamConnectRetry duration is out of range".to_owned());
+    }
+    Ok(millis.round() as u64)
 }
 
 fn legacy_retry_hours_to_ms(hours: f64) -> Result<u64, String> {
@@ -129,8 +128,8 @@ fn transfer_retry_policy_from_settings(settings: &Value) -> Result<(u64, bool, u
             .get("upstreamConnectRetryMaxHours")
             .map(|value| {
                 value
-                    .as_u64()
-                    .ok_or_else(|| "upstreamConnectRetryMaxHours must be a non-negative integer".to_owned())
+                    .as_f64()
+                    .ok_or_else(|| "upstreamConnectRetryMaxHours must be a non-negative number".to_owned())
             })
             .transpose()?
             .unwrap_or(0);

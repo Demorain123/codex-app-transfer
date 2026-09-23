@@ -62,7 +62,7 @@ foreach ($Check in @(
     @{ Text = $RetryForwardText; Marker = 'CAS-R94-1-TRANSFER-UPSTREAM-CONNECT-RETRY' },
     @{ Text = $RetryForwardText; Marker = 'error.is_connect()' },
     @{ Text = $RetryForwardText; Marker = 'set_upstream_connect_retry_policy' },
-    @{ Text = $RetryForwardText; Marker = 'RetryWindowElapsed' },
+    @{ Text = $RetryForwardText; Marker = 'transfer-upstream-retry-time-limit' },
     @{ Text = $RetryForwardText; Marker = 'mode=infinite' },
     @{ Text = $RetryServerText; Marker = '/_cas/transfer-retry-status' },
     @{ Text = $RetryServerText; Marker = '"maxDurationMs"' },
@@ -110,6 +110,11 @@ foreach ($StaleRetryCap in @(
     }
 }
 Write-Host 'R94_1_NO_STALE_RETRY_CAP_PASS' -ForegroundColor Green
+
+if ($RetryForwardText.Contains('tokio::time::timeout')) {
+    throw 'r94.1 retry safety contract violated: request attempts must not be hard-cancelled by the retry window'
+}
+Write-Host 'R94_1_RETRY_NO_HARD_CANCEL_PASS' -ForegroundColor Green
 
 Write-Host 'R94_1_TRANSFER_RETRY_CONTRACT_PASS' -ForegroundColor Green
 

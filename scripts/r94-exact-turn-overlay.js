@@ -1708,11 +1708,64 @@
         exact.sourceElement.isConnected &&
         r94NativeTimestampVisible(exact.sourceElement)
       ) {
+        // R94_NATIVE_TIME_FULL_FORMAT_OVERLAY_RUNTIME
+        // Keep the native React DOM read-only. If Codex visibly renders only a
+        // short time such as "8:06 PM", but the native datetime/lifecycle gives
+        // us an exact epoch, cover that text with one Transfer overlay using the
+        // required YYYY-MM-DD HH:mm:ss format. This is one visual timestamp,
+        // not a duplicate native+Transfer timestamp.
+        const nativeVisibleText = normalizedText(exact.sourceElement);
+        const nativeAlreadyFull = /\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b/.test(nativeVisibleText);
+        const lifecycleRecord = capability.getRecord(ids.threadId, ids.turnId);
+        const lifecycleCompleted = r94EpochMillis(lifecycleRecord && lifecycleRecord.completedAt);
+        const exactEpoch = r94EpochMillis(exact.record && exact.record.epoch);
+        const coverEpoch = Number.isFinite(exactEpoch) ? exactEpoch : lifecycleCompleted;
+
+        if (!nativeAlreadyFull && Number.isFinite(coverEpoch)) {
+          const coverRecord = {
+            epoch: coverEpoch,
+            label: r94LocalDateTimeStamp(coverEpoch),
+            title: r94FullTimestampTitle(coverEpoch, 'exact: Codex native/turn completion time'),
+            source: 'native-time-full-format-overlay',
+          };
+          let nativeEntry = entryByTurn.get(turn);
+          if (!nativeEntry) {
+            nativeEntry = {
+              turn,
+              ids,
+              record: coverRecord,
+              anchor: exact.sourceElement,
+              mode: 'native-time-cover',
+              badge: null,
+            };
+            entryByTurn.set(turn, nativeEntry);
+          } else {
+            nativeEntry.ids = ids;
+            nativeEntry.record = coverRecord;
+            nativeEntry.anchor = exact.sourceElement;
+            nativeEntry.mode = 'native-time-cover';
+          }
+          if (!nativeEntry.badge || !nativeEntry.badge.isConnected) {
+            nativeEntry.badge = r94CreateBadge(overlayRoot, coverRecord);
+          } else {
+            nativeEntry.badge.textContent = coverRecord.label;
+            nativeEntry.badge.title = coverRecord.title;
+          }
+          nativeEntry.badge.setAttribute('data-cas-native-time-cover','true');
+          nativeEntry.badge.style.background = 'Canvas';
+          nativeEntry.badge.style.padding = '0 1px';
+          nativeEntry.badge.style.opacity = '1';
+          visibleEntries.add(nativeEntry);
+          r94SuppressNativeFinalSegmentBadge(turn);
+          diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
+          diagnostics.lastSource = coverRecord.source;
+          r94SyncDiagnostics();
+          return;
+        }
+
         // R94_NATIVE_TIMESTAMP_VISIBILITY_GATE_RUNTIME
-        // Native ownership suppresses the Transfer badge only while the native
-        // sent-time is actually visible. Codex can keep hidden/opacity-zero
-        // time nodes mounted in the DOM; mere connectivity is not user-visible
-        // timestamp ownership and previously caused badge=0/nativeSupp runaway.
+        // A native timestamp that already satisfies the full format owns the
+        // final timestamp; keep Transfer's final-segment badge suppressed.
         r94RemoveTurnBadge(turn);
         r94SuppressNativeFinalSegmentBadge(turn);
         diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
@@ -2040,8 +2093,11 @@
           continue;
         }
 
-        const x = Math.max(12, Math.min(innerWidth - 6, rect.right - 3));
-        const rawY = entry.mode === 'action-row' ? (rect.top - 2) : (rect.bottom - 2);
+        const nativeTimeCover = entry.mode === 'native-time-cover';
+        const x = Math.max(12, Math.min(innerWidth - 6, nativeTimeCover ? rect.right : (rect.right - 3)));
+        const rawY = nativeTimeCover
+          ? rect.top
+          : (entry.mode === 'action-row' ? (rect.top - 2) : (rect.bottom - 2));
         // R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME
         // Never clamp an offscreen anchor onto the viewport edge. That behavior
         // caused dozens of unrelated timestamps to pile up at the top/bottom
@@ -2050,7 +2106,7 @@
           entry.badge.style.display = 'none';
           continue;
         }
-        writes.push({ entry, x, y: rawY });
+        writes.push({ entry, x, y: rawY, nativeTimeCover });
       }
 
       for (const entry of Array.from(visibleSegmentEntries)) {
@@ -2082,7 +2138,9 @@
         badge.style.display = 'block';
         badge.style.transform = item.segment
           ? ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,0)')
-          : ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,-100%)');
+          : (item.nativeTimeCover
+            ? ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,0)')
+            : ('translate3d(' + item.x + 'px,' + item.y + 'px,0) translate(-100%,-100%)'));
       }
       r94PositionTimelineRail();
       r94SyncDiagnostics();

@@ -459,6 +459,15 @@ $MainProcessCollector = @'
       info: envelope.info,
     };
     safeEnvelope.turnId = envelope.turnId || null;
+    // R94_CODEX_TOKEN_DURATION_SAFE_ENVELOPE_RUNTIME
+    // Numeric-only timing/rate metadata; no transcript content crosses into
+    // the renderer.
+    safeEnvelope.usageDurationMs = Number.isFinite(Number(envelope.usageDurationMs))
+      ? Number(envelope.usageDurationMs)
+      : null;
+    safeEnvelope.outputTokenRate = Number.isFinite(Number(envelope.outputTokenRate))
+      ? Number(envelope.outputTokenRate)
+      : null;
     safeEnvelope.turnStartedAt = envelope.turnStartedAt ?? null;
     safeEnvelope.turnCompletedAt = envelope.turnCompletedAt ?? null;
     safeEnvelope.turnDurationMs = envelope.turnDurationMs ?? null;

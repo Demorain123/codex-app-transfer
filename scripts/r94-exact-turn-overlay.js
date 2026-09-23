@@ -924,6 +924,31 @@
     return true;
   }
 
+  function r94AssistantWrapperHasOwnProse(node) {
+    // R94_ASSISTANT_PROSE_WITH_TOOL_RUNTIME
+    // An assistant message may contain an embedded tool/agent/status card and
+    // still have its own prose before/after that card. Do not discard the
+    // assistant timestamp merely because an operational child exists.
+    if (!(node instanceof Element)) return false;
+    let walker = null;
+    try { walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT); } catch {}
+    if (!walker) return normalizedText(node).length >= 2;
+
+    let ownChars = 0;
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode;
+      const parent = textNode && textNode.parentElement;
+      if (!(parent instanceof Element) || insideOwnUi(parent)) continue;
+      const semanticOwner = parent.closest(R94_SEMANTIC_OUTPUT_SELECTOR);
+      if (semanticOwner instanceof Element && semanticOwner !== node && node.contains(semanticOwner)) {
+        continue;
+      }
+      ownChars += String(textNode.nodeValue || '').replace(/\s+/g, '').length;
+      if (ownChars >= 2) return true;
+    }
+    return false;
+  }
+
   function r94CollectSemanticOutputSurfaces(turn) {
     if (!(turn instanceof Element)) return [];
     const raw = [];
@@ -960,14 +985,21 @@
         if (otherKind === 'tool' || otherKind === 'agent' || otherKind === 'status') return false;
       }
 
-      // A generic assistant wrapper that only exists to contain a concrete
-      // operational item is not an additional model-output timestamp.
+      // A generic assistant wrapper that only contains a concrete operational
+      // item is not an additional model-output timestamp. If it also owns
+      // visible assistant prose, keep it: that prose is one of the user's
+      // meaningful "model output before/after tool" timestamp units.
       if (kind === 'assistant') {
+        let containsOperationalItem = false;
         for (const other of filtered) {
           if (other === node || !node.contains(other)) continue;
           const otherKind = r94SemanticKind(other);
-          if (otherKind === 'tool' || otherKind === 'agent' || otherKind === 'status') return false;
+          if (otherKind === 'tool' || otherKind === 'agent' || otherKind === 'status') {
+            containsOperationalItem = true;
+            break;
+          }
         }
+        if (containsOperationalItem && !r94AssistantWrapperHasOwnProse(node)) return false;
       }
       return true;
     });

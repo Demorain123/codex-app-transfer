@@ -79,7 +79,6 @@ foreach ($Check in @(
     @{ Text = $RetryLauncherText; Marker = "retry && retry.infinite ? '∞'" },
     @{ Text = $RetryLauncherText; Marker = 'retry.maxDurationMs' },
     @{ Text = $RetryLauncherText; Marker = 'retryRemainingMs' },
-    @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY READY ' },
     @{ Text = $RetryLauncherText; Marker = 'statusAvailable' },
     @{ Text = $RetryLauncherText; Marker = 'CAS-R94-1-TRANSFER-RETRY-MAIN-BRIDGE' },
     @{ Text = $RetryLauncherText; Marker = 'process.getBuiltinModule("http")' },
@@ -90,7 +89,6 @@ foreach ($Check in @(
     @{ Text = $OutputUiText; Marker = "retry && retry.infinite ? '∞'" },
     @{ Text = $OutputUiText; Marker = 'retry.maxDurationMs' },
     @{ Text = $OutputUiText; Marker = 'retryRemainingMs' },
-    @{ Text = $OutputUiText; Marker = 'TRANSFER RETRY READY ' },
     @{ Text = $OutputUiText; Marker = 'statusAvailable' },
     @{ Text = $OutputUiText; Marker = '__casTransferRetryBridge' },
     @{ Text = $OutputUiText; Marker = 'applyRetrySnapshot' },
@@ -128,6 +126,16 @@ foreach ($StaleRetryCap in @(
     }
 }
 Write-Host 'R94_1_NO_STALE_RETRY_CAP_PASS' -ForegroundColor Green
+
+foreach ($MisleadingIdleRetryUi in @(
+    'TRANSFER RETRY READY ',
+    'Transfer connect-stage retry policy is armed'
+)) {
+    if ($RetryLauncherText.Contains($MisleadingIdleRetryUi) -or $OutputUiText.Contains($MisleadingIdleRetryUi)) {
+        throw "r94.1 misleading idle retry UI reintroduced: $MisleadingIdleRetryUi"
+    }
+}
+Write-Host 'R94_1_RETRY_INCIDENT_ONLY_UI_PASS' -ForegroundColor Green
 
 if ($RetryForwardText.Contains('tokio::time::timeout')) {
     throw 'r94.1 retry safety contract violated: request attempts must not be hard-cancelled by the retry window'

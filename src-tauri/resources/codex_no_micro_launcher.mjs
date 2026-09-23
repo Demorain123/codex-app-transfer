@@ -174,6 +174,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
     fetchInstalled: false,
     retryTimer: null,
     retry: {
+      statusAvailable: false,
       active: false,
       activeCount: 0,
       attempt: 0,
@@ -226,11 +227,23 @@ function outputTelemetryRuntimeSource(proxyPort) {
     return (Math.max(0, Number(ms) || 0) / 3600000).toFixed(2);
   }
 
+  function retryRemainingMs(retry) {
+    const max = Math.max(0, Number(retry && retry.maxDurationMs) || 0);
+    const elapsed = Math.max(0, Number(retry && retry.elapsedMs) || 0);
+    return Math.max(0, max - elapsed);
+  }
+
   function transferRetryLabel(retry) {
     const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
-    let label = 'TRANSFER RETRY ' + (Number(retry && retry.attempt) || 0) + '/' + denominator;
+    const attempt = Number(retry && retry.attempt) || 0;
+    let label = (retry && retry.active ? 'TRANSFER RETRY ' : 'TRANSFER RETRY READY ') + attempt + '/' + denominator;
     if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
-      label += ' · ' + retryHours(retry.elapsedMs) + 'h/' + retryHours(retry.maxDurationMs) + 'h';
+      const max = Number(retry.maxDurationMs) || 0;
+      if (retry.active) {
+        label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
+      } else {
+        label += ' · window ' + retryHours(max) + 'h';
+      }
     }
     return label;
   }
@@ -246,7 +259,8 @@ function outputTelemetryRuntimeSource(proxyPort) {
       '#' + HUD_ID + '{position:fixed;right:10px;bottom:10px;z-index:2147483646;display:none;align-items:center;gap:7px;padding:3px 7px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:999px;background:color-mix(in srgb,Canvas 88%,transparent);color:color-mix(in srgb,CanvasText 64%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 8px color-mix(in srgb,CanvasText 10%,transparent);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;pointer-events:none;}',
       '#' + HUD_ID + '[data-visible=\"true\"]{display:inline-flex;}',
       '#' + HUD_ID + '[data-transfer-retrying=\"true\"]{border-color:color-mix(in srgb,#e6a700 58%,transparent);background:color-mix(in srgb,#5a4300 82%,Canvas);color:#ffe08a;font-weight:700;}',
-      '[' + RETRY_CHIP_ATTR + ']{display:inline-flex;align-items:center;margin-left:8px;padding:1px 6px;border:1px solid color-mix(in srgb,#e6a700 55%,transparent);border-radius:999px;background:color-mix(in srgb,#5a4300 78%,Canvas);color:#ffe08a;font:700 9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;pointer-events:none;}',
+      '[' + RETRY_CHIP_ATTR + ']{display:inline-flex;align-items:center;margin-left:8px;padding:1px 6px;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:999px;background:color-mix(in srgb,Canvas 88%,transparent);color:color-mix(in srgb,CanvasText 58%,transparent);font:600 9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;pointer-events:none;}',
+      '[' + RETRY_CHIP_ATTR + '][data-active="true"]{border-color:color-mix(in srgb,#e6a700 55%,transparent);background:color-mix(in srgb,#5a4300 78%,Canvas);color:#ffe08a;font-weight:700;}',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
   }
@@ -364,7 +378,11 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function updateRetryChips() {
     const retry = state.retry;
     const existing = Array.from(document.querySelectorAll('[' + RETRY_CHIP_ATTR + ']'));
-    if (!retry || !retry.active) {
+    const policyEnabled =
+      retry &&
+      retry.statusAvailable === true &&
+      (retry.infinite === true || Number(retry.maxRetries) > 0);
+    if (!policyEnabled) {
       existing.forEach(function(node) { node.remove(); });
       return 0;
     }
@@ -390,9 +408,12 @@ function outputTelemetryRuntimeSource(proxyPort) {
       bar.appendChild(chip);
     }
     if (chip.textContent !== label) chip.textContent = label;
+    chip.setAttribute('data-active', retry.active ? 'true' : 'false');
     chip.setAttribute(
       'title',
-      'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
+      retry.active
+        ? 'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
+        : 'Transfer connect-stage retry policy is armed and waiting for a qualifying failure.'
     );
     existing.forEach(function(node) {
       if (node !== chip) node.remove();
@@ -404,7 +425,11 @@ function outputTelemetryRuntimeSource(proxyPort) {
     if (!hud) return;
     const r = state.retry;
     const retryChips = updateRetryChips();
-    if (r && r.active) {
+    const retryPolicyEnabled =
+      r &&
+      r.statusAvailable === true &&
+      (r.infinite === true || Number(r.maxRetries) > 0);
+    if (retryPolicyEnabled) {
       if (retryChips > 0) {
         hud.removeAttribute('data-visible');
         hud.removeAttribute('data-transfer-retrying');
@@ -412,12 +437,17 @@ function outputTelemetryRuntimeSource(proxyPort) {
         return;
       }
       const retryText = transferRetryLabel(r) +
-        (r.activeCount > 1 ? ' · active ' + r.activeCount : '') +
-        (r.delayMs ? ' · wait ' + r.delayMs + 'ms' : '');
+        (r.active && r.activeCount > 1 ? ' · active ' + r.activeCount : '') +
+        (r.active && r.delayMs ? ' · wait ' + r.delayMs + 'ms' : '');
       if (hud.textContent !== retryText) hud.textContent = retryText;
       hud.setAttribute('data-visible', 'true');
-      hud.setAttribute('data-transfer-retrying', 'true');
-      hud.setAttribute('title', 'Transfer is retrying an upstream connect-stage failure. Codex native retry budget is unchanged.');
+      if (r.active) {
+        hud.setAttribute('data-transfer-retrying', 'true');
+        hud.setAttribute('title', 'Transfer is retrying an upstream connect-stage failure. Codex native retry budget is unchanged.');
+      } else {
+        hud.removeAttribute('data-transfer-retrying');
+        hud.setAttribute('title', 'Transfer connect-stage retry policy is armed.');
+      }
       return;
     }
     hud.removeAttribute('data-transfer-retrying');
@@ -468,6 +498,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       if (!response.ok) throw new Error('retry status http ' + response.status);
       const value = await response.json();
       const retry = state.retry;
+      retry.statusAvailable = true;
       retry.active = value && value.active === true;
       retry.activeCount = Number(value && value.activeCount) || 0;
       retry.attempt = Number(value && value.attempt) || 0;
@@ -481,6 +512,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       nextDelay = retry.active ? 200 : ((retry.maxRetries > 0 || retry.infinite) ? 700 : 2000);
       schedule(0);
     } catch {
+      state.retry.statusAvailable = false;
       state.retry.active = false;
       schedule(0);
       nextDelay = 2000;

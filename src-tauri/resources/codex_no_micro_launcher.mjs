@@ -10,6 +10,7 @@ const OUTPUT_TELEMETRY_RUNTIME = "r73.1";
 const fixDirectory = path.dirname(fileURLToPath(import.meta.url));
 const statusPath = process.env.CAS_NO_MICRO_STATUS_PATH || path.join(fixDirectory, "last-launch.json");
 const packageVersion = process.env.CAS_NO_MICRO_PACKAGE_VERSION || "unknown";
+const transferProxyPort = Number.parseInt(process.env.CAS_TRANSFER_PROXY_PORT || "0", 10) || 0;
 const executable = process.argv[2];
 const extraArguments = process.argv.slice(3);
 
@@ -127,7 +128,11 @@ function safeError(error) {
 // auth, or model responses. Stable assistant selectors / MutationObserver ideas were informed by
 // MIT-licensed KevinKE93/Codex-Monitor and Minghou-Lei/codex-context-used-meter; the optional
 // output-rate concept was informed by MIT-licensed petergpt/codex-speed-monitor.
-function outputTelemetryRuntimeSource() {
+function outputTelemetryRuntimeSource(proxyPort) {
+  const retryStatusUrl =
+    Number.isInteger(proxyPort) && proxyPort > 0 && proxyPort <= 65535
+      ? JSON.stringify(`http://127.0.0.1:${proxyPort}/_cas/transfer-retry-status`)
+      : "null";
   return String.raw`
 (() => {
   'use strict';
@@ -140,6 +145,8 @@ function outputTelemetryRuntimeSource() {
   const FIRST_SEEN_ATTR = 'data-cas-output-first-seen';
   const HUD_ID = 'cas-output-telemetry-hud';
   const APPLY_KEY = '__casOutputTelemetryApplying';
+  const RETRY_STATUS_URL = ${retryStatusUrl};
+  const RETRY_MARKER = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY';
 
   const old = window[ROOT_KEY];
   if (old && old.version === VERSION) {
@@ -154,6 +161,16 @@ function outputTelemetryRuntimeSource() {
     observer: null,
     timer: null,
     fetchInstalled: false,
+    retryTimer: null,
+    retry: {
+      active: false,
+      activeCount: 0,
+      attempt: 0,
+      maxRetries: 0,
+      delayMs: 0,
+      provider: '',
+      reason: '',
+    },
     metrics: {
       seen: false,
       contextTokens: null,
@@ -505,7 +522,7 @@ function outputTelemetryRuntimeSource() {
 
 function stubExpression(expectedPid, expectedExecutable) {
   const expectedPath = JSON.stringify(normalizedExecutable(expectedExecutable));
-  const telemetrySource = JSON.stringify(outputTelemetryRuntimeSource());
+  const telemetrySource = JSON.stringify(outputTelemetryRuntimeSource(transferProxyPort));
   return String.raw`
 (() => {
   const actualPath = String(process.execPath || "").replaceAll("\\", "/").toLowerCase();

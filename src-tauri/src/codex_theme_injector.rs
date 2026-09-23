@@ -1490,10 +1490,12 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
           ? ('OK · active=' + (s.retryActive ? 'YES' : 'NO') +
              ' · policy=' + (s.retryInfinite ? '∞' : s.retryMax) +
              (s.retryActive ? ' · attempt=' + s.retryAttempt + '/' + (s.retryInfinite ? '∞' : s.retryMax) : '') +
-             (s.retryInfinite && s.retryMaxDurationMs > 0
-               ? (s.retryActive
-                   ? ' · left=' + (s.retryRemainingMs / 3600000).toFixed(2) + 'h/' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h'
-                   : ' · window=' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h')
+             (s.retryInfinite
+               ? (s.retryMaxDurationMs > 0
+                   ? (s.retryActive
+                       ? ' · left=' + (s.retryRemainingMs / 3600000).toFixed(2) + 'h/' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h'
+                       : ' · window=' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h')
+                   : ' · time=unlimited')
                : ''))
           : ('UNAVAILABLE' +
              (s.retryTransport ? ' · via=' + escapeHtml(s.retryTransport) : '') +

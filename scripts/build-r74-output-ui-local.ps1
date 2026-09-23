@@ -99,6 +99,9 @@ function outputTelemetryRuntimeSource(proxyPort) {
       activeCount: 0,
       attempt: 0,
       maxRetries: 0,
+      infinite: false,
+      elapsedMs: 0,
+      maxDurationMs: 0,
       delayMs: 0,
       reason: '',
     },
@@ -149,6 +152,19 @@ function outputTelemetryRuntimeSource(proxyPort) {
     if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
     return String(Math.round(value));
   }
+  function retryHours(ms) {
+    return (Math.max(0, Number(ms) || 0) / 3600000).toFixed(2);
+  }
+
+  function transferRetryLabel(retry) {
+    const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
+    let label = 'TRANSFER RETRY ' + (Number(retry && retry.attempt) || 0) + '/' + denominator;
+    if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
+      label += ' · ' + retryHours(retry.elapsedMs) + 'h/' + retryHours(retry.maxDurationMs) + 'h';
+    }
+    return label;
+  }
+
   function parseCompactNumber(text) {
     const match = String(text || '').trim().match(/^([\d,.]+)\s*([KMB])?$/i);
     if (!match) return null;
@@ -849,7 +865,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
         'white-space:nowrap;pointer-events:none;z-index:2147483646;';
     }
     chip.textContent =
-      'TRANSFER RETRY ' + retry.attempt + '/' + retry.maxRetries +
+      transferRetryLabel(retry) +
       (retry.activeCount > 1 ? ' · active ' + retry.activeCount : '') +
       (retry.delayMs ? ' · wait ' + retry.delayMs + 'ms' : '');
     chip.title =
@@ -880,9 +896,12 @@ function outputTelemetryRuntimeSource(proxyPort) {
       retry.activeCount = Number(value && value.activeCount) || 0;
       retry.attempt = Number(value && value.attempt) || 0;
       retry.maxRetries = Number(value && value.maxRetries) || 0;
+      retry.infinite = value && value.infinite === true;
+      retry.elapsedMs = Number(value && value.elapsedMs) || 0;
+      retry.maxDurationMs = Number(value && value.maxDurationMs) || 0;
       retry.delayMs = Number(value && value.delayMs) || 0;
       retry.reason = String((value && value.reason) || '');
-      nextDelay = retry.active ? 200 : (retry.maxRetries > 0 ? 700 : 2000);
+      nextDelay = retry.active ? 200 : ((retry.maxRetries > 0 || retry.infinite) ? 700 : 2000);
       renderTransferRetry();
     } catch {
       state.retry.active = false;
@@ -1032,6 +1051,8 @@ try {
         'CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY',
         '/_cas/transfer-retry-status',
         'TRANSFER RETRY ',
+        "retry.infinite ? '∞'",
+        'retry.maxDurationMs',
         'pollTransferRetryStatus'
     )) {
         if (-not $Launcher.Contains($Marker)) {

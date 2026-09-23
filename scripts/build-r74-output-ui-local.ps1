@@ -167,14 +167,10 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function transferRetryLabel(retry) {
     const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
     const attempt = Number(retry && retry.attempt) || 0;
-    let label = (retry && retry.active ? 'TRANSFER RETRY ' : 'TRANSFER RETRY READY ') + attempt + '/' + denominator;
+    let label = 'TRANSFER RETRY ' + attempt + '/' + denominator;
     if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
       const max = Number(retry.maxDurationMs) || 0;
-      if (retry.active) {
-        label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
-      } else {
-        label += ' · window ' + retryHours(max) + 'h';
-      }
+      label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
     }
     return label;
   }
@@ -877,11 +873,8 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function renderTransferRetry() {
     let chip = document.getElementById(RETRY_ID);
     const retry = state.retry;
-    const policyEnabled =
-      retry &&
-      retry.statusAvailable === true &&
-      (retry.infinite === true || Number(retry.maxRetries) > 0);
-    if (!policyEnabled) {
+    // Normal Codex UI must stay silent while healthy; this is an incident badge.
+    if (!retry || retry.active !== true) {
       if (chip) chip.remove();
       return;
     }
@@ -902,15 +895,14 @@ function outputTelemetryRuntimeSource(proxyPort) {
     }
     chip.textContent =
       transferRetryLabel(retry) +
-      (retry.active && retry.activeCount > 1 ? ' · active ' + retry.activeCount : '') +
-      (retry.active && retry.delayMs ? ' · wait ' + retry.delayMs + 'ms' : '');
-    chip.style.borderColor = retry.active ? 'rgba(230,167,0,.62)' : 'rgba(128,128,128,.32)';
-    chip.style.background = retry.active ? 'rgba(90,67,0,.88)' : 'rgba(128,128,128,.10)';
-    chip.style.color = retry.active ? '#ffe08a' : 'inherit';
-    chip.style.fontWeight = retry.active ? '700' : '600';
-    chip.title = retry.active
-      ? 'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
-      : 'Transfer connect-stage retry policy is armed and waiting for a qualifying failure.';
+      (retry.activeCount > 1 ? ' · active ' + retry.activeCount : '') +
+      (retry.delayMs ? ' · wait ' + retry.delayMs + 'ms' : '');
+    chip.style.borderColor = 'rgba(230,167,0,.62)';
+    chip.style.background = 'rgba(90,67,0,.88)';
+    chip.style.color = '#ffe08a';
+    chip.style.fontWeight = '700';
+    chip.title =
+      'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.';
 
     if (inline) {
       chip.style.position = 'static';

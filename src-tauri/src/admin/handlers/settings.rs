@@ -171,6 +171,19 @@ pub(super) fn normalize_imported_config(data: &Value) -> Result<Value, String> {
             settings_obj.insert(key.clone(), value.clone());
         }
     }
+    if let Some(value) = settings
+        .get("upstreamConnectRetries")
+    {
+        match value.as_u64() {
+            Some(value) if value <= 15 => {}
+            _ => {
+                return Err(
+                    "settings.upstreamConnectRetries must be an integer between 0 and 15"
+                        .to_owned(),
+                )
+            }
+        }
+    }
     normalized["settings"] = settings;
 
     let providers = source_obj

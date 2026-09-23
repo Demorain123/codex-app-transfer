@@ -73,13 +73,6 @@ pub struct Settings {
     #[serde(default = "default_codex_network_access")]
     pub codex_network_access: bool,
 
-    /// Transfer 自己的上游连接阶段重试次数。0=关闭，最大 15。
-    ///
-    /// 只用于 reqwest connect-stage error；不修改 Codex 内置 openai provider 的
-    /// stream_max_retries，也不重放普通 4xx/5xx 或已经开始返回的 SSE。
-    #[serde(default = "default_upstream_connect_retries")]
-    pub upstream_connect_retries: u8,
-
     /// 内置联网抓取工具的后端档位 (MOC-144): `off`(不暴露抓取工具) / `curl`(reqwest
     /// 静态 GET) / `wreq`(浏览器 TLS 指纹, 绕 Cloudflare JS 挑战) / `headless`(headless
     /// Chromium 跑 JS, 取渲染后 DOM)。**独立于** [`Self::codex_network_access`](后者管
@@ -100,10 +93,6 @@ pub struct Settings {
 
 fn default_codex_network_access() -> bool {
     false
-}
-
-fn default_upstream_connect_retries() -> u8 {
-    0
 }
 
 /// 内置联网抓取后端的默认档(MOC-215: off→auto,开箱即用)。**单一真源** —— typed serde 默认
@@ -134,7 +123,6 @@ impl Default for Settings {
             restore_codex_on_exit: true,
             update_url: DEFAULT_UPDATE_URL.to_owned(),
             codex_network_access: false,
-            upstream_connect_retries: default_upstream_connect_retries(),
             web_fetch_backend: default_web_fetch_backend(),
             trace_viewer_enabled: false,
         }

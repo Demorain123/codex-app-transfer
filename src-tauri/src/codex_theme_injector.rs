@@ -1119,6 +1119,20 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
   const STATE_KEY = '__casTransferRuntimeDebug';
   let dragState = null;
 
+  // CAS-R94-1-RUNTIME-DEBUG-COLLAPSE
+  // A short click toggles compact/expanded mode; an actual pointer move remains
+  // a drag. The state lives only on the DOM node for this renderer session.
+  const isCollapsed = (root) =>
+    root.getAttribute('data-cas-runtime-debug-collapsed') === 'true';
+
+  const toggleCollapsed = (root) => {
+    root.setAttribute(
+      'data-cas-runtime-debug-collapsed',
+      isCollapsed(root) ? 'false' : 'true'
+    );
+    render();
+  };
+
   try {
     const previous = window[STATE_KEY];
     if (previous && previous.timer) clearInterval(previous.timer);
@@ -1153,6 +1167,9 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
         pointerId: event.pointerId,
         offsetX: event.clientX - rect.left,
         offsetY: event.clientY - rect.top,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
       };
       root.style.right = 'auto';
       root.style.left = rect.left + 'px';
@@ -1163,6 +1180,12 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
 
     root.onpointermove = (event) => {
       if (!dragState || dragState.pointerId !== event.pointerId) return;
+      if (
+        Math.abs(event.clientX - dragState.startX) > 4 ||
+        Math.abs(event.clientY - dragState.startY) > 4
+      ) {
+        dragState.moved = true;
+      }
       const maxX = Math.max(0, window.innerWidth - root.offsetWidth);
       const maxY = Math.max(0, window.innerHeight - root.offsetHeight);
       const x = Math.min(maxX, Math.max(0, event.clientX - dragState.offsetX));
@@ -1173,8 +1196,10 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
 
     const stopDrag = (event) => {
       if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const shouldToggle = event.type === 'pointerup' && !dragState.moved;
       try { root.releasePointerCapture(event.pointerId); } catch {}
       dragState = null;
+      if (shouldToggle) toggleCollapsed(root);
     };
     root.onpointerup = stopDrag;
     root.onpointercancel = stopDrag;
@@ -1189,6 +1214,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     root = document.createElement('aside');
     root.id = ROOT_ID;
     root.setAttribute('data-cas-runtime-debug', META.protocol);
+    root.setAttribute('data-cas-runtime-debug-collapsed', 'false');
+    root.setAttribute('title', 'Click to collapse/expand · drag to move');
     root.style.cssText = [
       'position:fixed',
       'top:12px',
@@ -1364,12 +1391,26 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const root = ensureRoot();
     const s = snapshot();
     const colors = palette[s.state] || palette.missing;
+    const collapsed = isCollapsed(root);
     root.style.borderColor = colors[0];
     root.style.background = colors[1];
+    root.style.minWidth = collapsed ? '250px' : '350px';
+    root.style.padding = collapsed ? '7px 9px' : '9px 11px';
     root.setAttribute('data-cas-runtime-debug-state', s.state);
+
+    const header =
+      '<div style="font-size:12px;font-weight:800;letter-spacing:.03em;display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+        '<span>TRANSFER DEBUG · ' + escapeHtml(s.state.toUpperCase()) + ' · ' + escapeHtml(META.protocol) + '</span>' +
+        '<span aria-hidden="true" style="opacity:.78">' + (collapsed ? '▸' : '▾') + '</span>' +
+      '</div>';
+
+    if (collapsed) {
+      root.innerHTML = header;
+      return;
+    }
+
     root.innerHTML = [
-      '<div style="font-size:12px;font-weight:800;letter-spacing:.03em">TRANSFER DEBUG · ' +
-        escapeHtml(s.state.toUpperCase()) + ' · ' + escapeHtml(META.protocol) + '</div>',
+      header,
       '<div style="margin-top:4px">Transfer ' + escapeHtml(META.transferRevision) +
         ' · v' + escapeHtml(META.transferVersion) +
         ' · launch=' + escapeHtml(META.launchMode) + '</div>',

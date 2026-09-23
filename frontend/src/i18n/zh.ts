@@ -734,7 +734,13 @@ export default {
     "仅通过本应用启动 Codex 时生效，在 Codex 內显示用量面板:上下文占用、Tokens 速率与累计以及额度信息。",
   "settings.upstreamConnectRetries": "Transfer 上游连接重试次数",
   "settings.upstreamConnectRetriesHint":
-    "0 = 关闭，1–15 = Transfer 在尚未收到 HTTP 响应时遇到连接阶段错误后的额外重试次数。不会修改 Codex 原生 Reconnecting x/5，也不会重放普通 4xx/5xx 或已经开始的 SSE。No Lagging 启动时 Codex 内会显示 Transfer Retry 状态。",
+    "有限次数模式。0 = 关闭；正整数不设 15 次上限，可填写 20、99、500 等。仅重试尚未收到 HTTP 响应的连接阶段错误，不会修改 Codex 原生 Reconnecting x/5，也不会重放普通 4xx/5xx 或已经开始的 SSE。",
+  "settings.upstreamConnectRetryInfinite": "无限次数重试",
+  "settings.upstreamConnectRetryInfiniteHint":
+    "开启后忽略上面的次数，持续重试直到达到时间上限。Transfer 日志和 No Lagging Codex 状态会显示累计重试次数与已用时间。",
+  "settings.upstreamConnectRetryMaxHours": "无限重试最长持续时间（小时）",
+  "settings.upstreamConnectRetryMaxHoursHint":
+    "必须大于 0，可输入小数，例如 1.5 = 最长 1 小时 30 分钟。达到时间上限后停止 Transfer 内部重试并把最后错误交回 Codex。",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy 账号切换阈值",
   "settings.workbuddyQuotaGuardThresholdHint":
     "WorkBuddy 账号池剩余积分低于此值时自动切到下一个有额度的账号(默认 20)。",

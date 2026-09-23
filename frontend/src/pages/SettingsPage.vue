@@ -255,6 +255,7 @@ const codexNetworkAccess = toggle('codexNetworkAccess', false)
 const exposeAllProviderModels = toggle('exposeAllProviderModels', false)
 const showGrayProviders = toggle('showGrayProviders', false)
 const runtimeDebugMode = toggle('runtimeDebugMode', false)
+const upstreamConnectRetryInfinite = toggle('upstreamConnectRetryInfinite', false)
 const mcpCredentialsPortableStore = toggle('mcpCredentialsPortableStore', true)
 const hideDockIcon = toggle('hideDockIcon', false)
 // [MOC-277] superpowers 强约束插件开关:默认态由后端算(已自装 superpowers → 默认关,避免双装),
@@ -589,13 +590,22 @@ function onPort(key: 'proxyPort' | 'adminPort', e: Event) {
   const v = Number((e.target as HTMLInputElement).value)
   if (Number.isFinite(v) && v > 0) void persist({ [key]: v })
 }
-// Transfer-only 上游连接重试:0=关闭,1..15=连接阶段失败后的额外重试次数。
+// Transfer-only 上游连接重试:有限模式不设产品上限；0=关闭。
 function onUpstreamConnectRetries(e: Event) {
   const input = e.target as HTMLInputElement
   const raw = Number(input.value)
-  const value = Number.isFinite(raw) ? Math.max(0, Math.min(15, Math.trunc(raw))) : 0
+  const value =
+    Number.isFinite(raw) && raw >= 0 ? Math.trunc(raw) : 0
   input.value = String(value)
   void persist({ upstreamConnectRetries: value })
+}
+
+function onUpstreamConnectRetryMaxHours(e: Event) {
+  const input = e.target as HTMLInputElement
+  const raw = Number(input.value)
+  const value = Number.isFinite(raw) && raw > 0 ? raw : 1.5
+  input.value = String(value)
+  void persist({ upstreamConnectRetryMaxHours: value })
 }
 
 // WorkBuddy 账号池配额守护阈值:剩余积分低于此值自动切换账号(默认 20)。
@@ -713,9 +723,29 @@ const UPDATE_REPO_URL = 'https://github.com/Cmochance/codex-app-transfer'
           class="settings-num"
           :value="store.num('upstreamConnectRetries', 0)"
           min="0"
-          max="15"
           step="1"
+          :disabled="upstreamConnectRetryInfinite"
           @change="onUpstreamConnectRetries"
+        />
+      </SettingsRow>
+      <SettingsRow
+        :title="t('settings.upstreamConnectRetryInfinite')"
+        :description="t('settings.upstreamConnectRetryInfiniteHint')"
+      >
+        <AppSwitch v-model="upstreamConnectRetryInfinite" />
+      </SettingsRow>
+      <SettingsRow
+        v-if="upstreamConnectRetryInfinite"
+        :title="t('settings.upstreamConnectRetryMaxHours')"
+        :description="t('settings.upstreamConnectRetryMaxHoursHint')"
+      >
+        <input
+          type="number"
+          class="settings-num"
+          :value="store.num('upstreamConnectRetryMaxHours', 1.5)"
+          min="0.01"
+          step="0.1"
+          @change="onUpstreamConnectRetryMaxHours"
         />
       </SettingsRow>
       <SettingsRow :title="t('settings.webFetchBackend')" :description="t('settings.webFetchBackendHint')">

@@ -139,6 +139,51 @@ $R94TurnHelpers = @'
     return exact && typeof exact === 'object' ? exact : null;
   }
 
+  function r94RecentOutputMap() {
+    let map = state.metrics && state.metrics.r94RecentOutputsByThread;
+    if (!(map instanceof Map)) {
+      map = new Map();
+      if (state.metrics) state.metrics.r94RecentOutputsByThread = map;
+    }
+    return map;
+  }
+
+  function r94StoreRecentOutputs(threadId, outputs) {
+    // R94_ASSISTANT_OUTPUT_METADATA_INGEST_RUNTIME
+    // The main-process collector sends only turn/item identity, phase and
+    // timestamps from Codex rollout rows. No assistant text crosses this bridge.
+    const normalizedThread = r94NormalizePaneId(threadId);
+    if (!normalizedThread || !Array.isArray(outputs)) return;
+    const safe = outputs.slice(-96).map(function(output) {
+      if (!output || typeof output !== 'object') return null;
+      const turnId = String(output.turnId || '').trim().toLowerCase();
+      const atMs = Number(output.atMs);
+      if (!turnId || !Number.isFinite(atMs) || atMs <= 0) return null;
+      return {
+        turnId,
+        itemId: output.itemId ? String(output.itemId) : '',
+        phase: output.phase ? String(output.phase).toLowerCase() : '',
+        atMs,
+        source: String(output.source || 'rollout'),
+      };
+    }).filter(Boolean);
+    const map = r94RecentOutputMap();
+    map.delete(normalizedThread);
+    map.set(normalizedThread, safe);
+    while (map.size > 64) {
+      const oldest = map.keys().next().value;
+      if (!oldest) break;
+      map.delete(oldest);
+    }
+    try {
+      window.__casR94OutputEventDiagnostics = {
+        threads: map.size,
+        lastThread: normalizedThread,
+        outputs: safe.length,
+      };
+    } catch {}
+  }
+
   function r94OfficialUsageFromInfo(info) {
     if (!info || typeof info !== 'object') return null;
     const last = info.last_token_usage && typeof info.last_token_usage === 'object'
@@ -320,6 +365,7 @@ $R94ExternalIngest = @'
     const info = envelope.info && typeof envelope.info === 'object' ? envelope.info : null;
 
     // Lifecycle identity is useful before the first token_count snapshot exists.
+    r94StoreRecentOutputs(threadId, envelope.recentOutputs);
     r94OfferRolloutEnvelope(envelope, threadId, info);
     if (!info) {
       try { refreshUi(); } catch {}

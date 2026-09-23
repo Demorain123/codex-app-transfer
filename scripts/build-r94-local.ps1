@@ -487,6 +487,7 @@ Write-Host '  - runtime Debug MATCH requires an r94-inline-safe bar and editorLe
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',
     'R94_MULTI_PANE_USAGE_OWNERSHIP_RUNTIME',
+    'R94_MULTI_PANE_THREAD_FALLBACK_FAIL_CLOSED_RUNTIME',
     'R94_MULTI_PANE_USAGE_OWNERSHIP_PASS',
     'r94ExternalExactByThread',
     'r94StoreExternalExact(exact);',
@@ -518,6 +519,10 @@ foreach ($Marker in @(
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }
 }
+if ($TurnNotificationFinalizer.Contains('if (!threadId && index === 0) threadId = externalThreadId;')) {
+    throw 'r94 split-pane ownership regressed to process-global first-pane thread fallback'
+}
+Write-Host 'R94_MULTI_PANE_THREAD_FALLBACK_FAIL_CLOSED_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Forbidden in @(
     'R94_TURN_STATUS_BASE_OWNER_PASS',
     'R94_TURN_STATUS_BASE_OWNER_RUNTIME'

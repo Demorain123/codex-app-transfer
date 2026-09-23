@@ -295,6 +295,7 @@ $R94TurnHelpers = @'
           startedAt: terminal.startedAt ?? null,
           completedAt: terminal.completedAt ?? null,
           durationMs: terminal.durationMs ?? null,
+          timeToFirstTokenMs: terminal.timeToFirstTokenMs ?? null,
         },
       });
     } else if (usageTurnId && Number.isFinite(Number(envelope.turnCompletedAt))) {
@@ -306,6 +307,7 @@ $R94TurnHelpers = @'
           startedAt: envelope.turnStartedAt ?? null,
           completedAt: envelope.turnCompletedAt,
           durationMs: envelope.turnDurationMs ?? null,
+          timeToFirstTokenMs: envelope.turnTimeToFirstTokenMs ?? null,
         },
       });
     }
@@ -337,6 +339,8 @@ $R94TurnHelpers = @'
       threadId: r94NormalizePaneId(record.threadId),
       turnId: String(record.turnId || ''),
       usageObservedAtMs: Number(record.usageObservedAtMs) || null,
+      outputTokenRate: Number(record.outputTokenRate) || null,
+      usageDurationMs: Number(record.usageDurationMs) || null,
       inputTokens,
       cachedInputTokens,
       outputTokens,
@@ -424,6 +428,13 @@ $R94ExternalIngest = @'
         state.metrics.externalExactFingerprint = fingerprint;
       }
       exact.changedAt = Number(state.metrics.externalExactChangedAt) || Date.now();
+      exact.usageDurationMs = Number.isFinite(Number(envelope.usageDurationMs))
+        ? Number(envelope.usageDurationMs)
+        : null;
+      exact.outputTokenRate = Number.isFinite(Number(envelope.outputTokenRate)) &&
+        Number(envelope.outputTokenRate) > 0 && Number(envelope.outputTokenRate) < 10000
+        ? Number(envelope.outputTokenRate)
+        : null;
       state.metrics.externalExact = exact;
       r94StoreExternalExact(exact);
     }
@@ -648,16 +659,24 @@ $R94StatusHtml = @'
     // Codex native tok/s may be global, stale between polls, or cover a
     // different model-response interval. Only exact same-thread+same-turn
     // output-token deltas are eligible for the pane-local speed chip.
-    const speed = turnExact
-      ? r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity)
-      : {
+    const collectorRate = Number(turnExact && turnExact.outputTokenRate);
+    const speed = turnExact && Number.isFinite(collectorRate) && collectorRate > 0
+      ? {
+          text: (collectorRate >= 100 ? collectorRate.toFixed(0) : collectorRate.toFixed(1)) + ' tok/s',
+          source: 'rollout-token-interval',
+          confidence: 'matched-token-interval',
+          title: 'Pane-local output rate from the same Codex rollout token_count interval that produced this exact output_tokens snapshot.',
+        }
+      : (turnExact
+        ? r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity)
+        : {
           text: '-- tok/s',
           source: nativeFallback ? 'native-global-not-reused' : 'timing-unavailable',
           confidence: 'unavailable',
           title: nativeFallback
             ? 'Visible native/global Codex tok/s is intentionally not re-attributed to this pane.'
-            : 'Pane-local tok/s requires exact same-turn output-token samples.',
-        };
+            : 'Pane-local tok/s requires a matched Codex rollout token interval or exact same-turn output-token samples.',
+        });
     const exactSource = turnExact
       ? 'exact-turn-capability'
       : (threadExact

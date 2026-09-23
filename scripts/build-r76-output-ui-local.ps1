@@ -206,6 +206,11 @@ $MainProcessCollector = @'
         let latestUsage = null;
         let latestTerminal = null;
         let latestItemEventAt = 0;
+        // R94_CODEX_TOKEN_DURATION_RUNTIME
+        // Same principle used by tokscale's Codex parser: each accepted
+        // token_count owns the interval since the previous accepted token row,
+        // with turn_context/task_started as the first interval anchor.
+        let lastAcceptedTokenAt = null;
 
         const ensureTurn = (turnId) => {
           const id = normalizeTurnId(turnId);
@@ -266,6 +271,7 @@ $MainProcessCollector = @'
               const started = Date.parse(String(payload?.started_at || payload?.startedAt || row?.timestamp || ''));
               if (meta && Number.isFinite(started)) meta.startedAt = started;
               if (meta) meta.status = String(payload?.status || 'inProgress');
+              if (Number.isFinite(started)) lastAcceptedTokenAt = started;
             }
             continue;
           }
@@ -278,6 +284,8 @@ $MainProcessCollector = @'
               const meta = ensureTurn(id);
               if (meta && model) meta.model = model;
             }
+            const contextAt = rowEpoch(row, NaN);
+            if (Number.isFinite(contextAt)) lastAcceptedTokenAt = contextAt;
             continue;
           }
 
@@ -285,13 +293,27 @@ $MainProcessCollector = @'
             const info = payload?.info && typeof payload.info === 'object' ? payload.info : null;
             if (!info || !info.last_token_usage || !info.total_token_usage) continue;
             const activeMeta = activeTurnId ? turnMeta.get(activeTurnId) : null;
+            const usageAt = rowEpoch(row, Date.now());
+            const durationMs = Number.isFinite(lastAcceptedTokenAt) && Number.isFinite(usageAt) && usageAt > lastAcceptedTokenAt
+              ? usageAt - lastAcceptedTokenAt
+              : null;
+            const rawOutputTokens = Number(info.last_token_usage?.output_tokens ?? info.last_token_usage?.outputTokens);
+            const outputTokenRate = Number.isFinite(durationMs) && durationMs > 0 &&
+              Number.isFinite(rawOutputTokens) && rawOutputTokens > 0
+              ? rawOutputTokens * 1000 / durationMs
+              : null;
             latestUsage = {
               info,
-              updatedAt: rowEpoch(row, Date.now()),
+              updatedAt: usageAt,
+              usageDurationMs: Number.isFinite(durationMs) ? durationMs : null,
+              outputTokenRate: Number.isFinite(outputTokenRate) && outputTokenRate > 0 && outputTokenRate < 10000
+                ? outputTokenRate
+                : null,
               turnId: activeTurnId || null,
               model: activeMeta && typeof activeMeta.model === 'string' && activeMeta.model ? activeMeta.model : null,
               lineIndex: index,
             };
+            if (Number.isFinite(usageAt)) lastAcceptedTokenAt = usageAt;
             continue;
           }
 
@@ -365,6 +387,8 @@ $MainProcessCollector = @'
         const envelope = {
           info: latestUsage.info,
           updatedAt: latestUsage.updatedAt,
+          usageDurationMs: latestUsage.usageDurationMs ?? null,
+          outputTokenRate: latestUsage.outputTokenRate ?? null,
           model: latestUsage.model || (usageTurn && usageTurn.model) || null,
           turnId: usageTurnId || null,
           turnStartedAt: usageTurn?.startedAt ?? null,

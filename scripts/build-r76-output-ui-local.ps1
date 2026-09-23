@@ -234,7 +234,7 @@ $MainProcessCollector = @'
           if (!id) return null;
           let meta = turnMeta.get(id);
           if (!meta) {
-            meta = { turnId: id, startedAt: null, completedAt: null, durationMs: null, status: null, model: null };
+            meta = { turnId: id, startedAt: null, completedAt: null, durationMs: null, timeToFirstTokenMs: null, status: null, model: null };
             turnMeta.set(id, meta);
           }
           return meta;
@@ -325,10 +325,22 @@ $MainProcessCollector = @'
                   completedAtMs: null,
                 };
               }
+              // R94_ITEM_ROW_TIMESTAMP_FALLBACK_RUNTIME
+              // Current Codex rollout item lifecycle rows reliably carry the
+              // JSONL row timestamp even when the payload omits started_at_ms /
+              // completed_at_ms. Use that official persisted event time rather
+              // than dropping the item timing entirely.
+              const rowAtMs = rowEpoch(row, NaN);
               const startedAtMs = Number(payload?.started_at_ms ?? payload?.startedAtMs);
               const completedAtMs = Number(payload?.completed_at_ms ?? payload?.completedAtMs);
-              if (Number.isFinite(startedAtMs) && startedAtMs > 0) meta.startedAtMs = startedAtMs;
-              if (Number.isFinite(completedAtMs) && completedAtMs > 0) meta.completedAtMs = completedAtMs;
+              if (type === 'item_started') {
+                const at = Number.isFinite(startedAtMs) && startedAtMs > 0 ? startedAtMs : rowAtMs;
+                if (Number.isFinite(at) && at > 0) meta.startedAtMs = at;
+              }
+              if (type === 'item_completed') {
+                const at = Number.isFinite(completedAtMs) && completedAtMs > 0 ? completedAtMs : rowAtMs;
+                if (Number.isFinite(at) && at > 0) meta.completedAtMs = at;
+              }
               if (itemType) meta.itemType = itemType;
               itemMeta.delete(key);
               itemMeta.set(key, meta);
@@ -408,6 +420,8 @@ $MainProcessCollector = @'
               if (Number.isFinite(completed)) meta.completedAt = completed;
               const duration = Number(payload?.duration_ms ?? payload?.durationMs);
               if (Number.isFinite(duration)) meta.durationMs = duration;
+              const ttft = Number(payload?.time_to_first_token_ms ?? payload?.timeToFirstTokenMs);
+              if (Number.isFinite(ttft)) meta.timeToFirstTokenMs = ttft;
               meta.status = String(payload?.status || (payload?.error ? 'failed' : 'completed'));
             }
             latestTerminal = meta;
@@ -448,6 +462,7 @@ $MainProcessCollector = @'
                 startedAt: latestTerminal.startedAt ?? null,
                 completedAt: latestTerminal.completedAt ?? null,
                 durationMs: latestTerminal.durationMs ?? null,
+                timeToFirstTokenMs: latestTerminal.timeToFirstTokenMs ?? null,
                 status: latestTerminal.status || 'completed',
               } : null,
               recentItems,
@@ -487,6 +502,7 @@ $MainProcessCollector = @'
             startedAt: latestTerminal.startedAt ?? null,
             completedAt: latestTerminal.completedAt ?? null,
             durationMs: latestTerminal.durationMs ?? null,
+            timeToFirstTokenMs: latestTerminal.timeToFirstTokenMs ?? null,
             status: latestTerminal.status || 'completed',
           } : null,
           recentItems: Array.from(itemMeta.values()).slice(-96),

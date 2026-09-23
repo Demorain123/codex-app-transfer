@@ -192,6 +192,18 @@ $MainProcessCollector = @'
         const parsed = Date.parse(String(row?.timestamp || ''));
         return Number.isFinite(parsed) ? parsed : fallback;
       };
+      // R94_CODEX_NUMERIC_LIFECYCLE_EPOCH_RUNTIME
+      // Current Codex protocol defines turn started_at/completed_at as Unix
+      // seconds. Older/local rows can still carry ISO strings or ms, so accept
+      // all three without letting Date.parse misread a numeric epoch string.
+      const eventEpoch = (value, fallback) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric > 1000000000) {
+          return numeric > 10000000000 ? numeric : numeric * 1000;
+        }
+        const parsed = Date.parse(String(value ?? ''));
+        return Number.isFinite(parsed) ? parsed : fallback;
+      };
       const limits = [2 * 1024 * 1024, 8 * 1024 * 1024];
 
       for (const limit of limits) {
@@ -330,7 +342,10 @@ $MainProcessCollector = @'
             if (id) {
               activeTurnId = id;
               const meta = ensureTurn(id);
-              const started = Date.parse(String(payload?.started_at || payload?.startedAt || row?.timestamp || ''));
+              const started = eventEpoch(
+                payload?.started_at ?? payload?.startedAt,
+                rowEpoch(row, NaN)
+              );
               if (meta && Number.isFinite(started)) meta.startedAt = started;
               if (meta) meta.status = String(payload?.status || 'inProgress');
               if (Number.isFinite(started)) lastAcceptedTokenAt = started;
@@ -385,7 +400,10 @@ $MainProcessCollector = @'
             );
             if (!id) continue;
             const meta = ensureTurn(id);
-            const completed = Date.parse(String(payload?.completed_at || payload?.completedAt || row?.timestamp || ''));
+            const completed = eventEpoch(
+              payload?.completed_at ?? payload?.completedAt,
+              rowEpoch(row, NaN)
+            );
             if (meta) {
               if (Number.isFinite(completed)) meta.completedAt = completed;
               const duration = Number(payload?.duration_ms ?? payload?.durationMs);

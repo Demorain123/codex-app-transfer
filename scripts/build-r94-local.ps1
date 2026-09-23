@@ -519,8 +519,8 @@ foreach ($Marker in @(
 )) {
     if (-not $TurnNotificationFinalizer.Contains($Marker)) { throw "r94 notification finalizer contract missing: $Marker" }
 }
-if ($TurnNotificationFinalizer.Contains('if (!threadId && index === 0) threadId = externalThreadId;')) {
-    throw 'r94 split-pane ownership regressed to process-global first-pane thread fallback'
+if (-not $TurnNotificationFinalizer.Contains("'r94 multi-pane thread fallback fail-closed'")) {
+    throw 'r94 split-pane thread fallback replacement guard missing from finalizer'
 }
 Write-Host 'R94_MULTI_PANE_THREAD_FALLBACK_FAIL_CLOSED_PREFLIGHT_PASS' -ForegroundColor Green
 foreach ($Forbidden in @(

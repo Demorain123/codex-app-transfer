@@ -398,7 +398,7 @@ fn structured_event_name(message: &str) -> Option<&str> {
 }
 
 fn structured_fields(message: &str) -> BTreeMap<&'static str, String> {
-    const SAFE_FIELDS: [&str; 30] = [
+    const SAFE_FIELDS: [&str; 33] = [
         "req",
         "trace",
         "client_req",
@@ -429,6 +429,9 @@ fn structured_fields(message: &str) -> BTreeMap<&'static str, String> {
         "retries_used",
         "configured",
         "retry_id",
+        "mode",
+        "elapsed_ms",
+        "max_duration_ms",
     ];
 
     let mut fields = BTreeMap::new();

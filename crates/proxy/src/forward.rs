@@ -3851,16 +3851,14 @@ async fn build_and_send_upstream(
 
         match state.http.execute(attempt_request).await {
             Ok(resp) => {
-                if retries_used > 0 {
+                if let Some(id) = retry_activity_id.take() {
                     proxy_telemetry().logs.add(
                         "INFO",
                         format!(
-                            "[transfer-upstream-retry-success] provider={} retries_used={retries_used} max_retries={retry_limit}",
+                            "[transfer-upstream-retry-success] retry_id={id} provider={} retries_used={retries_used} max_retries={retry_limit}",
                             resolved.provider_id
                         ),
                     );
-                }
-                if let Some(id) = retry_activity_id.take() {
                     finish_transfer_retry(id);
                 }
                 return Ok((resp, outbound_headers_snapshot));
@@ -3875,28 +3873,26 @@ async fn build_and_send_upstream(
                 proxy_telemetry().logs.add(
                     "WARN",
                     format!(
-                        "[transfer-upstream-retry] provider={} attempt={retries_used} max_retries={retry_limit} delay_ms={delay_ms} reason=connect_error",
+                        "[transfer-upstream-retry] retry_id={id} provider={} attempt={retries_used} max_retries={retry_limit} delay_ms={delay_ms} reason=connect_error",
                         resolved.provider_id
                     ),
                 );
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             }
             Err(error) => {
-                if retries_used > 0 {
-                    let terminal = if error.is_connect() && retries_used >= retry_limit {
-                        "exhausted"
-                    } else {
-                        "aborted_non_connect_error"
-                    };
+                let terminal = if error.is_connect() && retries_used >= retry_limit {
+                    "exhausted"
+                } else {
+                    "aborted_non_connect_error"
+                };
+                if let Some(id) = retry_activity_id.take() {
                     proxy_telemetry().logs.add(
                         "ERROR",
                         format!(
-                            "[transfer-upstream-retry-{terminal}] provider={} retries_used={retries_used} max_retries={retry_limit}",
+                            "[transfer-upstream-retry-{terminal}] retry_id={id} provider={} retries_used={retries_used} max_retries={retry_limit}",
                             resolved.provider_id
                         ),
                     );
-                }
-                if let Some(id) = retry_activity_id.take() {
                     finish_transfer_retry(id);
                 }
                 return Err(ForwardError::Upstream(error));

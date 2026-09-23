@@ -76,9 +76,15 @@ foreach ($Check in @(
     @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY ' },
     @{ Text = $RetryLauncherText; Marker = "retry && retry.infinite ? '∞'" },
     @{ Text = $RetryLauncherText; Marker = 'retry.maxDurationMs' },
+    @{ Text = $RetryLauncherText; Marker = 'retryRemainingMs' },
+    @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY READY ' },
+    @{ Text = $RetryLauncherText; Marker = 'statusAvailable' },
     @{ Text = $OutputUiText; Marker = 'CAS-R94-1-TRANSFER-RETRY-GENERATED-CARRY' },
     @{ Text = $OutputUiText; Marker = "retry && retry.infinite ? '∞'" },
     @{ Text = $OutputUiText; Marker = 'retry.maxDurationMs' },
+    @{ Text = $OutputUiText; Marker = 'retryRemainingMs' },
+    @{ Text = $OutputUiText; Marker = 'TRANSFER RETRY READY ' },
+    @{ Text = $OutputUiText; Marker = 'statusAvailable' },
     @{ Text = $OutputUiText; Marker = 'R74_TRANSFER_RETRY_GENERATED_CARRY_PASS' },
     @{ Text = $OutputUiText; Marker = 'function outputTelemetryRuntimeSource(proxyPort)' }
 )) {

@@ -472,6 +472,11 @@
 
       current.usage = usage;
       current.usageFingerprint = fingerprint;
+      // R94_PANE_TPS_SAMPLE_CLOCK_RUNTIME
+      // Timestamp the exact token-usage change at ingestion time. Consecutive
+      // samples from the same thread+turn let the status bar derive a pane-local
+      // output-token rate without borrowing Codex's global/native tok/s.
+      current.usageObservedAtMs = r94HostEpochNow();
       current.capabilitySequence = ++capabilitySequence;
       if (ids.threadId) latestKeyByThread.set(ids.threadId, key);
       exactByKey.delete(key);

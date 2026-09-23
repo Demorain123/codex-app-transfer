@@ -238,14 +238,10 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function transferRetryLabel(retry) {
     const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
     const attempt = Number(retry && retry.attempt) || 0;
-    let label = (retry && retry.active ? 'TRANSFER RETRY ' : 'TRANSFER RETRY READY ') + attempt + '/' + denominator;
+    let label = 'TRANSFER RETRY ' + attempt + '/' + denominator;
     if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
       const max = Number(retry.maxDurationMs) || 0;
-      if (retry.active) {
-        label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
-      } else {
-        label += ' · window ' + retryHours(max) + 'h';
-      }
+      label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
     }
     return label;
   }
@@ -399,11 +395,8 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function updateRetryChips() {
     const retry = state.retry;
     const existing = Array.from(document.querySelectorAll('[' + RETRY_CHIP_ATTR + ']'));
-    const policyEnabled =
-      retry &&
-      retry.statusAvailable === true &&
-      (retry.infinite === true || Number(retry.maxRetries) > 0);
-    if (!policyEnabled) {
+    // User-facing retry UI is an incident indicator, never a policy/armed badge.
+    if (!retry || retry.active !== true) {
       existing.forEach(function(node) { node.remove(); });
       return 0;
     }
@@ -429,12 +422,10 @@ function outputTelemetryRuntimeSource(proxyPort) {
       bar.appendChild(chip);
     }
     if (chip.textContent !== label) chip.textContent = label;
-    chip.setAttribute('data-active', retry.active ? 'true' : 'false');
+    chip.setAttribute('data-active', 'true');
     chip.setAttribute(
       'title',
-      retry.active
-        ? 'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
-        : 'Transfer connect-stage retry policy is armed and waiting for a qualifying failure.'
+      'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
     );
     existing.forEach(function(node) {
       if (node !== chip) node.remove();
@@ -446,11 +437,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
     if (!hud) return;
     const r = state.retry;
     const retryChips = updateRetryChips();
-    const retryPolicyEnabled =
-      r &&
-      r.statusAvailable === true &&
-      (r.infinite === true || Number(r.maxRetries) > 0);
-    if (retryPolicyEnabled) {
+    if (r && r.active === true) {
       if (retryChips > 0) {
         hud.removeAttribute('data-visible');
         hud.removeAttribute('data-transfer-retrying');
@@ -462,13 +449,8 @@ function outputTelemetryRuntimeSource(proxyPort) {
         (r.active && r.delayMs ? ' · wait ' + r.delayMs + 'ms' : '');
       if (hud.textContent !== retryText) hud.textContent = retryText;
       hud.setAttribute('data-visible', 'true');
-      if (r.active) {
-        hud.setAttribute('data-transfer-retrying', 'true');
-        hud.setAttribute('title', 'Transfer is retrying an upstream connect-stage failure. Codex native retry budget is unchanged.');
-      } else {
-        hud.removeAttribute('data-transfer-retrying');
-        hud.setAttribute('title', 'Transfer connect-stage retry policy is armed.');
-      }
+      hud.setAttribute('data-transfer-retrying', 'true');
+      hud.setAttribute('title', 'Transfer is retrying an upstream connect-stage failure. Codex native retry budget is unchanged.');
       return;
     }
     hud.removeAttribute('data-transfer-retrying');

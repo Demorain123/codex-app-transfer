@@ -65,9 +65,54 @@ pub(super) fn default_config_value() -> Value {
             // 显式 opt-out 迁成 off,绕过「无真账号→synthetic」缺键默认。缺键 = migrate None = 走默认推导。
             "autoWakeCodexPet": true,
            "upstreamConnectRetries": 0,
+           "upstreamConnectRetryInfinite": false,
+           "upstreamConnectRetryMaxHours": 1.5,
            "updateUrl": DEFAULT_UPDATE_URL
         }
     })
+}
+
+fn retry_hours_to_ms(hours: f64) -> Result<u64, String> {
+    if !hours.is_finite() || hours <= 0.0 {
+        return Err("upstreamConnectRetryMaxHours must be a positive number".to_owned());
+    }
+    let millis = hours * 3_600_000.0;
+    if !millis.is_finite() || millis <= 0.0 {
+        return Err("upstreamConnectRetryMaxHours is out of range".to_owned());
+    }
+    Ok(millis.min(u64::MAX as f64).round().max(1.0) as u64)
+}
+
+fn transfer_retry_policy_from_settings(settings: &Value) -> Result<(u64, bool, u64), String> {
+    let retries = settings
+        .get("upstreamConnectRetries")
+        .map(|value| {
+            value
+                .as_u64()
+                .ok_or_else(|| "upstreamConnectRetries must be a non-negative integer".to_owned())
+        })
+        .transpose()?
+        .unwrap_or(0);
+    let infinite = settings
+        .get("upstreamConnectRetryInfinite")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| "upstreamConnectRetryInfinite must be a boolean".to_owned())
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let max_hours = settings
+        .get("upstreamConnectRetryMaxHours")
+        .map(|value| {
+            value
+                .as_f64()
+                .ok_or_else(|| "upstreamConnectRetryMaxHours must be a positive number".to_owned())
+        })
+        .transpose()?
+        .unwrap_or(1.5);
+    let max_duration_ms = retry_hours_to_ms(max_hours)?;
+    Ok((retries, infinite, max_duration_ms))
 }
 
 pub(super) fn normalize_imported_provider(provider: &Value) -> Option<Value> {
@@ -171,19 +216,8 @@ pub(super) fn normalize_imported_config(data: &Value) -> Result<Value, String> {
             settings_obj.insert(key.clone(), value.clone());
         }
     }
-    if let Some(value) = settings
-        .get("upstreamConnectRetries")
-    {
-        match value.as_u64() {
-            Some(value) if value <= 15 => {}
-            _ => {
-                return Err(
-                    "settings.upstreamConnectRetries must be an integer between 0 and 15"
-                        .to_owned(),
-                )
-            }
-        }
-    }
+    transfer_retry_policy_from_settings(&settings)
+        .map_err(|error| format!("settings.{error}"))?;
     normalized["settings"] = settings;
 
     let providers = source_obj
@@ -363,21 +397,36 @@ pub async fn get_settings() -> impl IntoResponse {
 
 pub async fn save_settings(Json(input): Json<Value>) -> impl IntoResponse {
     // CAS-R94-1-TRANSFER-UPSTREAM-RETRY-SETTING
-    // Explicit opt-in only: 0 disables Transfer retry, accepted range is 0..=15.
-    // Reject malformed values instead of silently clamping persisted config.
-    let requested_upstream_connect_retries = match input.get("upstreamConnectRetries") {
-        None => None,
-        Some(value) => match value.as_u64() {
-            Some(value) if value <= 15 => Some(value as u8),
-            _ => {
-                return err(
-                    StatusCode::BAD_REQUEST,
-                    "upstreamConnectRetries must be an integer between 0 and 15",
-                )
-                .into_response()
-            }
-        },
-    };
+    // Finite mode accepts any non-negative u64 count (0 = off). Infinite mode
+    // ignores that count and is bounded by upstreamConnectRetryMaxHours.
+    for (key, valid) in [
+        (
+            "upstreamConnectRetries",
+            input
+                .get("upstreamConnectRetries")
+                .map(|value| value.as_u64().is_some())
+                .unwrap_or(true),
+        ),
+        (
+            "upstreamConnectRetryInfinite",
+            input
+                .get("upstreamConnectRetryInfinite")
+                .map(|value| value.as_bool().is_some())
+                .unwrap_or(true),
+        ),
+        (
+            "upstreamConnectRetryMaxHours",
+            input
+                .get("upstreamConnectRetryMaxHours")
+                .map(|value| value.as_f64().is_some_and(|hours| hours.is_finite() && hours > 0.0))
+                .unwrap_or(true),
+        ),
+    ] {
+        if !valid {
+            return err(StatusCode::BAD_REQUEST, format!("invalid retry setting: {key}"))
+                .into_response();
+        }
+    }
 
     // CAS-HYBRID-DIRECT-R28-ENABLE-PREFLIGHT: transition only from a clean
     // Transfer state. Do not auto-restore here because CC Switch may already own a newer config.
@@ -438,24 +487,37 @@ pub async fn save_settings(Json(input): Json<Value>) -> impl IntoResponse {
             .unwrap_or(codex_app_transfer_registry::schema::DEFAULT_WEB_FETCH_BACKEND)
             .to_string();
         let web_fetch_changed = (new_web_fetch != old_web_fetch).then_some(new_web_fetch);
+        let retry_policy = transfer_retry_policy_from_settings(&settings)?;
         Ok(ConfigMutation::Modified((
             settings,
             portable_changed,
             auto_unlock_changed,
             web_fetch_changed,
+            retry_policy,
         )))
     });
     match result {
-        Ok((settings, portable_changed, auto_unlock_changed, web_fetch_changed)) => {
-            if let Some(limit) = requested_upstream_connect_retries {
-                let applied = codex_app_transfer_proxy::set_upstream_connect_retry_limit(limit);
-                codex_app_transfer_proxy::proxy_telemetry().logs.add(
-                    "INFO",
-                    format!(
-                        "[transfer-upstream-retry-setting] configured={applied} source=settings"
-                    ),
-                );
-            }
+        Ok((
+            settings,
+            portable_changed,
+            auto_unlock_changed,
+            web_fetch_changed,
+            (retry_count, retry_infinite, retry_max_duration_ms),
+        )) => {
+            let applied = codex_app_transfer_proxy::set_upstream_connect_retry_policy(
+                retry_count,
+                retry_infinite,
+                retry_max_duration_ms,
+            );
+            codex_app_transfer_proxy::proxy_telemetry().logs.add(
+                "INFO",
+                format!(
+                    "[transfer-upstream-retry-setting] mode={} configured={} max_duration_ms={} source=settings",
+                    if applied.infinite { "infinite" } else { "finite" },
+                    applied.retries,
+                    applied.max_duration_ms,
+                ),
+            );
 
             // CAS-HYBRID-DIRECT-R28-SETTING-ACTIVE: immediately disable any in-memory
             // synthetic ChatGPT fabrication. The setting itself never rewrites Codex files.
@@ -839,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn r94_1_transfer_retry_setting_accepts_zero_to_fifteen_and_hot_applies() {
+    fn r94_1_transfer_retry_setting_accepts_large_finite_counts_and_hot_applies() {
         with_isolated_home(|_| {
             save_registry(&config_with_secret()).unwrap();
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -848,26 +910,42 @@ mod tests {
                 .unwrap();
 
             let response = runtime.block_on(async {
-                save_settings(Json(json!({"upstreamConnectRetries": 15}))).await
+                save_settings(Json(json!({"upstreamConnectRetries": 99}))).await
             });
             assert_eq!(response.into_response().status(), StatusCode::OK);
-            assert_eq!(
-                codex_app_transfer_proxy::upstream_connect_retry_limit(),
-                15
-            );
+            let policy = codex_app_transfer_proxy::upstream_connect_retry_policy();
+            assert_eq!(policy.retries, 99);
+            assert!(!policy.infinite);
             let saved = load_registry().unwrap();
-            assert_eq!(saved["settings"]["upstreamConnectRetries"], json!(15));
-
-            let response = runtime.block_on(async {
-                save_settings(Json(json!({"upstreamConnectRetries": 0}))).await
-            });
-            assert_eq!(response.into_response().status(), StatusCode::OK);
-            assert_eq!(codex_app_transfer_proxy::upstream_connect_retry_limit(), 0);
+            assert_eq!(saved["settings"]["upstreamConnectRetries"], json!(99));
         });
     }
 
     #[test]
-    fn r94_1_transfer_retry_setting_rejects_values_above_fifteen() {
+    fn r94_1_transfer_retry_setting_supports_time_bounded_infinite_mode() {
+        with_isolated_home(|_| {
+            save_registry(&config_with_secret()).unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            let response = runtime.block_on(async {
+                save_settings(Json(json!({
+                    "upstreamConnectRetryInfinite": true,
+                    "upstreamConnectRetryMaxHours": 1.5
+                })))
+                .await
+            });
+            assert_eq!(response.into_response().status(), StatusCode::OK);
+            let policy = codex_app_transfer_proxy::upstream_connect_retry_policy();
+            assert!(policy.infinite);
+            assert_eq!(policy.max_duration_ms, 5_400_000);
+        });
+    }
+
+    #[test]
+    fn r94_1_transfer_retry_setting_rejects_invalid_infinite_duration() {
         with_isolated_home(|_| {
             save_registry(&config_with_secret()).unwrap();
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -875,17 +953,13 @@ mod tests {
                 .build()
                 .unwrap();
             let response = runtime.block_on(async {
-                save_settings(Json(json!({"upstreamConnectRetries": 16}))).await
+                save_settings(Json(json!({
+                    "upstreamConnectRetryInfinite": true,
+                    "upstreamConnectRetryMaxHours": 0
+                })))
+                .await
             });
-            assert_eq!(
-                response.into_response().status(),
-                StatusCode::BAD_REQUEST
-            );
-            let saved = load_registry().unwrap();
-            assert!(
-                saved["settings"].get("upstreamConnectRetries").is_none(),
-                "invalid retry value must not be persisted"
-            );
+            assert_eq!(response.into_response().status(), StatusCode::BAD_REQUEST);
         });
     }
 

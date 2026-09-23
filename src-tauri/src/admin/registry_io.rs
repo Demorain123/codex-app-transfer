@@ -26,6 +26,8 @@ pub fn load() -> Result<RawConfig, String> {
                 "restoreCodexOnExit": true,
                 "mcpCredentialsPortableStore": true,
                 "upstreamConnectRetries": 0,
+                "upstreamConnectRetryInfinite": false,
+                "upstreamConnectRetryMaxHours": 1.5,
                 "updateUrl": DEFAULT_UPDATE_URL
             }
         }));

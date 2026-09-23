@@ -2102,8 +2102,12 @@ mod tests {
         assert!(script.contains("\"transferRevision\":\"r94.1\""));
         assert!(script.contains("\"transferVersion\":\"2.4.5+94.1\""));
         assert!(script.contains("CAS-R94-1-RUNTIME-DEBUG-DRAG"));
+        assert!(script.contains("CAS-R94-1-RUNTIME-DEBUG-COLLAPSE"));
         assert!(script.contains("data-cas-runtime-debug-draggable"));
+        assert!(script.contains("data-cas-runtime-debug-collapsed"));
         assert!(script.contains("setPointerCapture"));
+        assert!(script.contains("shouldToggle"));
+        assert!(script.contains("Click to collapse/expand"));
         assert!(script.contains("__casOutputTelemetryRuntime"));
         assert!(script.contains("__casR94TurnCapability"));
         assert!(script.contains("data-cas-status-inside-composer"));

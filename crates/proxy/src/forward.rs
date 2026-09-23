@@ -98,8 +98,10 @@ const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("C
 // started processing/billing.
 //
 // Finite mode has no product-level retry cap: the persisted u64 value is used as
-// supplied (0 = disabled). Infinite mode ignores the count and is bounded by an
-// explicit wall-clock retry window so it can never run forever accidentally.
+// supplied (0 = disabled), but one provider outage receives only one Transfer
+// retry round. Infinite mode ignores the count and may span Codex reissues; an
+// optional wall-clock window applies when max_duration_ms > 0, while 0 means
+// explicitly unlimited time.
 const DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS: u64 = 0; // 0 = unlimited wall-clock duration
 static TRANSFER_UPSTREAM_CONNECT_RETRIES: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE: AtomicBool = AtomicBool::new(false);

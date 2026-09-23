@@ -25,6 +25,7 @@ pub fn load() -> Result<RawConfig, String> {
                 "exposeAllProviderModels": false,
                 "restoreCodexOnExit": true,
                 "mcpCredentialsPortableStore": true,
+                "upstreamConnectRetries": 0,
                 "updateUrl": DEFAULT_UPDATE_URL
             }
         }));

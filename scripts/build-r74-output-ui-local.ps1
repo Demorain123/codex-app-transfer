@@ -96,6 +96,8 @@ function outputTelemetryRuntimeSource(proxyPort) {
     retryFeature: RETRY_MARKER,
     retry: {
       statusAvailable: false,
+      transport: 'none',
+      lastError: '',
       active: false,
       activeCount: 0,
       attempt: 0,
@@ -175,6 +177,24 @@ function outputTelemetryRuntimeSource(proxyPort) {
       }
     }
     return label;
+  }
+
+  function applyRetrySnapshot(value, transport) {
+    if (!value || typeof value !== 'object') return false;
+    const retry = state.retry;
+    retry.statusAvailable = true;
+    retry.transport = String(transport || 'unknown');
+    retry.lastError = '';
+    retry.active = value.active === true;
+    retry.activeCount = Number(value.activeCount) || 0;
+    retry.attempt = Number(value.attempt) || 0;
+    retry.maxRetries = Number(value.maxRetries) || 0;
+    retry.infinite = value.infinite === true;
+    retry.elapsedMs = Number(value.elapsedMs) || 0;
+    retry.maxDurationMs = Number(value.maxDurationMs) || 0;
+    retry.delayMs = Number(value.delayMs) || 0;
+    retry.reason = String(value.reason || '');
+    return true;
   }
 
   function parseCompactNumber(text) {
@@ -912,24 +932,26 @@ function outputTelemetryRuntimeSource(proxyPort) {
       const response = await window.fetch(RETRY_STATUS_URL, { cache: 'no-store' });
       if (!response.ok) throw new Error('retry status http ' + response.status);
       const value = await response.json();
+      applyRetrySnapshot(value, 'renderer-fetch');
       const retry = state.retry;
-      retry.statusAvailable = true;
-      retry.active = value && value.active === true;
-      retry.activeCount = Number(value && value.activeCount) || 0;
-      retry.attempt = Number(value && value.attempt) || 0;
-      retry.maxRetries = Number(value && value.maxRetries) || 0;
-      retry.infinite = value && value.infinite === true;
-      retry.elapsedMs = Number(value && value.elapsedMs) || 0;
-      retry.maxDurationMs = Number(value && value.maxDurationMs) || 0;
-      retry.delayMs = Number(value && value.delayMs) || 0;
-      retry.reason = String((value && value.reason) || '');
       nextDelay = retry.active ? 200 : ((retry.maxRetries > 0 || retry.infinite) ? 700 : 2000);
       renderTransferRetry();
-    } catch {
-      state.retry.statusAvailable = false;
-      state.retry.active = false;
+    } catch (error) {
+      const bridged = globalThis.__casTransferRetryBridge;
+      const bridgedOk = !!(bridged && bridged.value && applyRetrySnapshot(bridged.value, bridged.transport || 'main-process-loopback'));
+      if (!bridgedOk) {
+        state.retry.statusAvailable = false;
+        state.retry.active = false;
+        state.retry.transport = bridged && bridged.transport ? String(bridged.transport) : 'renderer-fetch';
+        state.retry.lastError = String(
+          (bridged && bridged.error) ||
+          (error && error.message) ||
+          error ||
+          'retry status unavailable'
+        ).slice(0, 240);
+      }
       renderTransferRetry();
-      nextDelay = 2000;
+      nextDelay = bridgedOk ? (state.retry.active ? 200 : 700) : 2000;
     } finally {
       state.retryTimer = setTimeout(pollTransferRetryStatus, nextDelay);
     }
@@ -973,11 +995,17 @@ function outputTelemetryRuntimeSource(proxyPort) {
 
   state.refresh = refreshUi;
   state.cleanup = cleanup;
+  state.applyRetrySnapshot = applyRetrySnapshot;
   window[ROOT_KEY] = state;
+  const bridgedAtInit = globalThis.__casTransferRetryBridge;
+  if (bridgedAtInit && bridgedAtInit.value) {
+    try { applyRetrySnapshot(bridgedAtInit.value, bridgedAtInit.transport || 'main-process-loopback'); } catch {}
+  }
   ensureStyle();
   installFetchObserver();
   installOutputObserver();
   ensureAnalytics();
+  renderTransferRetry();
   if (RETRY_STATUS_URL) {
     state.retryTimer = setTimeout(pollTransferRetryStatus, 50);
   }
@@ -1080,6 +1108,9 @@ try {
         'retryRemainingMs',
         'TRANSFER RETRY READY ',
         'statusAvailable',
+        'applyRetrySnapshot',
+        '__casTransferRetryBridge',
+        'main-process-loopback',
         'pollTransferRetryStatus'
     )) {
         if (-not $Launcher.Contains($Marker)) {

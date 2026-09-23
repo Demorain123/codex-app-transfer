@@ -439,13 +439,6 @@ pub enum ForwardError {
     Adapter(#[from] AdapterError),
     #[error("bad request: {0}")]
     BadRequest(String),
-    #[error(
-        "Transfer upstream retry time limit reached after {elapsed_ms} ms (limit {max_duration_ms} ms)"
-    )]
-    RetryWindowElapsed {
-        elapsed_ms: u64,
-        max_duration_ms: u64,
-    },
     /// OAuth bearer 不可用(用户没登过 / refresh 失败 / token 文件 IO 错)。
     /// 跟 generic Header 错误区分,IntoResponse 走 401 + 结构化 code 提示用户
     /// 重新登录,**不**走 502 generic 错误体(2026-05-11 silent-failure 修)。
@@ -3912,29 +3905,6 @@ async fn build_and_send_upstream(
     let mut retry_started_epoch_ms: u64 = 0;
 
     loop {
-        if retry_policy.infinite {
-            if let Some(started) = retry_started_at {
-                let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                if elapsed_ms >= retry_policy.max_duration_ms {
-                    if let Some(id) = retry_activity_id.take() {
-                        proxy_telemetry().logs.add(
-                            "ERROR",
-                            format!(
-                                "[transfer-upstream-retry-time-limit] retry_id={id} provider={} mode=infinite retries_used={retries_used} elapsed_ms={elapsed_ms} max_duration_ms={}",
-                                resolved.provider_id,
-                                retry_policy.max_duration_ms,
-                            ),
-                        );
-                        finish_transfer_retry(id);
-                    }
-                    return Err(ForwardError::RetryWindowElapsed {
-                        elapsed_ms,
-                        max_duration_ms: retry_policy.max_duration_ms,
-                    });
-                }
-            }
-        }
-
         let Some(attempt_request) = template.try_clone() else {
             if let Some(id) = retry_activity_id.take() {
                 finish_transfer_retry(id);
@@ -3944,45 +3914,7 @@ async fn build_and_send_upstream(
             ));
         };
 
-        let execute_result = if retry_policy.infinite {
-            if let Some(started) = retry_started_at {
-                let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                let remaining_ms = retry_policy.max_duration_ms.saturating_sub(elapsed_ms);
-                match tokio::time::timeout(
-                    Duration::from_millis(remaining_ms.max(1)),
-                    state.http.execute(attempt_request),
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX))
-                            as u64;
-                        if let Some(id) = retry_activity_id.take() {
-                            proxy_telemetry().logs.add(
-                                "ERROR",
-                                format!(
-                                    "[transfer-upstream-retry-time-limit] retry_id={id} provider={} mode=infinite retries_used={retries_used} elapsed_ms={elapsed_ms} max_duration_ms={}",
-                                    resolved.provider_id,
-                                    retry_policy.max_duration_ms,
-                                ),
-                            );
-                            finish_transfer_retry(id);
-                        }
-                        return Err(ForwardError::RetryWindowElapsed {
-                            elapsed_ms,
-                            max_duration_ms: retry_policy.max_duration_ms,
-                        });
-                    }
-                }
-            } else {
-                state.http.execute(attempt_request).await
-            }
-        } else {
-            state.http.execute(attempt_request).await
-        };
-
-        match execute_result {
+        match state.http.execute(attempt_request).await {
             Ok(resp) => {
                 if let Some(id) = retry_activity_id.take() {
                     let elapsed_ms = retry_started_at
@@ -4046,17 +3978,47 @@ async fn build_and_send_upstream(
                     retry_started_at = Some(Instant::now());
                     retry_started_epoch_ms = now_epoch_ms();
                 }
-                retries_used = retries_used.saturating_add(1);
-                let mut delay_ms = transfer_retry_delay_ms(retries_used);
+
+                let elapsed_ms = retry_started_at
+                    .map(|started| {
+                        started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+                    })
+                    .unwrap_or(0);
+                let next_attempt = retries_used.saturating_add(1);
+                let mut delay_ms = transfer_retry_delay_ms(next_attempt);
+
                 if retry_policy.infinite {
-                    if let Some(started) = retry_started_at {
-                        let elapsed_ms =
-                            started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                        let remaining_ms =
-                            retry_policy.max_duration_ms.saturating_sub(elapsed_ms);
-                        delay_ms = delay_ms.min(remaining_ms);
+                    let remaining_ms = retry_policy.max_duration_ms.saturating_sub(elapsed_ms);
+                    // Do not start another request once its backoff would cross the
+                    // user's retry window. Crucially, we never hard-cancel a request
+                    // that may already have reached upstream, avoiding duplicate work.
+                    if remaining_ms == 0 || remaining_ms <= delay_ms {
+                        if let Some(id) = retry_activity_id.take() {
+                            proxy_telemetry().logs.add(
+                                "ERROR",
+                                format!(
+                                    "[transfer-upstream-retry-time-limit] retry_id={id} provider={} mode=infinite retries_used={retries_used} elapsed_ms={elapsed_ms} max_duration_ms={}",
+                                    resolved.provider_id,
+                                    retry_policy.max_duration_ms,
+                                ),
+                            );
+                            finish_transfer_retry(id);
+                        } else {
+                            proxy_telemetry().logs.add(
+                                "ERROR",
+                                format!(
+                                    "[transfer-upstream-retry-time-limit] provider={} mode=infinite retries_used={retries_used} elapsed_ms={elapsed_ms} max_duration_ms={}",
+                                    resolved.provider_id,
+                                    retry_policy.max_duration_ms,
+                                ),
+                            );
+                        }
+                        return Err(ForwardError::Upstream(error));
                     }
+                    delay_ms = delay_ms.min(remaining_ms);
                 }
+
+                retries_used = next_attempt;
                 let id = *retry_activity_id.get_or_insert_with(|| {
                     begin_transfer_retry(
                         &resolved.provider_id,
@@ -4065,11 +4027,6 @@ async fn build_and_send_upstream(
                     )
                 });
                 update_transfer_retry(id, retries_used, delay_ms);
-                let elapsed_ms = retry_started_at
-                    .map(|started| {
-                        started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
-                    })
-                    .unwrap_or(0);
                 proxy_telemetry().logs.add(
                     "WARN",
                     format!(

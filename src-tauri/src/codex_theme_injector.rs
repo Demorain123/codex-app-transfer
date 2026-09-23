@@ -1485,10 +1485,11 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Pane owners=' + s.statusBars +
         ' · exactUsageThreads=' + s.exactUsageThreads +
         (s.statusPaneSummary ? ' · ' + escapeHtml(s.statusPaneSummary) : '') + '</div>',
-      '<div>Retry=' +
+      '<div>Retry monitor=' +
         (s.retryAvailable
-          ? ((s.retryActive ? 'ACTIVE ' : 'READY ') +
-             s.retryAttempt + '/' + (s.retryInfinite ? '∞' : s.retryMax) +
+          ? ('OK · active=' + (s.retryActive ? 'YES' : 'NO') +
+             ' · policy=' + (s.retryInfinite ? '∞' : s.retryMax) +
+             (s.retryActive ? ' · attempt=' + s.retryAttempt + '/' + (s.retryInfinite ? '∞' : s.retryMax) : '') +
              (s.retryInfinite && s.retryMaxDurationMs > 0
                ? (s.retryActive
                    ? ' · left=' + (s.retryRemainingMs / 3600000).toFixed(2) + 'h/' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h'

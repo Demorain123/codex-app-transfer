@@ -319,6 +319,9 @@ foreach ($Marker in @(
     'R94_NATIVE_TIME_FULL_FORMAT_OVERLAY_RUNTIME',
     'R94_PANE_ORPHAN_SEMANTIC_TIMESTAMP_RUNTIME',
     'R94_PANE_ORPHAN_CAPABILITY_RETRY_RUNTIME',
+    'R94_ROLLOUT_ASSISTANT_OUTPUT_TIMESTAMP_RUNTIME',
+    'function r94RecentOutputEventsFor(threadId, turnId) {',
+    'function r94ClaimOutputEvent(threadId, turnId, segment) {',
     'function r94StampOrphanSemanticRoot(root) {',
     'function r94RetryPendingOrphanSegments() {',
     "mode: 'native-time-cover'",
@@ -360,7 +363,8 @@ foreach ($Forbidden in @(
 Write-Host 'R94_PER_OUTPUT_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - nested assistant message groups are timestamp units; explicit tool/agent/status surfaces remain independent'
 Write-Host '  - assistant prose surrounding embedded tool/agent/status cards keeps its own timestamp unit'
-Write-Host '  - current Codex agent/progress cards without stable test ids use a bounded structural status fallback'
+Write-Host '  - current Codex agent/progress cards outside canonical turn wrappers use a pane-scoped live-only structural fallback'
+Write-Host '  - assistant commentary/final blocks preferentially bind to timestamp-only Codex rollout output metadata (MessagePhase when present); no transcript text is forwarded'
 Write-Host '  - nested wrapper item ids cannot steal the concrete tool/agent item timestamp'
 Write-Host '  - prose-bearing assistant wrappers never borrow an embedded tool item exact time'
 Write-Host '  - user-only wrappers are excluded from assistant timestamping'
@@ -518,6 +522,7 @@ foreach ($Marker in @(
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
     'R94_PANE_LOCAL_TPS_RUNTIME',
     'R94_CODEX_TOKEN_DURATION_INGEST_RUNTIME',
+    'R94_ASSISTANT_OUTPUT_METADATA_INGEST_RUNTIME',
     'R94_ROLLOUT_DURATION_TPS_RUNTIME',
     'function r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity) {',
     'exact-rollout-token-interval',
@@ -715,6 +720,8 @@ foreach ($Marker in @(
     'terminalTurn',
     'activeTurn',
     'R94_CODEX_TOKEN_DURATION_RUNTIME',
+    'R94_CODEX_ASSISTANT_OUTPUT_EVENT_RUNTIME',
+    'safeEnvelope.recentOutputs',
     'R94_CODEX_TOKEN_DURATION_SAFE_ENVELOPE_RUNTIME',
     'safeEnvelope.usageDurationMs',
     'safeEnvelope.outputTokenRate',

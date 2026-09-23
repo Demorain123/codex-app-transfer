@@ -647,6 +647,9 @@ export default {
   "settings.chatCustomModelEnabledHint": "Lets Codex's Chat (classic conversation) use your configured custom-provider models. Only when Codex is launched from this app; relaunch Codex after toggling.",
   "settings.codexQuotaEnabled": "Show usage in Codex",
   "settings.codexQuotaEnabledHint": "Shows a usage panel in Codex (context, token rate/total, quota). Only when Codex is launched from this app.",
+  "settings.upstreamConnectRetries": "Transfer upstream connect retries",
+  "settings.upstreamConnectRetriesHint":
+    "0 = off; 1–15 = extra Transfer retries for connect-stage failures before any HTTP response exists. This does not change Codex's native Reconnecting x/5 and never replays ordinary 4xx/5xx responses or an SSE stream that already started. No Lagging launches show Transfer Retry status inside Codex.",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy account-switch threshold",
   "settings.workbuddyQuotaGuardThresholdHint":
     "Auto-switch to the next WorkBuddy account when the active one's remaining credits drop below this value (default 20).",

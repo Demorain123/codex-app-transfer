@@ -147,6 +147,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
   const APPLY_KEY = '__casOutputTelemetryApplying';
   const RETRY_STATUS_URL = ${retryStatusUrl};
   const RETRY_MARKER = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY';
+  const RETRY_CHIP_ATTR = 'data-cas-transfer-retry-chip';
 
   const old = window[ROOT_KEY];
   if (old && old.version === VERSION) {
@@ -219,6 +220,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       '#' + HUD_ID + '{position:fixed;right:10px;bottom:10px;z-index:2147483646;display:none;align-items:center;gap:7px;padding:3px 7px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:999px;background:color-mix(in srgb,Canvas 88%,transparent);color:color-mix(in srgb,CanvasText 64%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 8px color-mix(in srgb,CanvasText 10%,transparent);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;pointer-events:none;}',
       '#' + HUD_ID + '[data-visible=\"true\"]{display:inline-flex;}',
       '#' + HUD_ID + '[data-transfer-retrying=\"true\"]{border-color:color-mix(in srgb,#e6a700 58%,transparent);background:color-mix(in srgb,#5a4300 82%,Canvas);color:#ffe08a;font-weight:700;}',
+      '[' + RETRY_CHIP_ATTR + ']{display:inline-flex;align-items:center;margin-left:8px;padding:1px 6px;border:1px solid color-mix(in srgb,#e6a700 55%,transparent);border-radius:999px;background:color-mix(in srgb,#5a4300 78%,Canvas);color:#ffe08a;font:700 9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;pointer-events:none;}',
     ].join('\n');
     (document.head || document.documentElement).appendChild(style);
   }
@@ -333,14 +335,55 @@ function outputTelemetryRuntimeSource(proxyPort) {
     return hud;
   }
 
-  function updateHud() {
-    const hud = ensureHud();
+  function updateRetryChips() {
+    const retry = state.retry;
+    const existing = Array.from(document.querySelectorAll('[' + RETRY_CHIP_ATTR + ']'));
+    if (!retry || !retry.active) {
+      existing.forEach(function(node) { node.remove(); });
+      return 0;
+    }
+    const label = 'TRANSFER RETRY ' + retry.attempt + '/' + retry.maxRetries;
+    const bars = Array.from(document.querySelectorAll(
+      '[data-cas-status-inside-composer="true"][data-cas-status-owner="r94-inline-safe"]'
+    ));
+    let rendered = 0;
+    bars.forEach(function(bar) {
+      if (!(bar instanceof Element)) return;
+      let chip = Array.from(bar.children || []).find(function(child) {
+        return child instanceof Element && child.hasAttribute(RETRY_CHIP_ATTR);
+      });
+      if (!chip) {
+        chip = document.createElement('span');
+        chip.setAttribute(RETRY_CHIP_ATTR, 'true');
+        chip.setAttribute('aria-label', 'Transfer upstream retry');
+        bar.appendChild(chip);
+      }
+      if (chip.textContent !== label) chip.textContent = label;
+      chip.setAttribute(
+        'title',
+        'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
+      );
+      rendered += 1;
+    });
+    existing.forEach(function(node) {
+      if (!node.closest('[data-cas-status-inside-composer="true"]')) node.remove();
+    });
+    return rendered;
+  }
+
+  function updateHud() {    const hud = ensureHud();
     if (!hud) return;
     const r = state.retry;
+    const retryChips = updateRetryChips();
     if (r && r.active) {
+      if (retryChips > 0) {
+        hud.removeAttribute('data-visible');
+        hud.removeAttribute('data-transfer-retrying');
+        hud.removeAttribute('title');
+        return;
+      }
       const retryText = 'TRANSFER RETRY ' + r.attempt + '/' + r.maxRetries +
         (r.activeCount > 1 ? ' · active ' + r.activeCount : '') +
-        (r.provider ? ' · ' + r.provider : '') +
         (r.delayMs ? ' · wait ' + r.delayMs + 'ms' : '');
       if (hud.textContent !== retryText) hud.textContent = retryText;
       hud.setAttribute('data-visible', 'true');
@@ -547,6 +590,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
     if (state.retryTimer) clearTimeout(state.retryTimer);
     const hud = document.getElementById(HUD_ID);
     if (hud) hud.remove();
+    document.querySelectorAll('[' + RETRY_CHIP_ATTR + ']').forEach(function(node) { node.remove(); });
     const style = document.getElementById(STYLE_ID);
     if (style) style.remove();
     document.querySelectorAll('[' + BADGE_ATTR + ']').forEach(function(node) { node.remove(); });

@@ -70,6 +70,11 @@ try {
       timestampMode: "per-assistant-output",
       metricMode: "best-effort-live-stream",
     },
+    transferRetryOverlay: {
+      status: transferProxyPort > 0 ? "armed" : "disabled",
+      proxyPort: transferProxyPort || null,
+      mode: "transfer-only-connect-retry",
+    },
     cleanup: "not-needed",
     statusFile: { status: "success" },
   };
@@ -101,6 +106,10 @@ try {
     outputTelemetry: {
       status: "not-armed",
       runtime: OUTPUT_TELEMETRY_RUNTIME,
+    },
+    transferRetryOverlay: {
+      status: "not-armed",
+      proxyPort: transferProxyPort || null,
     },
     cleanup,
     statusFile: { status: "success" },

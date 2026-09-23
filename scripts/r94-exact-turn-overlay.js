@@ -1373,6 +1373,11 @@
     const segmentEntryByNode = new WeakMap();
     const visibleSegmentEntries = new Set();
     const pendingSegmentTurns = new Set();
+    // R94_PANE_ORPHAN_SEMANTIC_TIMESTAMP_RUNTIME
+    // Some current Desktop progress/agent cards are pane children rather than
+    // descendants of a canonical turn wrapper. Track only newly-added live
+    // semantic nodes so history/remounts are never assigned a fresh "now".
+    const orphanSegmentNodes = new WeakSet();
 
     const timelineEntries = new Map();
     const timelineMarkers = new Map();
@@ -2065,6 +2070,121 @@
       r94SchedulePosition();
     }
 
+    function r94OrphanSemanticCandidates(root) {
+      const element = root instanceof Element ? root : root && root.parentElement;
+      if (!(element instanceof Element)) return [];
+      const raw = [];
+      const add = function(node) {
+        if (!(node instanceof Element) || raw.includes(node)) return;
+        raw.push(node);
+      };
+
+      if (element.matches(R94_SEMANTIC_OUTPUT_SELECTOR) || r94FallbackSemanticSignature(element)) add(element);
+      element.querySelectorAll(R94_SEMANTIC_OUTPUT_SELECTOR).forEach(add);
+      r94FallbackSemanticOutputSurfaces(element).forEach(add);
+
+      const usable = raw.filter(function(node) {
+        return node.isConnected &&
+          isVisible(node) &&
+          !r94CanonicalTurn(node) &&
+          !insideComposer(node) &&
+          !insideOwnUi(node) &&
+          !r94IsUserSurface(node) &&
+          (r94StrongSemanticOutputSurface(node) || !!r94FallbackSemanticSignature(node) || normalizedText(node).length >= 2);
+      });
+
+      // Keep the most specific semantic wrapper so one progress card does not
+      // receive timestamps on both its outer shell and inner body.
+      return usable.filter(function(node) {
+        return !usable.some(function(other) {
+          if (other === node || !node.contains(other)) return false;
+          const nodeKind = r94SemanticKind(node);
+          const otherKind = r94SemanticKind(other);
+          return nodeKind === otherKind || otherKind !== 'assistant';
+        });
+      });
+    }
+
+    function r94OrphanNearComposer(node) {
+      if (!(node instanceof Element)) return false;
+      let pane = null;
+      let composer = null;
+      try {
+        pane = typeof paneForNode === 'function' ? paneForNode(node) : null;
+        composer = typeof composerForPane === 'function'
+          ? composerForPane(pane)
+          : (typeof findComposerRoot === 'function' ? findComposerRoot() : null);
+      } catch {}
+      if (!(composer instanceof Element) || !composer.isConnected) return false;
+      let nodeRect = null;
+      let composerRect = null;
+      try {
+        nodeRect = node.getBoundingClientRect();
+        composerRect = composer.getBoundingClientRect();
+      } catch {}
+      if (!nodeRect || !composerRect || nodeRect.height <= 0 || composerRect.height <= 0) return false;
+      // Live progress surfaces sit above/around their pane composer. A generous
+      // bound keeps current long status groups while rejecting old virtualized
+      // history that remounts far up the pane during another active turn.
+      return nodeRect.bottom >= composerRect.top - Math.max(1400, innerHeight * 1.25) &&
+        nodeRect.top <= composerRect.bottom + 160;
+    }
+
+    function r94StampOrphanSemanticRoot(root) {
+      // R94_PANE_ORPHAN_SEMANTIC_TIMESTAMP_RUNTIME
+      for (const segment of r94OrphanSemanticCandidates(root)) {
+        if (orphanSegmentNodes.has(segment) || !r94OrphanNearComposer(segment)) continue;
+
+        const threadId = String(r94ThreadIdForNode(segment) || '').replace(/^local:/i, '').trim().toLowerCase();
+        if (!threadId) continue;
+        const latest = capability.latestForThread(threadId);
+        const turnId = r94NormalizeTurnId(latest && latest.turnId);
+        if (!turnId) continue;
+
+        const status = String(latest && latest.status || '').toLowerCase();
+        if (/completed|failed|interrupted|cancelled|canceled/.test(status)) continue;
+        const live = /inprogress|in_progress|running|started|pending/.test(status) ||
+          r94ActiveGenerationUiPresentFor(segment);
+        if (!live) continue;
+
+        let epoch = null;
+        let source = '';
+        const itemId = r94DirectItemIdForSurface(segment) || r94ItemIdForSurface(segment);
+        if (itemId && typeof capability.getItemRecord === 'function') {
+          const itemRecord = capability.getItemRecord(threadId, turnId, itemId);
+          const started = Number(itemRecord && itemRecord.startedAtMs);
+          const completed = Number(itemRecord && itemRecord.completedAtMs);
+          if (Number.isFinite(started) && started > 0) {
+            epoch = started;
+            source = 'item/started';
+          } else if (Number.isFinite(completed) && completed > 0) {
+            epoch = completed;
+            source = 'item/completed';
+          }
+        }
+        if (!Number.isFinite(epoch)) {
+          epoch = r94HostEpochNow();
+          source = 'host-first-observed-live-orphan-output';
+        }
+
+        const pane = typeof paneForNode === 'function' ? paneForNode(segment) : null;
+        const key = 'orphan:' + r94Hash(
+          threadId + '|' + turnId + '|' +
+          r94StructuralPath(segment, pane instanceof Element ? pane : document.body) + '|' +
+          r94SemanticKind(segment)
+        );
+        if (!key) continue;
+
+        orphanSegmentNodes.add(segment);
+        segmentTimeByKey.delete(key);
+        segmentTimeByKey.set(key, { epoch, source });
+        r94TrimSegmentCache();
+        diagnostics.liveSegmentsStamped = (diagnostics.liveSegmentsStamped || 0) + 1;
+        diagnostics.orphanSegmentsStamped = (diagnostics.orphanSegmentsStamped || 0) + 1;
+        r94EnsureSegmentEntry(segment, segment, key, epoch, source);
+      }
+    }
+
     function r94FlushSegmentTurns() {
       segmentTimerId = 0;
       const turns = Array.from(pendingSegmentTurns);
@@ -2273,6 +2393,12 @@
           if (!(element instanceof Element) ||
               element.closest('#' + R94_OVERLAY_ID) ||
               element.closest('#' + R94_TIMELINE_RAIL_ID)) continue;
+
+          // Current Codex Desktop can render progress/agent output as pane-level
+          // siblings of canonical turn wrappers. Timestamp those newly-added
+          // live semantic surfaces before the canonical-turn fast path.
+          try { r94StampOrphanSemanticRoot(element); } catch {}
+
           const owner = r94CanonicalTurn(element);
           if (owner) {
             r94RememberLatestObservedTurn(owner);

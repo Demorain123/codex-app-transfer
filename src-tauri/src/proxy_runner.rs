@@ -249,6 +249,21 @@ fn load_resolver_snapshot() -> Result<ResolverSnapshot, String> {
     }
 
     let cfg: Config = with_config_write(|raw| {
+        let retry_limit = raw
+            .get("settings")
+            .and_then(|settings| settings.get("upstreamConnectRetries"))
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value.min(15) as u8)
+            .unwrap_or(0);
+        let applied_retry_limit =
+            codex_app_transfer_proxy::set_upstream_connect_retry_limit(retry_limit);
+        codex_app_transfer_proxy::proxy_telemetry().logs.add(
+            "INFO",
+            format!(
+                "[transfer-upstream-retry-setting] configured={applied_retry_limit} source=proxy-start"
+            ),
+        );
+
         let mut cfg: Config = serde_json::from_value(raw.clone())
             .map_err(|e| format!("config.json schema mismatch: {e}"))?;
         if cfg.providers.is_empty() {
@@ -267,16 +282,6 @@ fn load_resolver_snapshot() -> Result<ResolverSnapshot, String> {
         cfg.gateway_api_key = Some(gateway_key);
         Ok(ConfigMutation::Modified(cfg))
     })?;
-
-    let retry_limit = codex_app_transfer_proxy::set_upstream_connect_retry_limit(
-        cfg.settings.upstream_connect_retries,
-    );
-    codex_app_transfer_proxy::proxy_telemetry().logs.add(
-        "INFO",
-        format!(
-            "[transfer-upstream-retry-setting] configured={retry_limit} source=proxy-start"
-        ),
-    );
 
     let gateway_key = cfg
         .gateway_api_key

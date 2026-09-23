@@ -734,13 +734,17 @@ export default {
     "仅通过本应用启动 Codex 时生效，在 Codex 內显示用量面板:上下文占用、Tokens 速率与累计以及额度信息。",
   "settings.upstreamConnectRetries": "Transfer 上游连接重试次数",
   "settings.upstreamConnectRetriesHint":
-    "有限次数模式。0 = 关闭；正整数不设 15 次上限，可填写 20、99、500 等。仅重试尚未收到 HTTP 响应的连接阶段错误，不会修改 Codex 原生 Reconnecting x/5，也不会重放普通 4xx/5xx 或已经开始的 SSE。",
+    "有限次数模式。0 = 关闭；正整数不设 15 次上限，可填写 20、99、500 等。一次连接异常只执行一轮 Transfer 重试：例如设 20，则本轮最多重试 20 次；耗尽后即使 Codex 自己再次发起请求，也不会自动再获得新一轮 Transfer 20 次预算，直到真正收到一次 HTTP 响应后才重置。普通 4xx/5xx 或已经开始的 SSE 不会被重放。",
   "settings.upstreamConnectRetryInfinite": "无限次数重试",
   "settings.upstreamConnectRetryInfiniteHint":
-    "开启后忽略上面的次数，持续重试直到达到时间上限。Transfer 日志和 No Lagging Codex 状态会显示累计重试次数与已用时间。",
-  "settings.upstreamConnectRetryMaxHours": "无限重试最长持续时间（小时）",
-  "settings.upstreamConnectRetryMaxHoursHint":
-    "必须大于 0，可输入小数，例如 1.5 = 最长 1 小时 30 分钟。达到时间上限后不再发起新的 Transfer 重试；已经发出的请求不会被强行中断，以避免重复执行/重复计费风险。",
+    "开启后忽略上面的有限次数，可跨 Codex 后续重发持续重试。可选设置总持续时长；0 小时 0 分钟（或都留空）表示不限时。只有实际发生 Transfer 重试时，Codex 才显示重试提示。",
+  "settings.upstreamConnectRetryMaxDuration": "无限重试最长持续时间",
+  "settings.upstreamConnectRetryMaxDurationHint":
+    "小时可填写任意非负整数，分钟范围 0–59。例如 1 小时 0 分、0 小时 50 分、25 小时 59 分。两项都为 0 或留空 = 不限时。达到总时间上限后不再发起新的 Transfer 重试；已发出的请求不会被强行中断。",
+  "settings.upstreamConnectRetryHoursUnit": "小时",
+  "settings.upstreamConnectRetryMinutesUnit": "分钟",
+  "settings.upstreamConnectRetryHoursPlaceholder": "小时",
+  "settings.upstreamConnectRetryMinutesPlaceholder": "分钟",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy 账号切换阈值",
   "settings.workbuddyQuotaGuardThresholdHint":
     "WorkBuddy 账号池剩余积分低于此值时自动切到下一个有额度的账号(默认 20)。",

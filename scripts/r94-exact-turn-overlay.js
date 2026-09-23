@@ -894,6 +894,63 @@
     return r94SpecificSemanticOutputSurface(node) || r94AssistantMessageSurface(node);
   }
 
+  // R94_STRUCTURAL_STATUS_FALLBACK_RUNTIME
+  // Current Codex Desktop does not expose stable data-testid/item-id attributes
+  // on every visible progress/agent summary card. Recognize only coarse,
+  // high-signal status blocks, then keep the most specific matching wrapper.
+  // This avoids falling back to arbitrary Markdown paragraphs/list items.
+  function r94FallbackSemanticSignature(node) {
+    if (!(node instanceof Element)) return '';
+    const text = normalizedText(node).replace(/\s+/g, ' ').trim();
+    if (text.length < 2 || text.length > 1800) return '';
+
+    const stepLabels = [
+      /(?:^|\s)步骤\s*[:：]/g,
+      /(?:^|\s)目的\s*[:：]/g,
+      /(?:^|\s)执行\s*[:：]/g,
+      /(?:^|\s)结果\s*[:：]/g,
+      /(?:^|\s)证据\s*[:：]/g,
+    ];
+    let stepScore = 0;
+    for (const pattern of stepLabels) {
+      pattern.lastIndex = 0;
+      if (pattern.test(text)) stepScore += 1;
+    }
+    if (stepScore >= 2) return 'status';
+
+    if (/^(?:created an agent|closed an agent|worked for\s+\d+\s*[smh]?|called tool|talked to app|read resource)\b/i.test(text)) {
+      return /agent/i.test(text) ? 'agent' : 'status';
+    }
+    if (/^(?:已?创建.*子代理|已?关闭.*子代理|子代理.*(?:已连接|已创建|已关闭|连接成功)|调用(?:了)?工具|读取(?:了)?资源)/i.test(text)) {
+      return /子代理/.test(text) ? 'agent' : 'status';
+    }
+    return '';
+  }
+
+  function r94FallbackSemanticOutputSurfaces(turn) {
+    if (!(turn instanceof Element)) return [];
+    const raw = Array.from(turn.querySelectorAll('div,section,article,[role="group"],li'))
+      .filter(function(node) {
+        return node instanceof Element &&
+          node !== turn &&
+          node.isConnected &&
+          isVisible(node) &&
+          !insideComposer(node) &&
+          !insideOwnUi(node) &&
+          !r94IsUserSurface(node) &&
+          !!r94FallbackSemanticSignature(node);
+      });
+
+    return raw.filter(function(node) {
+      const signature = r94FallbackSemanticSignature(node);
+      return !raw.some(function(other) {
+        return other !== node &&
+          node.contains(other) &&
+          r94FallbackSemanticSignature(other) === signature;
+      });
+    });
+  }
+
   // R94_SEMANTIC_OUTPUT_UNIT_RUNTIME
   // One timestamp belongs to one Codex output item/message/tool surface, not to
   // arbitrary visual descendants such as paragraphs, list items, table rows or
@@ -914,6 +971,8 @@
   function r94SemanticKind(node) {
     if (!(node instanceof Element)) return 'assistant';
     if (node.matches('[data-local-conversation-final-assistant]')) return 'final';
+    const fallbackKind = r94FallbackSemanticSignature(node);
+    if (fallbackKind) return fallbackKind;
     if (node.matches('[data-testid*="agent"]') || node.closest('[data-testid*="agent"]')) return 'agent';
     if (node.matches('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]') ||
         node.closest('[data-testid*="tool"],[data-testid*="command"],[data-testid*="integration"]')) return 'tool';
@@ -959,6 +1018,7 @@
     const raw = [];
     if (turn.matches(R94_SEMANTIC_OUTPUT_SELECTOR)) raw.push(turn);
     turn.querySelectorAll(R94_SEMANTIC_OUTPUT_SELECTOR).forEach(function(node) { raw.push(node); });
+    r94FallbackSemanticOutputSurfaces(turn).forEach(function(node) { raw.push(node); });
 
     const candidates = [];
     const seenNodes = new Set();

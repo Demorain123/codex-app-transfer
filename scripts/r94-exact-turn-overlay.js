@@ -1378,6 +1378,7 @@
     // descendants of a canonical turn wrapper. Track only newly-added live
     // semantic nodes so history/remounts are never assigned a fresh "now".
     const orphanSegmentNodes = new WeakSet();
+    const pendingOrphanSegments = new Set();
 
     const timelineEntries = new Map();
     const timelineMarkers = new Map();
@@ -2144,13 +2145,27 @@
         if (!threadId) continue;
         const latest = capability.latestForThread(threadId);
         const turnId = r94NormalizeTurnId(latest && latest.turnId);
-        if (!turnId) continue;
+        if (!turnId) {
+          pendingOrphanSegments.add(segment);
+          while (pendingOrphanSegments.size > 96) {
+            const oldest = pendingOrphanSegments.values().next().value;
+            if (!(oldest instanceof Element)) break;
+            pendingOrphanSegments.delete(oldest);
+          }
+          continue;
+        }
 
         const status = String(latest && latest.status || '').toLowerCase();
-        if (/completed|failed|interrupted|cancelled|canceled/.test(status)) continue;
+        if (/completed|failed|interrupted|cancelled|canceled/.test(status)) {
+          pendingOrphanSegments.delete(segment);
+          continue;
+        }
         const live = /inprogress|in_progress|running|started|pending/.test(status) ||
           r94ActiveGenerationUiPresentFor(segment);
-        if (!live) continue;
+        if (!live) {
+          pendingOrphanSegments.add(segment);
+          continue;
+        }
 
         let epoch = null;
         let source = '';
@@ -2181,12 +2196,26 @@
         if (!key) continue;
 
         orphanSegmentNodes.add(segment);
+        pendingOrphanSegments.delete(segment);
         segmentTimeByKey.delete(key);
         segmentTimeByKey.set(key, { epoch, source });
         r94TrimSegmentCache();
         diagnostics.liveSegmentsStamped = (diagnostics.liveSegmentsStamped || 0) + 1;
         diagnostics.orphanSegmentsStamped = (diagnostics.orphanSegmentsStamped || 0) + 1;
         r94EnsureSegmentEntry(segment, segment, key, epoch, source);
+      }
+    }
+
+    function r94RetryPendingOrphanSegments() {
+      // R94_PANE_ORPHAN_CAPABILITY_RETRY_RUNTIME
+      if (!pendingOrphanSegments.size) return;
+      const pending = Array.from(pendingOrphanSegments);
+      for (const segment of pending) {
+        if (!(segment instanceof Element) || !segment.isConnected) {
+          pendingOrphanSegments.delete(segment);
+          continue;
+        }
+        try { r94StampOrphanSemanticRoot(segment); } catch {}
       }
     }
 
@@ -2448,6 +2477,7 @@
     }
 
     function r94HandleCapabilityUpdate(event) {
+      r94RetryPendingOrphanSegments();
       const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : null;
       const turnId = r94NormalizeTurnId(detail && detail.turnId);
       if (!turnId) return;
@@ -2478,6 +2508,7 @@
         segmentTimerId = 0;
         pendingRoots.clear();
         pendingSegmentTurns.clear();
+        pendingOrphanSegments.clear();
         r94ClearVisibleBadges();
         return;
       }
@@ -2514,6 +2545,7 @@
       window.removeEventListener('cas-r94-item-capability-update', r94HandleCapabilityUpdate);
       pendingRoots.clear();
       pendingSegmentTurns.clear();
+      pendingOrphanSegments.clear();
       observedTurns.clear();
       visibleTurns.clear();
       visibleEntries.clear();

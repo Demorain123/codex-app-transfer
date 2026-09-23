@@ -1151,8 +1151,17 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     .replace(/"/g, '&quot;');
 
   // CAS-R94-1-RUNTIME-DEBUG-DRAG
-  // Deliberately simple: the whole debug panel is the drag surface. Position is
-  // session-local only; reload/restart returns to the normal top-right default.
+  // The panel remains freely draggable, but collapse/expand has its own explicit
+  // control so a tiny pointer movement cannot turn an intended click into a drag.
+  const clampRootPosition = (root) => {
+    if (!root.style.left) return;
+    const rect = root.getBoundingClientRect();
+    const maxX = Math.max(0, window.innerWidth - root.offsetWidth);
+    const maxY = Math.max(0, window.innerHeight - root.offsetHeight);
+    root.style.left = Math.min(maxX, Math.max(0, rect.left)) + 'px';
+    root.style.top = Math.min(maxY, Math.max(0, rect.top)) + 'px';
+  };
+
   const installDrag = (root) => {
     root.setAttribute('data-cas-runtime-debug-draggable', 'true');
     root.style.pointerEvents = 'auto';
@@ -1160,16 +1169,29 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     root.style.userSelect = 'none';
     root.style.touchAction = 'none';
 
+    root.onclick = (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('[data-cas-runtime-debug-toggle="true"]')
+        : null;
+      if (!target || !root.contains(target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleCollapsed(root);
+    };
+
     root.onpointerdown = (event) => {
       if (event.button !== 0) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-cas-runtime-debug-toggle="true"]')
+      ) {
+        return;
+      }
       const rect = root.getBoundingClientRect();
       dragState = {
         pointerId: event.pointerId,
         offsetX: event.clientX - rect.left,
         offsetY: event.clientY - rect.top,
-        startX: event.clientX,
-        startY: event.clientY,
-        moved: false,
       };
       root.style.right = 'auto';
       root.style.left = rect.left + 'px';
@@ -1180,12 +1202,6 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
 
     root.onpointermove = (event) => {
       if (!dragState || dragState.pointerId !== event.pointerId) return;
-      if (
-        Math.abs(event.clientX - dragState.startX) > 4 ||
-        Math.abs(event.clientY - dragState.startY) > 4
-      ) {
-        dragState.moved = true;
-      }
       const maxX = Math.max(0, window.innerWidth - root.offsetWidth);
       const maxY = Math.max(0, window.innerHeight - root.offsetHeight);
       const x = Math.min(maxX, Math.max(0, event.clientX - dragState.offsetX));
@@ -1196,10 +1212,8 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
 
     const stopDrag = (event) => {
       if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const shouldToggle = event.type === 'pointerup' && !dragState.moved;
       try { root.releasePointerCapture(event.pointerId); } catch {}
       dragState = null;
-      if (shouldToggle) toggleCollapsed(root);
     };
     root.onpointerup = stopDrag;
     root.onpointercancel = stopDrag;
@@ -1215,7 +1229,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     root.id = ROOT_ID;
     root.setAttribute('data-cas-runtime-debug', META.protocol);
     root.setAttribute('data-cas-runtime-debug-collapsed', 'false');
-    root.setAttribute('title', 'Click to collapse/expand · drag to move');
+    root.setAttribute('title', 'Drag to move · use the arrow to collapse/expand');
     root.style.cssText = [
       'position:fixed',
       'top:12px',
@@ -1401,11 +1415,15 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
     const header =
       '<div style="font-size:12px;font-weight:800;letter-spacing:.03em;display:flex;align-items:center;justify-content:space-between;gap:10px">' +
         '<span>TRANSFER DEBUG · ' + escapeHtml(s.state.toUpperCase()) + ' · ' + escapeHtml(META.protocol) + '</span>' +
-        '<span aria-hidden="true" style="opacity:.78">' + (collapsed ? '▸' : '▾') + '</span>' +
+        '<button type="button" data-cas-runtime-debug-toggle="true" aria-label="Collapse/expand Transfer debug panel" title="Collapse/expand" ' +
+          'style="border:0;background:transparent;color:inherit;padding:2px 4px;margin:-2px -4px -2px 0;cursor:pointer;font:inherit;line-height:1">' +
+          (collapsed ? '▸' : '▾') +
+        '</button>' +
       '</div>';
 
     if (collapsed) {
       root.innerHTML = header;
+      clampRootPosition(root);
       return;
     }
 
@@ -1461,6 +1479,7 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
           escapeHtml(META.transferRevision) + ' · OBSERVED ' + escapeHtml(s.runtime) + '</div>'
         : ''
     ].join('');
+    clampRootPosition(root);
   };
 
   render();
@@ -2106,8 +2125,9 @@ mod tests {
         assert!(script.contains("data-cas-runtime-debug-draggable"));
         assert!(script.contains("data-cas-runtime-debug-collapsed"));
         assert!(script.contains("setPointerCapture"));
-        assert!(script.contains("shouldToggle"));
-        assert!(script.contains("Click to collapse/expand"));
+        assert!(script.contains("data-cas-runtime-debug-toggle"));
+        assert!(script.contains("root.onclick"));
+        assert!(script.contains("Collapse/expand"));
         assert!(script.contains("__casOutputTelemetryRuntime"));
         assert!(script.contains("__casR94TurnCapability"));
         assert!(script.contains("data-cas-status-inside-composer"));

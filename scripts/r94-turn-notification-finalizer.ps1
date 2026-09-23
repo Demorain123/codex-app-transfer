@@ -640,6 +640,13 @@ $R94StatusHtml = @'
             : 'UNOWNED: no exact turn/thread usage can be safely attributed to this pane.')));
 
     if (bar instanceof Element) {
+      // R94_PANE_THREAD_ID_EXPORT_RUNTIME
+      // Export the already-resolved pane identity onto Transfer's own status
+      // element so the timestamp overlay can attribute pane-level agent/progress
+      // siblings without guessing from the process-global active thread.
+      const paneThreadId = r94NormalizePaneId(threadId);
+      if (paneThreadId) bar.setAttribute('data-cas-pane-thread-id', paneThreadId);
+      else bar.removeAttribute('data-cas-pane-thread-id');
       if (turnRecord && turnRecord.turnId) bar.setAttribute('data-cas-turn-id', String(turnRecord.turnId));
       else bar.removeAttribute('data-cas-turn-id');
       bar.setAttribute(

@@ -510,10 +510,10 @@ $R94PaneSpeedHelpers = @'
       Number.isFinite(rolloutDurationMs) && rolloutDurationMs > 0
     ) {
       return {
-        text: rolloutRate.toFixed(rolloutRate >= 100 ? 0 : 1) + ' tok/s',
-        source: 'exact-rollout-token-interval',
-        confidence: activity === 'live' ? 'live-exact-interval' : 'last-exact-interval',
-        title: 'Pane-local Codex output rate from one persisted token_count output count divided by its matched rollout timestamp interval (' + Math.round(rolloutDurationMs) + ' ms).',
+        text: '≈' + rolloutRate.toFixed(rolloutRate >= 100 ? 0 : 1) + ' tok/s',
+        source: 'rollout-token-interval',
+        confidence: activity === 'live' ? 'live-interval-estimate' : 'last-interval-estimate',
+        title: 'Pane-local interval rate from persisted Codex token_count output divided by its matched rollout timestamp interval (' + Math.round(rolloutDurationMs) + ' ms). Codex does not persist a per-model-request generation timer here, so the interval can include TTFT or adjacent tool/work gaps.',
       };
     }
 

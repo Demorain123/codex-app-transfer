@@ -66,21 +66,40 @@ pub(super) fn default_config_value() -> Value {
             "autoWakeCodexPet": true,
            "upstreamConnectRetries": 0,
            "upstreamConnectRetryInfinite": false,
-           "upstreamConnectRetryMaxHours": 1.5,
+           "upstreamConnectRetryMaxHours": 0,
+           "upstreamConnectRetryMaxMinutes": 0,
            "updateUrl": DEFAULT_UPDATE_URL
         }
     })
 }
 
-fn retry_hours_to_ms(hours: f64) -> Result<u64, String> {
-    if !hours.is_finite() || hours <= 0.0 {
-        return Err("upstreamConnectRetryMaxHours must be a positive number".to_owned());
+fn retry_duration_to_ms(hours: u64, minutes: u64) -> Result<u64, String> {
+    if minutes > 59 {
+        return Err("upstreamConnectRetryMaxMinutes must be between 0 and 59".to_owned());
+    }
+    let hours_ms = hours
+        .checked_mul(3_600_000)
+        .ok_or_else(|| "upstreamConnectRetryMaxHours is out of range".to_owned())?;
+    let minutes_ms = minutes
+        .checked_mul(60_000)
+        .ok_or_else(|| "upstreamConnectRetryMaxMinutes is out of range".to_owned())?;
+    hours_ms
+        .checked_add(minutes_ms)
+        .ok_or_else(|| "upstreamConnectRetry duration is out of range".to_owned())
+}
+
+fn legacy_retry_hours_to_ms(hours: f64) -> Result<u64, String> {
+    if !hours.is_finite() || hours < 0.0 {
+        return Err("upstreamConnectRetryMaxHours must be a non-negative number".to_owned());
+    }
+    if hours == 0.0 {
+        return Ok(0);
     }
     let millis = hours * 3_600_000.0;
-    if !millis.is_finite() || millis <= 0.0 {
+    if !millis.is_finite() || millis < 0.0 {
         return Err("upstreamConnectRetryMaxHours is out of range".to_owned());
     }
-    Ok(millis.min(u64::MAX as f64).round().max(1.0) as u64)
+    Ok(millis.min(u64::MAX as f64).round() as u64)
 }
 
 fn transfer_retry_policy_from_settings(settings: &Value) -> Result<(u64, bool, u64), String> {
@@ -102,16 +121,41 @@ fn transfer_retry_policy_from_settings(settings: &Value) -> Result<(u64, bool, u
         })
         .transpose()?
         .unwrap_or(false);
-    let max_hours = settings
-        .get("upstreamConnectRetryMaxHours")
-        .map(|value| {
-            value
-                .as_f64()
-                .ok_or_else(|| "upstreamConnectRetryMaxHours must be a positive number".to_owned())
-        })
-        .transpose()?
-        .unwrap_or(1.5);
-    let max_duration_ms = retry_hours_to_ms(max_hours)?;
+    // New r94.1 UI stores integer hours + minutes. If the minutes key is
+    // absent, preserve compatibility with the previous fractional-hours field
+    // (for example 1.5 -> 1h30m). 0h0m means no wall-clock limit.
+    let max_duration_ms = if settings.get("upstreamConnectRetryMaxMinutes").is_some() {
+        let max_hours = settings
+            .get("upstreamConnectRetryMaxHours")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "upstreamConnectRetryMaxHours must be a non-negative integer".to_owned())
+            })
+            .transpose()?
+            .unwrap_or(0);
+        let max_minutes = settings
+            .get("upstreamConnectRetryMaxMinutes")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .ok_or_else(|| "upstreamConnectRetryMaxMinutes must be an integer between 0 and 59".to_owned())
+            })
+            .transpose()?
+            .unwrap_or(0);
+        retry_duration_to_ms(max_hours, max_minutes)?
+    } else {
+        let legacy_hours = settings
+            .get("upstreamConnectRetryMaxHours")
+            .map(|value| {
+                value
+                    .as_f64()
+                    .ok_or_else(|| "upstreamConnectRetryMaxHours must be a non-negative number".to_owned())
+            })
+            .transpose()?
+            .unwrap_or(0.0);
+        legacy_retry_hours_to_ms(legacy_hours)?
+    };
     Ok((retries, infinite, max_duration_ms))
 }
 

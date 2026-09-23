@@ -1730,8 +1730,7 @@
 
       if (
         exact.sourceElement instanceof Element &&
-        exact.sourceElement.isConnected &&
-        r94NativeTimestampVisible(exact.sourceElement)
+        exact.sourceElement.isConnected
       ) {
         // R94_NATIVE_TIME_FULL_FORMAT_OVERLAY_RUNTIME
         // Keep the native React DOM read-only. If Codex visibly renders only a
@@ -1741,12 +1740,15 @@
         // not a duplicate native+Transfer timestamp.
         const nativeVisibleText = normalizedText(exact.sourceElement);
         const nativeAlreadyFull = /\b\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\b/.test(nativeVisibleText);
+        const nativeVisibilityGate = r94NativeTimestampVisible(exact.sourceElement);
+        let nativeHasLayoutBox = false;
+        try { nativeHasLayoutBox = exact.sourceElement.getClientRects().length > 0; } catch {}
         const lifecycleRecord = capability.getRecord(ids.threadId, ids.turnId);
         const lifecycleCompleted = r94EpochMillis(lifecycleRecord && lifecycleRecord.completedAt);
         const exactEpoch = r94EpochMillis(exact.record && exact.record.epoch);
         const coverEpoch = Number.isFinite(exactEpoch) ? exactEpoch : lifecycleCompleted;
 
-        if (!nativeAlreadyFull && Number.isFinite(coverEpoch)) {
+        if (!nativeAlreadyFull && Number.isFinite(coverEpoch) && (nativeVisibilityGate || nativeHasLayoutBox)) {
           const coverRecord = {
             epoch: coverEpoch,
             label: r94LocalDateTimeStamp(coverEpoch),
@@ -1789,14 +1791,17 @@
         }
 
         // R94_NATIVE_TIMESTAMP_VISIBILITY_GATE_RUNTIME
-        // A native timestamp that already satisfies the full format owns the
-        // final timestamp; keep Transfer's final-segment badge suppressed.
-        r94RemoveTurnBadge(turn);
-        r94SuppressNativeFinalSegmentBadge(turn);
-        diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
-        diagnostics.lastSource = exact.record.source || '';
-        r94SyncDiagnostics();
-        return;
+        // Only a genuinely visible native timestamp that already satisfies the
+        // full format owns the final timestamp. A mounted-but-hidden short
+        // native node must not suppress the generic full-date overlay path.
+        if (nativeVisibilityGate && nativeAlreadyFull) {
+          r94RemoveTurnBadge(turn);
+          r94SuppressNativeFinalSegmentBadge(turn);
+          diagnostics.nativeTimestampSuppressed = (diagnostics.nativeTimestampSuppressed || 0) + 1;
+          diagnostics.lastSource = exact.record.source || '';
+          r94SyncDiagnostics();
+          return;
+        }
       }
 
       let entry = entryByTurn.get(turn);

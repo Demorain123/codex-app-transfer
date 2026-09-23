@@ -435,6 +435,8 @@ foreach ($Marker in @(
     'R94_NO_STATUS_VIEWPORT_TRACKING_PASS',
     'R94_DUPLICATE_USAGE_MIRROR_DISABLED_PASS',
     'R94_COMPOSER_SURFACE_COMPAT_RUNTIME',
+    'R94_PANE_SCOPED_STATUS_MOUNT_RUNTIME',
+    'function r94EditableForComposerScope(composer) {',
     'R94_CURRENT_COMPOSER_ROOT_RUNTIME',
     'R94_COMPOSER_INLINE_MOUNT_RUNTIME',
     'R94_COMPOSER_MOUNT_V4',
@@ -460,10 +462,19 @@ foreach ($Marker in @(
 # Do not scan the finalizer SOURCE for the forbidden overlay strings here:
 # they intentionally appear as literals inside its runtime fail-closed guard.
 # The finalizer applies those checks to generated $Patched JavaScript instead.
+$CrossPaneEditableFallback = @'
+    const scopedEditable = r94VisibleComposerEditable(composer instanceof Element ? composer : null);
+    const editable = scopedEditable || r94VisibleComposerEditable(null);
+'@
+if ($ComposerStatusFinalizer.Contains($CrossPaneEditableFallback)) {
+    throw 'r94 pane-scoped status mount regressed to document-global editable fallback'
+}
+Write-Host 'R94_PANE_SCOPED_STATUS_MOUNT_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_COMPOSER_STATUS_INSIDE_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host 'R94_EDITOR_SAFE_STATUS_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - status mount host must be outside ProseMirror/contenteditable and structurally tied to composer controls'
 Write-Host '  - failed/unknown mount discovery removes the bar and retries later; it never falls back into the draft'
+Write-Host '  - pane-specific remounts fail closed instead of borrowing another visible pane editor'
 Write-Host '  - runtime Debug MATCH requires an r94-inline-safe bar and editorLeak=0'
 foreach ($Marker in @(
     'R94_TURN_NOTIFICATION_FINALIZER',

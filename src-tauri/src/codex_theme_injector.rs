@@ -1266,6 +1266,16 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
   const snapshot = () => {
     const telemetry = window.__casOutputTelemetryRuntime;
     const runtime = telemetry && telemetry.version ? String(telemetry.version) : 'missing';
+    const retry = telemetry && telemetry.retry && typeof telemetry.retry === 'object'
+      ? telemetry.retry
+      : {};
+    const retryAvailable = retry.statusAvailable === true;
+    const retryInfinite = retry.infinite === true;
+    const retryAttempt = Number(retry.attempt) || 0;
+    const retryMax = Number(retry.maxRetries) || 0;
+    const retryElapsedMs = Number(retry.elapsedMs) || 0;
+    const retryMaxDurationMs = Number(retry.maxDurationMs) || 0;
+    const retryRemainingMs = Math.max(0, retryMaxDurationMs - retryElapsedMs);
     const expectedRevisionNumber = revisionNumber(META.transferRevision);
     const runtimeRevisionNumber = revisionNumber(runtime);
     const exactTurn = !!window.__casR94TurnCapability;
@@ -1396,6 +1406,14 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       composerMountCount: Number(composerDiag.mounted) || 0,
       composerFastReuses: Number(composerDiag.fastReuses) || 0,
       composerUnsafeRejects: Number(composerDiag.unsafeRejects) || 0,
+      retryAvailable,
+      retryActive: retry.active === true,
+      retryInfinite,
+      retryAttempt,
+      retryMax,
+      retryElapsedMs,
+      retryMaxDurationMs,
+      retryRemainingMs,
     };
   };
 
@@ -1458,6 +1476,16 @@ const RUNTIME_DEBUG_SCRIPT_TEMPLATE: &str = r#"
       '<div>Pane owners=' + s.statusBars +
         ' · exactUsageThreads=' + s.exactUsageThreads +
         (s.statusPaneSummary ? ' · ' + escapeHtml(s.statusPaneSummary) : '') + '</div>',
+      '<div>Retry=' +
+        (s.retryAvailable
+          ? ((s.retryActive ? 'ACTIVE ' : 'READY ') +
+             s.retryAttempt + '/' + (s.retryInfinite ? '∞' : s.retryMax) +
+             (s.retryInfinite && s.retryMaxDurationMs > 0
+               ? (s.retryActive
+                   ? ' · left=' + (s.retryRemainingMs / 3600000).toFixed(2) + 'h/' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h'
+                   : ' · window=' + (s.retryMaxDurationMs / 3600000).toFixed(2) + 'h')
+               : ''))
+          : 'UNAVAILABLE') + '</div>',
       '<div>Collector tick=' + s.collectorTick +
         ' · stage=' + escapeHtml(s.collectorStage || '-') +
         ' · threads=' + s.collectorThreadCount +
@@ -2147,6 +2175,8 @@ mod tests {
         assert!(script.contains("TL meta="));
         assert!(script.contains("TS obs/vis/badge/cache"));
         assert!(script.contains("Collector tick="));
+        assert!(script.contains("Retry="));
+        assert!(script.contains("retryRemainingMs"));
         assert!(script.contains("__casR94LocalUsageCollectorDiagnostics"));
         assert!(script.contains("SEG stamp/badge/cache"));
         assert!(script.contains("nativeRail='"));

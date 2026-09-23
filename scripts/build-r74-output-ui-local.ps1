@@ -95,6 +95,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
     retryTimer: null,
     retryFeature: RETRY_MARKER,
     retry: {
+      statusAvailable: false,
       active: false,
       activeCount: 0,
       attempt: 0,
@@ -155,12 +156,23 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function retryHours(ms) {
     return (Math.max(0, Number(ms) || 0) / 3600000).toFixed(2);
   }
+  function retryRemainingMs(retry) {
+    const max = Math.max(0, Number(retry && retry.maxDurationMs) || 0);
+    const elapsed = Math.max(0, Number(retry && retry.elapsedMs) || 0);
+    return Math.max(0, max - elapsed);
+  }
 
   function transferRetryLabel(retry) {
     const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
-    let label = 'TRANSFER RETRY ' + (Number(retry && retry.attempt) || 0) + '/' + denominator;
+    const attempt = Number(retry && retry.attempt) || 0;
+    let label = (retry && retry.active ? 'TRANSFER RETRY ' : 'TRANSFER RETRY READY ') + attempt + '/' + denominator;
     if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
-      label += ' · ' + retryHours(retry.elapsedMs) + 'h/' + retryHours(retry.maxDurationMs) + 'h';
+      const max = Number(retry.maxDurationMs) || 0;
+      if (retry.active) {
+        label += ' · left ' + retryHours(retryRemainingMs(retry)) + 'h/' + retryHours(max) + 'h';
+      } else {
+        label += ' · window ' + retryHours(max) + 'h';
+      }
     }
     return label;
   }
@@ -845,7 +857,11 @@ function outputTelemetryRuntimeSource(proxyPort) {
   function renderTransferRetry() {
     let chip = document.getElementById(RETRY_ID);
     const retry = state.retry;
-    if (!retry || !retry.active) {
+    const policyEnabled =
+      retry &&
+      retry.statusAvailable === true &&
+      (retry.infinite === true || Number(retry.maxRetries) > 0);
+    if (!policyEnabled) {
       if (chip) chip.remove();
       return;
     }
@@ -859,17 +875,22 @@ function outputTelemetryRuntimeSource(proxyPort) {
       chip.id = RETRY_ID;
       chip.setAttribute('aria-label', 'Transfer upstream retry');
       chip.style.cssText =
-        'display:inline-flex;align-items:center;padding:2px 7px;border:1px solid rgba(230,167,0,.62);' +
-        'border-radius:999px;background:rgba(90,67,0,.88);color:#ffe08a;' +
-        'font:700 9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;' +
+        'display:inline-flex;align-items:center;padding:2px 7px;border:1px solid rgba(128,128,128,.32);' +
+        'border-radius:999px;background:rgba(128,128,128,.10);color:inherit;' +
+        'font:600 9px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;' +
         'white-space:nowrap;pointer-events:none;z-index:2147483646;';
     }
     chip.textContent =
       transferRetryLabel(retry) +
-      (retry.activeCount > 1 ? ' · active ' + retry.activeCount : '') +
-      (retry.delayMs ? ' · wait ' + retry.delayMs + 'ms' : '');
-    chip.title =
-      'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.';
+      (retry.active && retry.activeCount > 1 ? ' · active ' + retry.activeCount : '') +
+      (retry.active && retry.delayMs ? ' · wait ' + retry.delayMs + 'ms' : '');
+    chip.style.borderColor = retry.active ? 'rgba(230,167,0,.62)' : 'rgba(128,128,128,.32)';
+    chip.style.background = retry.active ? 'rgba(90,67,0,.88)' : 'rgba(128,128,128,.10)';
+    chip.style.color = retry.active ? '#ffe08a' : 'inherit';
+    chip.style.fontWeight = retry.active ? '700' : '600';
+    chip.title = retry.active
+      ? 'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
+      : 'Transfer connect-stage retry policy is armed and waiting for a qualifying failure.';
 
     if (inline) {
       chip.style.position = 'static';
@@ -892,6 +913,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       if (!response.ok) throw new Error('retry status http ' + response.status);
       const value = await response.json();
       const retry = state.retry;
+      retry.statusAvailable = true;
       retry.active = value && value.active === true;
       retry.activeCount = Number(value && value.activeCount) || 0;
       retry.attempt = Number(value && value.attempt) || 0;
@@ -904,6 +926,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       nextDelay = retry.active ? 200 : ((retry.maxRetries > 0 || retry.infinite) ? 700 : 2000);
       renderTransferRetry();
     } catch {
+      state.retry.statusAvailable = false;
       state.retry.active = false;
       renderTransferRetry();
       nextDelay = 2000;
@@ -917,6 +940,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
     readModelLabel();
     const bar = ensureStatusBar();
     if (bar) bar.innerHTML = statusHtml();
+    renderTransferRetry();
     renderMirror();
     sampleHistory(false);
     renderAnalytics();
@@ -1053,6 +1077,9 @@ try {
         'TRANSFER RETRY ',
         "retry.infinite ? '∞'",
         'retry.maxDurationMs',
+        'retryRemainingMs',
+        'TRANSFER RETRY READY ',
+        'statusAvailable',
         'pollTransferRetryStatus'
     )) {
         if (-not $Launcher.Contains($Marker)) {

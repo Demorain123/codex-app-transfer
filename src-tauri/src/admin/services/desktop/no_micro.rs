@@ -20,37 +20,6 @@ const STUB_SHAPE_MARKERS: &[&[u8]] = &[
 const LAUNCHER_JS: &str = include_str!("../../../../resources/codex_no_micro_launcher.mjs");
 // CAS-NO-LAGGING-R32-MCP-EXIT-GUARD
 const MCP_EXIT_GUARD_PS1: &str = include_str!("../../../../resources/codex_no_lagging_janitor.ps1");
-const R94_1_CODEX_RUNTIME_FILE: &str = "codex-r94.1-runtime.exe";
-const R94_1_OPENAI_POLICY_OVERLAY_FILE: &str = "r94.1-openai-provider-policy.json";
-
-/// True only while r94.1 has staged portable provider behavior for the built-in
-/// openai runtime. Normal MSIX launch cannot apply that native runtime patch,
-/// so callers can fail closed instead of silently falling back to /5 retries.
-pub fn r94_1_openai_policy_overlay_active() -> bool {
-    codex_app_transfer_registry::paths::resolve_home()
-        .map(|home| {
-            home.join(".codex-app-transfer")
-                .join(R94_1_OPENAI_POLICY_OVERLAY_FILE)
-                .is_file()
-        })
-        .unwrap_or(false)
-}
-
-fn r94_1_patched_runtime_path() -> Result<PathBuf, String> {
-    let current = std::env::current_exe()
-        .map_err(|e| format!("无法解析 Transfer executable: {e}"))?;
-    let dir = current
-        .parent()
-        .ok_or_else(|| "Transfer executable 没有父目录".to_owned())?;
-    let runtime = dir.join(R94_1_CODEX_RUNTIME_FILE);
-    if !runtime.is_file() {
-        return Err(format!(
-            "r94.1 provider policy overlay 已启用，但缺少同版本 patched Codex runtime: {}",
-            runtime.display()
-        ));
-    }
-    Ok(runtime)
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -640,13 +609,6 @@ fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
     // Failure is reported but does not block the already-proven Micro/Accessory guard.
     let mcp_exit_guard = start_mcp_exit_guard(&executable);
 
-    let policy_overlay_active = r94_1_openai_policy_overlay_active();
-    let patched_runtime = if policy_overlay_active {
-        Some(r94_1_patched_runtime_path()?)
-    } else {
-        None
-    };
-
     let mut command = Command::new(&node);
     command
         .arg(&launcher)
@@ -656,13 +618,7 @@ fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
         .env(
             "CAS_NO_MICRO_PACKAGE_VERSION",
             report.package_version.as_deref().unwrap_or("unknown"),
-        );
-    if let Some(runtime) = patched_runtime.as_ref() {
-        command
-            .env("CAS_R94_1_CODEX_RUNTIME_EXE", runtime)
-            .env("CAS_R94_1_OPENAI_POLICY_OVERLAY", "1");
-    }
-    command
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -685,17 +641,6 @@ fn launch_windows(extra_args: &[String]) -> Result<Value, String> {
                 "noLagging": {
                     "microAccessoryGuard": "success",
                     "mcpExitGuard": mcp_exit_guard,
-                    "openaiPolicyOverlay": if policy_overlay_active {
-                        json!({
-                            "status": "native-runtime",
-                            "effectiveProvider": "openai",
-                            "runtime": patched_runtime
-                                .as_ref()
-                                .map(|p| p.to_string_lossy().into_owned()),
-                        })
-                    } else {
-                        json!({ "status": "not-required" })
-                    },
                 },
             }));
         }
@@ -732,15 +677,6 @@ mod tests {
     fn count_occurrences_handles_overlap_free_markers() {
         assert_eq!(count_occurrences(b"abc--abc--abc", b"abc"), 3);
         assert_eq!(count_occurrences(b"abc", b"abcd"), 0);
-    }
-
-    #[test]
-    fn r94_1_runtime_filename_is_side_by_side_with_transfer() {
-        assert_eq!(R94_1_CODEX_RUNTIME_FILE, "codex-r94.1-runtime.exe");
-        assert_eq!(
-            R94_1_OPENAI_POLICY_OVERLAY_FILE,
-            "r94.1-openai-provider-policy.json"
-        );
     }
 
     #[test]

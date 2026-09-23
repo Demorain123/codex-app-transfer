@@ -571,47 +571,23 @@ Write-Host 'R94_1_RUST_2021_SYNTAX_COMPAT_PASS' -ForegroundColor Green
 
 foreach ($Marker in @(
     'CAS-R94-1-PROVIDER-CONFIG-TRUTH',
-    'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY',
+    'CAS-R94-1-TRANSFER-ONLY-PROVIDER-POLICY-OBSERVATION',
     'CAS-R94-1-EXTERNAL-CATALOG-AUTHORITY',
-    'provider_policy_overlay_block_reason',
-    'OPENAI_POLICY_OVERLAY_FIELDS',
-    'write_openai_policy_overlay',
-    'restore_openai_policy_overlay',
-    'built-in-openai-native-policy-overlay',
-    'CAS-R94-1-BUILTIN-OPENAI-RUNTIME-REQUIRED',
-    'provider-id-requires-quoted-toml-key',
-    'nested-provider-policy-not-portable',
-    'wire-api-not-responses',
-    'boolean-provider-capability-not-portable',
-    'unsupported-openai-overlay-field',
     'provider_section_fields',
     'section_requires_quoted_key',
     'behavior_fields',
     'sync_root_value(&paths.config_toml, "model_provider", None)',
-    '"model_providers.openai"',
+    'transfer-only-observed-stock-openai-policy-not-overridable',
+    'CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED',
+    'CAS-R94-1-BUILTIN-OPENAI-IDENTITY-RESTORE',
     'r94_1_provider_policy_truth_reads_custom_provider_fields',
     'r94_1_provider_policy_reader_accepts_plain_header_comment',
-    'r94_1_quoted_provider_table_fails_closed_before_mutation',
-    'r94_1_nested_provider_policy_fails_closed_before_mutation',
-    'r94_1_nested_provider_table_is_detected_even_after_unrelated_table',
-    'r94_1_dotted_unknown_provider_policy_fails_closed',
+    'r94_1_provider_policy_parser_marks_quoted_and_nested_forms',
     'r94_1_live_provider_switch_in_same_session_fails_before_mutation',
-    'r94_1_expected_root_provider_absence_reuses_snapshot_source',
+    'r94_1_expected_root_provider_absence_reuses_snapshot_source_without_fake_overlay',
     'r94_1_identity_only_provider_can_repeat_after_transfer_strips_root_identity',
-    'CAS-R94-1-LIVE-PROVIDER-IDENTITY-CHANGED',
-    'r94_1_dotted_provider_text_inside_unrelated_table_is_not_root_policy',
-    'r94_1_snapshot_policy_without_live_provider_table_is_detected',
-    'r94_1_dotted_root_provider_policy_overlays_builtin_openai',
-    'live-provider-table-missing',
-    'root_scope',
-    'r94_1_provider_policy_overlays_builtin_openai_and_keeps_source_untouched',
-    'r94_1_partial_overlay_journal_recovers_without_false_user_edit',
-    'r94_1_restore_preserves_source_provider_endpoint_edit',
-    'r94_1_restore_preserves_live_provider_identity_edit_and_restores_overlay',
-    'r94_1_portable_retry_policy_reuses_values_without_source_auth',
-    'r94_1_identity_only_provider_still_normalizes_to_builtin_openai',
-    'r94_1_builtin_openai_policy_is_journalled_for_native_overlay',
-    'CAS-R94-1-BUILTIN-OPENAI-OVERLAY-RESTORE',
+    'r94_1_provider_policy_is_observed_but_not_copied_to_builtin_openai',
+    'r94_1_builtin_openai_table_is_left_user_owned',
     'snapshot_toml_value_literal(snapshot_config, "model_context_window")',
     'model_context_window_set: !preserve_external_model_catalog',
     'r94_1_external_catalog_removes_transfer_only_global_window',
@@ -621,11 +597,19 @@ foreach ($Marker in @(
     'action = "preserve-ambiguous-live-root-window"'
 )) {
     if (-not $R941ApplyRsText.Contains($Marker)) {
-        throw "r94.1 provider/config truth contract missing: $Marker"
+        throw "r94.1 Transfer-only provider/config truth contract missing: $Marker"
     }
 }
 
 foreach ($Forbidden in @(
+    'CAS-R94-1-BUILTIN-OPENAI-POLICY-OVERLAY',
+    'OPENAI_POLICY_OVERLAY_FIELDS',
+    'write_openai_policy_overlay',
+    'restore_openai_policy_overlay',
+    'CAS-R94-1-BUILTIN-OPENAI-RUNTIME-REQUIRED',
+    'codex-r94.1-runtime',
+    'CAS_R94_1_CODEX_RUNTIME_EXE',
+    'CAS_R94_1_OPENAI_POLICY_OVERLAY',
     'custom-provider-policy-preserved',
     'CAS-R94-1-CUSTOM-PROVIDER-ROUTE-CANARY',
     'provider_policy_carry_forward_block_reason',
@@ -634,13 +618,10 @@ foreach ($Forbidden in @(
     'sync_root_value(&paths.config_toml, "request_max_retries"',
     'sync_root_value(&paths.config_toml, "stream_idle_timeout_ms"',
     'sync_root_value(&paths.config_toml, "websocket_connect_timeout_ms"',
-    'sync_root_value(&paths.config_toml, "wire_api"',
-    'sync_root_value(&paths.config_toml, "supports_websockets"',
-    'sync_root_value(&paths.config_toml, "query_params"',
-    'sync_root_value(&paths.config_toml, "http_headers"'
+    'sync_table_field(&paths.config_toml, "model_providers.openai"'
 )) {
     if ($R941ApplyRsText.Contains($Forbidden)) {
-        throw "r94.1 built-in openai policy-overlay contract violated: $Forbidden"
+        throw "r94.1 Transfer-only provider/config contract violated: $Forbidden"
     }
 }
 
@@ -650,16 +631,13 @@ if ($MyInvocation.MyCommand.Path -and ([System.IO.File]::ReadAllText($MyInvocati
 }
 Write-Host 'R94_1_PREVIEW_IDENTITY_SANITY_PASS' -ForegroundColor Green
 
-Write-Host 'R94_1_BUILTIN_OPENAI_POLICY_OVERLAY_PREFLIGHT_PASS' -ForegroundColor Green
-Write-Host '  - Transfer keeps the effective Codex provider on built-in openai; custom source provider identity is not retained for runtime'
-Write-Host '  - portable provider behavior fields are copied into a Transfer-owned [model_providers.openai] overlay while the source table stays user-owned'
-Write-Host '  - stock Codex built-in-provider collision is not treated as success; a native runtime overlay is explicitly required when copied fields exist'
-Write-Host '  - retry budgets, stream/connect timeouts, query params and header maps are journalled and restored symmetrically'
-Write-Host '  - unsupported/nested/quoted/future provider behavior fails closed instead of silently degrading to Codex defaults'
-Write-Host '  - same-session model_provider identity changes fail closed before routing mutation; a fresh apply establishes a new source baseline'
-Write-Host '  - identity-only providers still normalize directly to built-in openai and require no patched provider-policy runtime'
-Write-Host '  - source auth/routing metadata remains untouched; only portable behavior is reused'
-Write-Host '  - external catalog ownership rules from r94.1 remain unchanged'
+Write-Host 'R94_1_TRANSFER_ONLY_PROVIDER_CONFIG_PREFLIGHT_PASS' -ForegroundColor Green
+Write-Host '  - Transfer keeps the effective Codex provider on built-in openai'
+Write-Host '  - user custom-provider tables and behavior fields remain user-owned and untouched'
+Write-Host '  - provider behavior is parsed for diagnostics only; r94.1 does not write a cosmetic [model_providers.openai] override'
+Write-Host '  - no Codex binary, app-server, MSIX content or private runtime is patched/replaced'
+Write-Host '  - same-session model_provider identity changes still fail closed before Transfer overwrites the user edit'
+Write-Host '  - external catalog ownership rules remain unchanged'
 
 foreach ($Marker in @(
     'CAS-R94-TURN-AWARE-ROLLOUT-BRIDGE',
@@ -904,9 +882,10 @@ function Replace-BlockRequired([string]$Text,[string]$Start,[string]$End,[string
         Write-Host '  - local rollout task/token events are normalized into the same bounded capability without provider/app-server probes'
         Write-Host '  - pane status consumes exact recent-turn usage when available; native/global Usage is never borrowed'
         Write-Host '  - optional Runtime Debug (DBG94.1-1) exposes package/runtime/PID evidence in Transfer and the live Codex renderer'
-        Write-Host 'R94_1_PROVIDER_POLICY_CARRY_FORWARD_RUNTIME_PASS' -ForegroundColor Green
-        Write-Host '  - identity-only providers still normalize to built-in openai'
-        Write-Host '  - eligible custom provider policy remains active and only its endpoint is redirected to Transfer'
+        Write-Host 'R94_1_TRANSFER_ONLY_PROVIDER_CONFIG_RUNTIME_PASS' -ForegroundColor Green
+        Write-Host '  - effective provider remains built-in openai'
+        Write-Host '  - user provider tables remain untouched; behavior fields are observed but not falsely claimed effective on stock Codex'
+        Write-Host '  - Transfer does not patch or replace Codex runtime/app-server'
         Write-Host '  - external model catalog owns per-model context; user-owned/ambiguous live root overrides are never silently deleted'
         Write-Host '  - runtime debug panel is freely draggable for this session'
         Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'

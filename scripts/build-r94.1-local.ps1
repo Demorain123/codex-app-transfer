@@ -13,8 +13,14 @@ $CargoLock = Join-Path $RepoRoot 'Cargo.lock'
 $DebugBanner = Join-Path $RepoRoot 'frontend\src\components\codex\RuntimeDebugBanner.vue'
 $ThemeInjector = Join-Path $RepoRoot 'src-tauri\src\codex_theme_injector.rs'
 $OutputUiBuilder = Join-Path $PSScriptRoot 'build-r74-output-ui-local.ps1'
+$RetryForward = Join-Path $RepoRoot 'crates\proxy\src\forward.rs'
+$RetryServer = Join-Path $RepoRoot 'crates\proxy\src\server.rs'
+$RetrySettings = Join-Path $RepoRoot 'src-tauri\src\admin\handlers\settings.rs'
+$RetrySettingsPage = Join-Path $RepoRoot 'frontend\src\pages\SettingsPage.vue'
+$RetryNoMicro = Join-Path $RepoRoot 'src-tauri\src\admin\services\desktop\no_micro.rs'
+$RetryLauncher = Join-Path $RepoRoot 'src-tauri\resources\codex_no_micro_launcher.mjs'
 
-foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder)) {
+foreach ($Path in @($Inner,$CargoToml,$CargoLock,$DebugBanner,$ThemeInjector,$OutputUiBuilder,$RetryForward,$RetryServer,$RetrySettings,$RetrySettingsPage,$RetryNoMicro,$RetryLauncher)) {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "r94.1 required source missing: $Path"
     }
@@ -25,6 +31,12 @@ $LockText = [System.IO.File]::ReadAllText($CargoLock)
 $DebugText = [System.IO.File]::ReadAllText($DebugBanner)
 $ThemeText = [System.IO.File]::ReadAllText($ThemeInjector)
 $OutputUiText = [System.IO.File]::ReadAllText($OutputUiBuilder)
+$RetryForwardText = [System.IO.File]::ReadAllText($RetryForward)
+$RetryServerText = [System.IO.File]::ReadAllText($RetryServer)
+$RetrySettingsText = [System.IO.File]::ReadAllText($RetrySettings)
+$RetrySettingsPageText = [System.IO.File]::ReadAllText($RetrySettingsPage)
+$RetryNoMicroText = [System.IO.File]::ReadAllText($RetryNoMicro)
+$RetryLauncherText = [System.IO.File]::ReadAllText($RetryLauncher)
 
 foreach ($Check in @(
     @{ Text = $CargoText; Marker = 'version = "2.4.5+94.1"' },
@@ -46,12 +58,51 @@ foreach ($Check in @(
 
 Write-Host 'R94_1_PREVIEW_WRAPPER_IDENTITY_PASS' -ForegroundColor Green
 
+foreach ($Check in @(
+    @{ Text = $RetryForwardText; Marker = 'CAS-R94-1-TRANSFER-UPSTREAM-CONNECT-RETRY' },
+    @{ Text = $RetryForwardText; Marker = 'error.is_connect()' },
+    @{ Text = $RetryForwardText; Marker = 'MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES: u8 = 15' },
+    @{ Text = $RetryServerText; Marker = '/_cas/transfer-retry-status' },
+    @{ Text = $RetrySettingsText; Marker = 'upstreamConnectRetries must be an integer between 0 and 15' },
+    @{ Text = $RetrySettingsPageText; Marker = "persist({ upstreamConnectRetries: value })" },
+    @{ Text = $RetrySettingsPageText; Marker = 'max="15"' },
+    @{ Text = $RetryNoMicroText; Marker = 'CAS_TRANSFER_PROXY_PORT' },
+    @{ Text = $RetryLauncherText; Marker = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY' },
+    @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY ' }
+)) {
+    if (-not $Check.Text.Contains($Check.Marker)) {
+        throw "r94.1 Transfer retry contract missing: $($Check.Marker)"
+    }
+}
+foreach ($Forbidden in @(
+    'codex-r94.1-runtime',
+    'CAS_R94_1_CODEX_RUNTIME_EXE',
+    'CAS_R94_1_OPENAI_POLICY_OVERLAY'
+)) {
+    if ($RetryLauncherText.Contains($Forbidden) -or $RetryNoMicroText.Contains($Forbidden)) {
+        throw "r94.1 Transfer-only retry contract violated: $Forbidden"
+    }
+}
+Write-Host 'R94_1_TRANSFER_RETRY_CONTRACT_PASS' -ForegroundColor Green
+
+& node --check $RetryLauncher
+if ($LASTEXITCODE -ne 0) {
+    throw "r94.1 No Lagging retry overlay JavaScript syntax failed: $LASTEXITCODE"
+}
+Write-Host 'R94_1_TRANSFER_RETRY_JS_SYNTAX_PASS' -ForegroundColor Green
+
 $WorkspaceCargo = Join-Path $RepoRoot 'Cargo.toml'
 & cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-codex-integration --lib r94_1_
 if ($LASTEXITCODE -ne 0) {
     throw "r94.1 Transfer-only provider/config focused tests failed with exit code $LASTEXITCODE"
 }
 Write-Host 'R94_1_TRANSFER_ONLY_PROVIDER_CONFIG_FOCUSED_TESTS_PASS' -ForegroundColor Green
+
+& cargo test --manifest-path $WorkspaceCargo -p codex-app-transfer-proxy r94_1_transfer_retry_ -- --test-threads=1
+if ($LASTEXITCODE -ne 0) {
+    throw "r94.1 Transfer retry focused tests failed with exit code $LASTEXITCODE"
+}
+Write-Host 'R94_1_TRANSFER_RETRY_FOCUSED_TESTS_PASS' -ForegroundColor Green
 
 $Args = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$Inner)
 if ($RunFocusedTests) { $Args += '-RunFocusedTests' }

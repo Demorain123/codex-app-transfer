@@ -346,29 +346,32 @@ function outputTelemetryRuntimeSource(proxyPort) {
     const bars = Array.from(document.querySelectorAll(
       '[data-cas-status-inside-composer="true"][data-cas-status-owner="r94-inline-safe"]'
     ));
-    let rendered = 0;
-    bars.forEach(function(bar) {
-      if (!(bar instanceof Element)) return;
-      let chip = Array.from(bar.children || []).find(function(child) {
-        return child instanceof Element && child.hasAttribute(RETRY_CHIP_ATTR);
-      });
-      if (!chip) {
-        chip = document.createElement('span');
-        chip.setAttribute(RETRY_CHIP_ATTR, 'true');
-        chip.setAttribute('aria-label', 'Transfer upstream retry');
-        bar.appendChild(chip);
-      }
-      if (chip.textContent !== label) chip.textContent = label;
-      chip.setAttribute(
-        'title',
-        'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
-      );
-      rendered += 1;
+    // Never pretend a global proxy retry belongs to a specific pane when split
+    // panes/subagents are visible. With exactly one safe composer bar, render
+    // there; otherwise use the global Transfer HUD fallback.
+    if (bars.length !== 1 || !(bars[0] instanceof Element)) {
+      existing.forEach(function(node) { node.remove(); });
+      return 0;
+    }
+    const bar = bars[0];
+    let chip = Array.from(bar.children || []).find(function(child) {
+      return child instanceof Element && child.hasAttribute(RETRY_CHIP_ATTR);
     });
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.setAttribute(RETRY_CHIP_ATTR, 'true');
+      chip.setAttribute('aria-label', 'Transfer upstream retry');
+      bar.appendChild(chip);
+    }
+    if (chip.textContent !== label) chip.textContent = label;
+    chip.setAttribute(
+      'title',
+      'Transfer is retrying a connect-stage upstream failure. Codex native retry budget remains unchanged.'
+    );
     existing.forEach(function(node) {
-      if (!node.closest('[data-cas-status-inside-composer="true"]')) node.remove();
+      if (node !== chip) node.remove();
     });
-    return rendered;
+    return 1;
   }
 
   function updateHud() {    const hud = ensureHud();

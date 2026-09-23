@@ -649,7 +649,7 @@ export default {
   "settings.codexQuotaEnabledHint": "Shows a usage panel in Codex (context, token rate/total, quota). Only when Codex is launched from this app.",
   "settings.upstreamConnectRetries": "Transfer upstream connect retries",
   "settings.upstreamConnectRetriesHint":
-    "Finite-count mode. 0 = off; positive integers are not capped at 15. One connection incident gets one Transfer retry round: for example, 20 means at most 20 Transfer retries for that incident. After exhaustion, Codex reissues do not silently receive another 20-retry round; the budget resets only after a real HTTP response is received. Ordinary 4xx/5xx responses or an SSE stream that already started are never replayed.",
+    "Finite-count mode. 0 = off; positive integers are not capped at 15. Retry layering is fixed as Transfer → Codex: Transfer first completes its one round (for example 1/20…20/20). Only if that round still fails and returns the error to Codex may Codex's native Reconnecting x/5 phase begin. Codex reissues after exhaustion do not receive a second Transfer round; the budget resets only after a real HTTP response is received. Ordinary 4xx/5xx responses or an SSE stream that already started are never replayed.",
   "settings.upstreamConnectRetryInfinite": "Unlimited retry count",
   "settings.upstreamConnectRetryInfiniteHint":
     "When enabled, the finite count above is ignored and retries may continue across later Codex reissues. The total duration is optional; 0 hours 0 minutes (or both blank) means no time limit. Codex shows a retry warning only while Transfer is actually retrying.",

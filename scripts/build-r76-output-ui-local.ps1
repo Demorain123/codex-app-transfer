@@ -203,6 +203,10 @@ $MainProcessCollector = @'
         let activeTurnId = '';
         const turnMeta = new Map();
         const itemMeta = new Map();
+        // R94_CODEX_ASSISTANT_OUTPUT_EVENT_RUNTIME
+        // Keep only item identity/phase/timestamp metadata. No assistant text,
+        // prompt, tool payload, credential, or transcript content is forwarded.
+        const outputMeta = new Map();
         let latestUsage = null;
         let latestTerminal = null;
         let latestItemEventAt = 0;
@@ -225,14 +229,69 @@ $MainProcessCollector = @'
 
         for (let index = 0; index < lines.length; index += 1) {
           const line = lines[index];
-          if (!line || !/(token_count|task_started|task_complete|turn_started|turn_complete|turn_context|item_started|item_completed)/.test(line)) continue;
+          if (!line || !/(token_count|task_started|task_complete|turn_started|turn_complete|turn_context|item_started|item_completed|response_item|agent_message)/.test(line)) continue;
 
           let row;
           try { row = JSON.parse(line); } catch { continue; }
-          const payload = row && row.type === 'event_msg' && row.payload && typeof row.payload === 'object'
+          const rowType = String(row?.type || '').toLowerCase();
+          const eventPayload = rowType === 'event_msg' && row?.payload && typeof row.payload === 'object'
             ? row.payload
-            : row;
-          const type = String(payload?.type || row?.type || '').toLowerCase();
+            : null;
+          const responsePayload = rowType === 'response_item' && row?.payload && typeof row.payload === 'object'
+            ? row.payload
+            : null;
+          const payload = eventPayload || row;
+          const type = String(payload?.type || rowType || '').toLowerCase();
+
+          if (responsePayload) {
+            const itemType = String(responsePayload?.type || '').toLowerCase();
+            const role = String(responsePayload?.role || '').toLowerCase();
+            if (itemType === 'message' && role === 'assistant') {
+              const passthrough = responsePayload?.internal_chat_message_metadata_passthrough;
+              const turnId = normalizeTurnId(
+                passthrough?.turn_id || passthrough?.turnId ||
+                responsePayload?.turn_id || responsePayload?.turnId ||
+                activeTurnId
+              );
+              const itemId = String(responsePayload?.id || '').trim();
+              const phase = String(responsePayload?.phase || '').trim().toLowerCase();
+              const atMs = rowEpoch(row, Date.now());
+              if (turnId && Number.isFinite(atMs)) {
+                const key = itemId
+                  ? (turnId + '\u0000' + itemId)
+                  : (turnId + '\u0000response\u0000' + phase + '\u0000' + String(atMs));
+                outputMeta.delete(key);
+                outputMeta.set(key, {
+                  turnId,
+                  itemId: itemId || null,
+                  phase: phase || null,
+                  atMs,
+                  source: 'response_item',
+                });
+              }
+            }
+            continue;
+          }
+
+          if (type === 'agent_message') {
+            const turnId = normalizeTurnId(
+              payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId || activeTurnId
+            );
+            const phase = String(payload?.phase || '').trim().toLowerCase();
+            const atMs = rowEpoch(row, Date.now());
+            if (turnId && Number.isFinite(atMs)) {
+              const key = turnId + '\u0000agent_message\u0000' + phase + '\u0000' + String(atMs);
+              outputMeta.delete(key);
+              outputMeta.set(key, {
+                turnId,
+                itemId: null,
+                phase: phase || null,
+                atMs,
+                source: 'agent_message',
+              });
+            }
+            continue;
+          }
 
           if (type === 'item_started' || type === 'item_completed') {
             const turnId = normalizeTurnId(payload?.turn_id || payload?.turnId || row?.turn_id || row?.turnId);
@@ -343,6 +402,7 @@ $MainProcessCollector = @'
 
         if (!latestUsage) {
           const recentItems = Array.from(itemMeta.values()).slice(-96);
+          const recentOutputs = Array.from(outputMeta.values()).slice(-96);
           const previousEnvelope = previous && previous.envelope && typeof previous.envelope === 'object'
             ? previous.envelope
             : null;
@@ -370,6 +430,7 @@ $MainProcessCollector = @'
                 status: latestTerminal.status || 'completed',
               } : null,
               recentItems,
+              recentOutputs,
             };
             localUsageSnapshotCache.set(filePath, { size: stat.size, envelope });
             return envelope;
@@ -408,6 +469,7 @@ $MainProcessCollector = @'
             status: latestTerminal.status || 'completed',
           } : null,
           recentItems: Array.from(itemMeta.values()).slice(-96),
+          recentOutputs: Array.from(outputMeta.values()).slice(-96),
         };
         localUsageSnapshotCache.set(filePath, { size: stat.size, envelope });
         return envelope;
@@ -482,6 +544,15 @@ $MainProcessCollector = @'
           startedAtMs: Number(item?.startedAtMs) || null,
           completedAtMs: Number(item?.completedAtMs) || null,
         })).filter((item) => item.turnId && item.itemId)
+      : [];
+    safeEnvelope.recentOutputs = Array.isArray(envelope.recentOutputs)
+      ? envelope.recentOutputs.slice(-96).map((output) => ({
+          turnId: String(output?.turnId || ''),
+          itemId: output?.itemId ? String(output.itemId) : null,
+          phase: output?.phase ? String(output.phase) : null,
+          atMs: Number(output?.atMs) || null,
+          source: String(output?.source || ''),
+        })).filter((output) => output.turnId && Number.isFinite(output.atMs) && output.atMs > 0)
       : [];
     // CAS-R94-EXACT-INGEST-ACK-DIAGNOSTICS
     // executeJavaScript succeeding only proves renderer transport succeeded.

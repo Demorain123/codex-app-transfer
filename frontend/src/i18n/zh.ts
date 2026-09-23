@@ -732,6 +732,9 @@ export default {
   "settings.codexQuotaEnabled": "Codex 内显示用量信息",
   "settings.codexQuotaEnabledHint":
     "仅通过本应用启动 Codex 时生效，在 Codex 內显示用量面板:上下文占用、Tokens 速率与累计以及额度信息。",
+  "settings.upstreamConnectRetries": "Transfer 上游连接重试次数",
+  "settings.upstreamConnectRetriesHint":
+    "0 = 关闭，1–15 = Transfer 在尚未收到 HTTP 响应时遇到连接阶段错误后的额外重试次数。不会修改 Codex 原生 Reconnecting x/5，也不会重放普通 4xx/5xx 或已经开始的 SSE。No Lagging 启动时 Codex 内会显示 Transfer Retry 状态。",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy 账号切换阈值",
   "settings.workbuddyQuotaGuardThresholdHint":
     "WorkBuddy 账号池剩余积分低于此值时自动切到下一个有额度的账号(默认 20)。",

@@ -28,8 +28,9 @@ pub use diagnostics::{
 };
 pub use fake_account::{fake_account_mode_enabled, set_fake_account_mode};
 pub use forward::{
-    forward_handler, set_upstream_connect_retry_limit, transfer_retry_status_snapshot,
-    upstream_connect_retry_limit, ChatgptMcpRelayAuth, ProxyState, TransferRetryStatusSnapshot,
+    forward_handler, set_upstream_connect_retry_limit, set_upstream_connect_retry_policy,
+    transfer_retry_status_snapshot, upstream_connect_retry_limit, upstream_connect_retry_policy,
+    ChatgptMcpRelayAuth, ProxyState, TransferRetryPolicySnapshot, TransferRetryStatusSnapshot,
 }; // CAS-APPS-MCP-AUTH-R25-EXPORT
 pub use resolver::{
     AuthScheme, ProviderResolver, ResolveError, ResolvedProvider, SharedResolver, StaticResolver,

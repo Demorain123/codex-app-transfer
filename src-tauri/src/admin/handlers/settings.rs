@@ -132,7 +132,7 @@ fn transfer_retry_policy_from_settings(settings: &Value) -> Result<(u64, bool, u
                     .ok_or_else(|| "upstreamConnectRetryMaxHours must be a non-negative number".to_owned())
             })
             .transpose()?
-            .unwrap_or(0);
+            .unwrap_or(0.0);
         let max_minutes = settings
             .get("upstreamConnectRetryMaxMinutes")
             .map(|value| {

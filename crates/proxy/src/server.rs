@@ -6,15 +6,17 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    http::{HeaderMap, Method, Request, Uri},
-    response::IntoResponse,
+    http::{header, HeaderMap, HeaderValue, Method, Request, Uri},
+    response::{IntoResponse, Response},
     routing::{any, get},
-    Router,
+    Json, Router,
 };
 use futures_util::StreamExt;
 use serde_json::json;
 
-use crate::forward::{forward_handler, ChatgptMcpRelayAuth, ProxyState};
+use crate::forward::{
+    forward_handler, transfer_retry_status_snapshot, ChatgptMcpRelayAuth, ProxyState,
+};
 use crate::resolver::SharedResolver;
 
 /// 把所有方法 / 所有路径都路由到 `forward_handler`(裸代理 + B1 路由 + B2 鉴权改写)。
@@ -102,6 +104,11 @@ fn build_router_with_state(state: ProxyState) -> Router {
                 .post(forward_handler)
                 .options(forward_handler),
         )
+        // CAS-R94-1-TRANSFER-UPSTREAM-RETRY-STATUS
+        // Read-only, credential-free local status for the Transfer-owned Codex
+        // overlay. CORS is deliberately open because only loopback clients can
+        // reach this listener and the payload contains no prompt/body/token data.
+        .route("/_cas/transfer-retry-status", get(transfer_retry_status_handler))
         // [MOC-125] Codex 远程控制 WS 端点:真 WS 透传(区别于 /responses 的 ws→http 转换)。
         // relay 模式 chatgpt_base_url 指向本 proxy,这条 GET 是 WebSocket 握手 → 透传到
         // wss://chatgpt.com;显式路由优先于 fallback,其余 /backend-api/* 仍走 passthrough。
@@ -112,6 +119,18 @@ fn build_router_with_state(state: ProxyState) -> Router {
         )
         .fallback(any(forward_handler))
         .with_state(state)
+}
+
+async fn transfer_retry_status_handler() -> Response {
+    let mut response = Json(transfer_retry_status_snapshot()).into_response();
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// [MOC-125] Codex 远程控制 WS 接收侧:axum 接 upgrade,把 Codex 原始 header + path(含

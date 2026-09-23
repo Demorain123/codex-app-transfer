@@ -305,12 +305,18 @@ foreach ($Marker in @(
     'R94_NO_VIEWPORT_EDGE_PINNING_RUNTIME',
     'window.setTimeout(r94FlushSegmentTurns, 220)',
     'R94_SEMANTIC_OUTPUT_UNIT_RUNTIME',
+    'R94_STRUCTURAL_STATUS_FALLBACK_RUNTIME',
+    'function r94FallbackSemanticSignature(node) {',
+    'function r94FallbackSemanticOutputSurfaces(turn) {',
     'R94_ASSISTANT_PROSE_WITH_TOOL_RUNTIME',
     'function r94AssistantWrapperHasOwnProse(node) {',
     'R94_ITEM_ID_DEDUPE_SPECIFICITY_RUNTIME',
     'function r94DirectItemIdForSurface(surface) {',
     'function r94CollectSemanticOutputSurfaces(turn) {',
     'R94_NO_DESCENDANT_EXACT_BORROW_RUNTIME',
+    'R94_PANE_TPS_SAMPLE_CLOCK_RUNTIME',
+    'R94_NATIVE_TIME_FULL_FORMAT_OVERLAY_RUNTIME',
+    "mode: 'native-time-cover'",
     'function r94ExactItemTimeForSurface(surface, turn, capability) {',
     'function r94ItemIdForSurface(surface) {',
     'function r94AssistantMessageSurface(node) {',
@@ -349,11 +355,12 @@ foreach ($Forbidden in @(
 Write-Host 'R94_PER_OUTPUT_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - nested assistant message groups are timestamp units; explicit tool/agent/status surfaces remain independent'
 Write-Host '  - assistant prose surrounding embedded tool/agent/status cards keeps its own timestamp unit'
+Write-Host '  - current Codex agent/progress cards without stable test ids use a bounded structural status fallback'
 Write-Host '  - nested wrapper item ids cannot steal the concrete tool/agent item timestamp'
 Write-Host '  - prose-bearing assistant wrappers never borrow an embedded tool item exact time'
 Write-Host '  - user-only wrappers are excluded from assistant timestamping'
 Write-Host '  - existing/remounted history is baselined and cannot receive a fresh host-now timestamp'
-Write-Host '  - native final sent-time wins; Transfer removes its final segment badge instead of duplicating Codex'
+Write-Host '  - native final sent-time remains read-only; short native labels are visually covered by one full-date overlay only when an exact epoch exists'
 Write-Host '  - all Transfer timestamp badges live in the overlay root with pointer-events:none'
 Write-Host 'R94_FULL_DATE_TIMESTAMP_CONTRACT_PASS' -ForegroundColor Green
 Write-Host '  - Transfer-owned timestamp labels use the current host system wall clock as YYYY-MM-DD HH:mm:ss; tooltip also carries the short local timezone'
@@ -503,6 +510,9 @@ foreach ($Marker in @(
     'R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME',
     'R94_STATUS_TRUTH_SEMANTICS_RUNTIME',
     'R94_NO_NATIVE_GLOBAL_SPEED_AS_PANE_SPEED_RUNTIME',
+    'R94_PANE_LOCAL_TPS_RUNTIME',
+    'function r94PaneSpeedPresentation(threadId, turnRecord, turnExact, activity) {',
+    'exact-pane-output-delta',
     'R94_MULTI_PANE_LAST_THREAD_SNAPSHOT_FALLBACK_RUNTIME',
     'thread-snapshot-before-turn-usage',
     'exact-thread-snapshot-before-turn-usage',
@@ -737,7 +747,9 @@ Write-Host 'R94_STATUS_TRUTH_SEMANTICS_PREFLIGHT_PASS' -ForegroundColor Green
 Write-Host '  - ctx uses Codex last_token_usage.total_tokens / model_context_window on exact JSONL'
 Write-Host '  - in/out mean latest model request, session means cumulative total_token_usage'
 Write-Host '  - parent/sub-agent panes retain their last exact same-thread snapshot while a newer turn waits for its first token update'
-Write-Host '  - native/global tok/s is never relabeled as pane-local speed'
+Write-Host '  - pane tok/s is derived only from consecutive exact same-thread+same-turn output-token samples'
+Write-Host '  - native/global tok/s is never relabeled as pane-local speed; first exact sample remains -- until a delta exists'
+Write-Host '  - unavailable sid is omitted instead of rendering a permanent sid -- placeholder'
 Write-Host 'R94_LOCAL_USAGE_COLLECTOR_DIAGNOSTICS_PREFLIGHT_PASS' -ForegroundColor Green
 
 

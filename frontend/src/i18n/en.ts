@@ -649,13 +649,17 @@ export default {
   "settings.codexQuotaEnabledHint": "Shows a usage panel in Codex (context, token rate/total, quota). Only when Codex is launched from this app.",
   "settings.upstreamConnectRetries": "Transfer upstream connect retries",
   "settings.upstreamConnectRetriesHint":
-    "Finite-count mode. 0 = off; positive integers are not capped at 15, so values such as 20, 99, or 500 are allowed. Only connect-stage failures before any HTTP response exists are retried. Codex's native Reconnecting x/5 is unchanged, and ordinary 4xx/5xx responses or an SSE stream that already started are never replayed.",
+    "Finite-count mode. 0 = off; positive integers are not capped at 15. One connection incident gets one Transfer retry round: for example, 20 means at most 20 Transfer retries for that incident. After exhaustion, Codex reissues do not silently receive another 20-retry round; the budget resets only after a real HTTP response is received. Ordinary 4xx/5xx responses or an SSE stream that already started are never replayed.",
   "settings.upstreamConnectRetryInfinite": "Unlimited retry count",
   "settings.upstreamConnectRetryInfiniteHint":
-    "When enabled, the finite count above is ignored and Transfer keeps retrying until the time limit is reached. Logs and the No Lagging Codex status show the accumulated retry count and elapsed time.",
-  "settings.upstreamConnectRetryMaxHours": "Maximum unlimited-retry duration (hours)",
-  "settings.upstreamConnectRetryMaxHoursHint":
-    "Must be greater than 0 and may be fractional; for example, 1.5 means 1 hour 30 minutes. When the retry window ends, Transfer starts no new retry attempt; a request already in flight is not force-cancelled, avoiding duplicate execution or billing risk.",
+    "When enabled, the finite count above is ignored and retries may continue across later Codex reissues. The total duration is optional; 0 hours 0 minutes (or both blank) means no time limit. Codex shows a retry warning only while Transfer is actually retrying.",
+  "settings.upstreamConnectRetryMaxDuration": "Maximum unlimited-retry duration",
+  "settings.upstreamConnectRetryMaxDurationHint":
+    "Hours may be any non-negative integer and minutes must be 0–59. Examples: 1h 0m, 0h 50m, 25h 59m. Both values 0 or blank = no time limit. Once the total window expires, Transfer starts no new retry attempt; an in-flight request is not force-cancelled.",
+  "settings.upstreamConnectRetryHoursUnit": "hours",
+  "settings.upstreamConnectRetryMinutesUnit": "minutes",
+  "settings.upstreamConnectRetryHoursPlaceholder": "hours",
+  "settings.upstreamConnectRetryMinutesPlaceholder": "minutes",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy account-switch threshold",
   "settings.workbuddyQuotaGuardThresholdHint":
     "Auto-switch to the next WorkBuddy account when the active one's remaining credits drop below this value (default 20).",

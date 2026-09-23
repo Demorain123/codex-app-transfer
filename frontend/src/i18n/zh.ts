@@ -734,7 +734,7 @@ export default {
     "仅通过本应用启动 Codex 时生效，在 Codex 內显示用量面板:上下文占用、Tokens 速率与累计以及额度信息。",
   "settings.upstreamConnectRetries": "Transfer 上游连接重试次数",
   "settings.upstreamConnectRetriesHint":
-    "有限次数模式。0 = 关闭；正整数不设 15 次上限，可填写 20、99、500 等。一次连接异常只执行一轮 Transfer 重试：例如设 20，则本轮最多重试 20 次；耗尽后即使 Codex 自己再次发起请求，也不会自动再获得新一轮 Transfer 20 次预算，直到真正收到一次 HTTP 响应后才重置。普通 4xx/5xx 或已经开始的 SSE 不会被重放。",
+    "有限次数模式。0 = 关闭；正整数不设 15 次上限，可填写 20、99、500 等。重试层级固定为 Transfer → Codex：先由 Transfer 完整执行一轮，例如 1/20…20/20；只有这一轮仍失败并把错误交还 Codex 后，Codex 原生 Reconnecting x/5 才进入自己的重试阶段。耗尽后 Codex 的后续重发不会再获得第二轮 Transfer 20 次预算，直到真正收到一次 HTTP 响应后才重置。普通 4xx/5xx 或已经开始的 SSE 不会被重放。",
   "settings.upstreamConnectRetryInfinite": "无限次数重试",
   "settings.upstreamConnectRetryInfiniteHint":
     "开启后忽略上面的有限次数，可跨 Codex 后续重发持续重试。可选设置总持续时长；0 小时 0 分钟（或都留空）表示不限时。只有实际发生 Transfer 重试时，Codex 才显示重试提示。",

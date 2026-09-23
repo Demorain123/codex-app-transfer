@@ -1098,7 +1098,6 @@ try {
         "retry.infinite ? '∞'",
         'retry.maxDurationMs',
         'retryRemainingMs',
-        'TRANSFER RETRY READY ',
         'statusAvailable',
         'applyRetrySnapshot',
         '__casTransferRetryBridge',

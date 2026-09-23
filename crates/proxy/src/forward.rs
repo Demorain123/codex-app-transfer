@@ -100,7 +100,7 @@ const DEFAULT_OUTBOUND_USER_AGENT: &str = concat!("Codex-App-Transfer/", env!("C
 // Finite mode has no product-level retry cap: the persisted u64 value is used as
 // supplied (0 = disabled). Infinite mode ignores the count and is bounded by an
 // explicit wall-clock retry window so it can never run forever accidentally.
-const DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS: u64 = 5_400_000; // 1.5 hours
+const DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS: u64 = 0; // 0 = unlimited wall-clock duration
 static TRANSFER_UPSTREAM_CONNECT_RETRIES: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE: AtomicBool = AtomicBool::new(false);
 static TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS: AtomicU64 =
@@ -148,6 +148,72 @@ static TRANSFER_RETRY_ACTIVITIES: OnceLock<
     Mutex<std::collections::HashMap<u64, TransferRetryActivity>>,
 > = OnceLock::new();
 
+// CAS-R94-1-TRANSFER-RETRY-INCIDENT-SCOPE
+// Finite mode gets exactly one Transfer retry round per provider outage. Once
+// exhausted, later Codex-native reissues are passed through once and cannot
+// silently obtain another Transfer budget. A real HTTP response resets the
+// incident. Infinite mode shares one wall-clock window across Codex reissues;
+// max_duration_ms=0 means that window has no time limit.
+static TRANSFER_FINITE_EXHAUSTED_PROVIDERS: OnceLock<
+    Mutex<std::collections::HashSet<String>>,
+> = OnceLock::new();
+static TRANSFER_INFINITE_INCIDENT_STARTED_MS: OnceLock<
+    Mutex<std::collections::HashMap<String, u64>>,
+> = OnceLock::new();
+
+fn finite_exhausted_providers() -> &'static Mutex<std::collections::HashSet<String>> {
+    TRANSFER_FINITE_EXHAUSTED_PROVIDERS
+        .get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+fn infinite_incident_started_ms() -> &'static Mutex<std::collections::HashMap<String, u64>> {
+    TRANSFER_INFINITE_INCIDENT_STARTED_MS
+        .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn finite_retry_round_exhausted(provider: &str) -> bool {
+    finite_exhausted_providers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .contains(provider)
+}
+
+fn mark_finite_retry_round_exhausted(provider: &str) {
+    finite_exhausted_providers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(provider.to_owned());
+}
+
+fn get_or_start_infinite_incident(provider: &str, now_ms: u64) -> u64 {
+    let mut guard = infinite_incident_started_ms()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard.entry(provider.to_owned()).or_insert(now_ms)
+}
+
+fn clear_retry_incident(provider: &str) {
+    finite_exhausted_providers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(provider);
+    infinite_incident_started_ms()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(provider);
+}
+
+fn clear_all_retry_incidents() {
+    finite_exhausted_providers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+    infinite_incident_started_ms()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+}
+
 fn transfer_retry_activities(
 ) -> &'static Mutex<std::collections::HashMap<u64, TransferRetryActivity>> {
     TRANSFER_RETRY_ACTIVITIES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
@@ -166,18 +232,18 @@ pub fn set_upstream_connect_retry_policy(
     infinite: bool,
     max_duration_ms: u64,
 ) -> TransferRetryPolicySnapshot {
-    let duration = if max_duration_ms == 0 {
-        DEFAULT_TRANSFER_RETRY_MAX_DURATION_MS
-    } else {
-        max_duration_ms
-    };
-    TRANSFER_UPSTREAM_CONNECT_RETRIES.store(retries, Ordering::Relaxed);
-    TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE.store(infinite, Ordering::Relaxed);
-    TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS.store(duration, Ordering::Relaxed);
+    let old_retries = TRANSFER_UPSTREAM_CONNECT_RETRIES.swap(retries, Ordering::Relaxed);
+    let old_infinite =
+        TRANSFER_UPSTREAM_CONNECT_RETRY_INFINITE.swap(infinite, Ordering::Relaxed);
+    let old_duration = TRANSFER_UPSTREAM_CONNECT_RETRY_MAX_DURATION_MS
+        .swap(max_duration_ms, Ordering::Relaxed);
+    if old_retries != retries || old_infinite != infinite || old_duration != max_duration_ms {
+        clear_all_retry_incidents();
+    }
     TransferRetryPolicySnapshot {
         retries,
         infinite,
-        max_duration_ms: duration,
+        max_duration_ms,
     }
 }
 
@@ -3876,6 +3942,39 @@ async fn build_and_send_upstream(
     let outbound_headers_snapshot = req.headers().clone();
     let retry_policy = upstream_connect_retry_policy();
 
+    // A finite retry budget is a single round for one provider outage. If that
+    // round was already exhausted, let the next Codex/native reissue make one
+    // ordinary connection attempt, but do not grant another Transfer round.
+    if !retry_policy.infinite
+        && retry_policy.retries > 0
+        && finite_retry_round_exhausted(&resolved.provider_id)
+    {
+        match state.http.execute(req).await {
+            Ok(resp) => {
+                clear_retry_incident(&resolved.provider_id);
+                proxy_telemetry().logs.add(
+                    "INFO",
+                    format!(
+                        "[transfer-upstream-retry-incident-reset] provider={} mode=finite reason=http_response_after_exhaustion",
+                        resolved.provider_id,
+                    ),
+                );
+                return Ok((resp, outbound_headers_snapshot));
+            }
+            Err(error) => {
+                proxy_telemetry().logs.add(
+                    "WARN",
+                    format!(
+                        "[transfer-upstream-retry-round-blocked] provider={} mode=finite reason=previous_round_exhausted connect_error={}",
+                        resolved.provider_id,
+                        error.is_connect(),
+                    ),
+                );
+                return Err(ForwardError::Upstream(error));
+            }
+        }
+    }
+
     if !retry_policy.infinite && retry_policy.retries == 0 {
         let resp = state.http.execute(req).await?;
         return Ok((resp, outbound_headers_snapshot));
@@ -3916,6 +4015,7 @@ async fn build_and_send_upstream(
 
         match state.http.execute(attempt_request).await {
             Ok(resp) => {
+                clear_retry_incident(&resolved.provider_id);
                 if let Some(id) = retry_activity_id.take() {
                     let elapsed_ms = retry_started_at
                         .map(|started| {
@@ -3938,6 +4038,7 @@ async fn build_and_send_upstream(
             }
             Err(error) => {
                 if !error.is_connect() {
+                    clear_retry_incident(&resolved.provider_id);
                     if let Some(id) = retry_activity_id.take() {
                         let elapsed_ms = retry_started_at
                             .map(|started| {
@@ -3960,6 +4061,7 @@ async fn build_and_send_upstream(
                 }
 
                 if !retry_policy.infinite && retries_used >= retry_policy.retries {
+                    mark_finite_retry_round_exhausted(&resolved.provider_id);
                     if let Some(id) = retry_activity_id.take() {
                         proxy_telemetry().logs.add(
                             "ERROR",
@@ -3976,18 +4078,27 @@ async fn build_and_send_upstream(
 
                 if retry_started_at.is_none() {
                     retry_started_at = Some(Instant::now());
-                    retry_started_epoch_ms = now_epoch_ms();
+                    let now_ms = now_epoch_ms();
+                    retry_started_epoch_ms = if retry_policy.infinite {
+                        get_or_start_infinite_incident(&resolved.provider_id, now_ms)
+                    } else {
+                        now_ms
+                    };
                 }
 
-                let elapsed_ms = retry_started_at
-                    .map(|started| {
-                        started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
-                    })
-                    .unwrap_or(0);
+                let elapsed_ms = if retry_policy.infinite {
+                    now_epoch_ms().saturating_sub(retry_started_epoch_ms)
+                } else {
+                    retry_started_at
+                        .map(|started| {
+                            started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+                        })
+                        .unwrap_or(0)
+                };
                 let next_attempt = retries_used.saturating_add(1);
                 let mut delay_ms = transfer_retry_delay_ms(next_attempt);
 
-                if retry_policy.infinite {
+                if retry_policy.infinite && retry_policy.max_duration_ms > 0 {
                     let remaining_ms = retry_policy.max_duration_ms.saturating_sub(elapsed_ms);
                     // Do not start another request once its backoff would cross the
                     // user's retry window. Crucially, we never hard-cancel a request
@@ -5589,14 +5700,49 @@ mod tests {
     }
 
     #[test]
-    fn r94_1_transfer_retry_infinite_mode_is_time_bounded() {
-        let policy = set_upstream_connect_retry_policy(0, true, 5_400_000);
-        assert!(policy.infinite);
-        assert_eq!(policy.max_duration_ms, 5_400_000);
+    fn r94_1_transfer_retry_infinite_mode_supports_bounded_or_unlimited_time() {
+        let bounded = set_upstream_connect_retry_policy(0, true, 5_400_000);
+        assert!(bounded.infinite);
+        assert_eq!(bounded.max_duration_ms, 5_400_000);
+
+        let unlimited = set_upstream_connect_retry_policy(0, true, 0);
+        assert!(unlimited.infinite);
+        assert_eq!(unlimited.max_duration_ms, 0);
+
         let status = transfer_retry_status_snapshot();
         assert!(status.infinite);
-        assert_eq!(status.max_duration_ms, 5_400_000);
-        set_upstream_connect_retry_policy(0, false, 5_400_000);
+        assert_eq!(status.max_duration_ms, 0);
+        set_upstream_connect_retry_policy(0, false, 0);
+    }
+
+    #[test]
+    fn r94_1_transfer_retry_finite_round_latches_until_http_recovery_or_policy_change() {
+        set_upstream_connect_retry_policy(20, false, 0);
+        mark_finite_retry_round_exhausted("provider-a");
+        assert!(finite_retry_round_exhausted("provider-a"));
+        assert!(!finite_retry_round_exhausted("provider-b"));
+
+        clear_retry_incident("provider-a");
+        assert!(!finite_retry_round_exhausted("provider-a"));
+
+        mark_finite_retry_round_exhausted("provider-a");
+        set_upstream_connect_retry_policy(21, false, 0);
+        assert!(!finite_retry_round_exhausted("provider-a"));
+        set_upstream_connect_retry_policy(0, false, 0);
+    }
+
+    #[test]
+    fn r94_1_transfer_retry_infinite_incident_window_is_shared_across_reissues() {
+        set_upstream_connect_retry_policy(0, true, 3_600_000);
+        let a = get_or_start_infinite_incident("provider-window", 1000);
+        let b = get_or_start_infinite_incident("provider-window", 9000);
+        assert_eq!(a, 1000);
+        assert_eq!(b, 1000);
+        clear_retry_incident("provider-window");
+        let c = get_or_start_infinite_incident("provider-window", 9000);
+        assert_eq!(c, 9000);
+        clear_retry_incident("provider-window");
+        set_upstream_connect_retry_policy(0, false, 0);
     }
 
     #[test]

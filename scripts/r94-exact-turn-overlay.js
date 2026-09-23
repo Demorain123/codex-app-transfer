@@ -1220,7 +1220,7 @@
   }
 
   function r94SegmentTimeIsExact(source) {
-    return /^item\/(started|completed)$/i.test(String(source || ''));
+    return /^(?:item\/(?:started|completed)|rollout\/assistant-output)$/i.test(String(source || ''));
   }
 
   function r94SegmentTimeLabel(epoch, source) {
@@ -1318,6 +1318,52 @@
     return ordered.length ? ordered[ordered.length - 1] : null;
   }
 
+  // R94_ROLLOUT_ASSISTANT_OUTPUT_TIMESTAMP_RUNTIME
+  // Official Codex rollouts persist assistant message rows with a timestamp and,
+  // when available, MessagePhase (commentary/final_answer). The local collector
+  // forwards only identity/phase/time metadata, never message text.
+  function r94RecentOutputEventsFor(threadId, turnId) {
+    const thread = String(threadId || '').replace(/^local:/i, '').trim().toLowerCase();
+    const turn = r94NormalizeTurnId(turnId);
+    const map = state.metrics && state.metrics.r94RecentOutputsByThread;
+    if (!thread || !turn || !(map instanceof Map)) return [];
+    const raw = map.get(thread);
+    if (!Array.isArray(raw)) return [];
+
+    const ordered = raw.filter(function(output) {
+      return output && r94NormalizeTurnId(output.turnId) === turn &&
+        Number.isFinite(Number(output.atMs)) && Number(output.atMs) > 0;
+    }).map(function(output) {
+      return {
+        turnId: turn,
+        itemId: String(output.itemId || ''),
+        phase: String(output.phase || '').toLowerCase(),
+        atMs: Number(output.atMs),
+        source: String(output.source || 'rollout'),
+      };
+    }).sort(function(a,b) { return a.atMs - b.atMs; });
+
+    const deduped = [];
+    for (const output of ordered) {
+      const previous = deduped.length ? deduped[deduped.length - 1] : null;
+      if (previous && previous.phase === output.phase && Math.abs(previous.atMs - output.atMs) <= 250) {
+        if (!previous.itemId && output.itemId) deduped[deduped.length - 1] = output;
+        continue;
+      }
+      deduped.push(output);
+    }
+    return deduped;
+  }
+
+  function r94LatestFinalOutputEpoch(threadId, turnId) {
+    const outputs = r94RecentOutputEventsFor(threadId, turnId);
+    for (let index = outputs.length - 1; index >= 0; index -= 1) {
+      const output = outputs[index];
+      if (output.phase === 'final_answer' || output.phase === 'final') return output.atMs;
+    }
+    return null;
+  }
+
   function installOutputObserver() {
     if (!document.body) {
       setTimeout(installOutputObserver, 120);
@@ -1379,6 +1425,7 @@
     // semantic nodes so history/remounts are never assigned a fresh "now".
     const orphanSegmentNodes = new WeakSet();
     const pendingOrphanSegments = new Set();
+    const claimedOutputEventKeys = new Set();
 
     const timelineEntries = new Map();
     const timelineMarkers = new Map();
@@ -1711,13 +1758,15 @@
       if (exact && exact.record && !Number.isFinite(r94EpochMillis(exact.record.epoch))) {
         const lifecycleRecord = capability.getRecord(ids.threadId, ids.turnId);
         const completedEpoch = r94EpochMillis(lifecycleRecord && lifecycleRecord.completedAt);
-        if (Number.isFinite(completedEpoch)) {
+        const finalOutputEpoch = r94LatestFinalOutputEpoch(ids.threadId, ids.turnId);
+        const upgradedEpoch = Number.isFinite(completedEpoch) ? completedEpoch : finalOutputEpoch;
+        if (Number.isFinite(upgradedEpoch)) {
           exact = {
             record: {
-              epoch: completedEpoch,
-              label: r94LocalDateTimeStamp(completedEpoch),
-              title: r94FullTimestampTitle(completedEpoch, 'exact: Codex turn/completed'),
-              source: 'turn/completed-full-format',
+              epoch: upgradedEpoch,
+              label: r94LocalDateTimeStamp(upgradedEpoch),
+              title: r94FullTimestampTitle(upgradedEpoch, Number.isFinite(completedEpoch) ? 'exact: Codex turn/completed' : 'exact: Codex final assistant rollout row'),
+              source: Number.isFinite(completedEpoch) ? 'turn/completed-full-format' : 'rollout-final-output-full-format',
             },
             sourceElement: exact.sourceElement instanceof Element ? exact.sourceElement : null,
           };
@@ -2040,6 +2089,22 @@
           continue;
         }
 
+        // R94_ROLLOUT_ASSISTANT_OUTPUT_TIMESTAMP_RUNTIME
+        // When Desktop omits a DOM item id, bind assistant commentary/final
+        // blocks by ordered output events for the exact pane+turn. Status/tool
+        // cards are never assigned an assistant event merely to obtain a time.
+        const ids = r94IdsForTurn(turn);
+        const claimedOutput = ids
+          ? r94ClaimOutputEvent(ids.threadId, ids.turnId, segment)
+          : null;
+        if (claimedOutput && Number.isFinite(claimedOutput.epoch)) {
+          segmentTimeByKey.delete(key);
+          segmentTimeByKey.set(key, { epoch: claimedOutput.epoch, source: claimedOutput.source });
+          r94TrimSegmentCache();
+          r94EnsureSegmentEntry(segment, turn, key, claimedOutput.epoch, claimedOutput.source);
+          continue;
+        }
+
         // DOM wrappers can be reparented while an item streams. A concrete node
         // keeps the first timestamp assigned to that semantic output item.
         const existingEntry = segmentEntryByNode.get(segment);
@@ -2074,6 +2139,48 @@
       }
       r94SyncDiagnostics();
       r94SchedulePosition();
+    }
+
+    function r94ClaimOutputEvent(threadId, turnId, segment) {
+      if (!(segment instanceof Element)) return null;
+      const outputs = r94RecentOutputEventsFor(threadId, turnId);
+      if (!outputs.length) return null;
+      const kind = r94SemanticKind(segment);
+      if (kind !== 'assistant' && kind !== 'final') return null;
+
+      const directItemId = r94DirectItemIdForSurface(segment);
+      let candidates = outputs;
+      if (directItemId) {
+        const exactItem = outputs.filter(function(output) {
+          return output.itemId && output.itemId.toLowerCase() === String(directItemId).toLowerCase();
+        });
+        if (exactItem.length) candidates = exactItem;
+      } else if (kind === 'final') {
+        const finals = outputs.filter(function(output) {
+          return output.phase === 'final_answer' || output.phase === 'final';
+        });
+        if (finals.length) candidates = finals;
+      } else {
+        const commentary = outputs.filter(function(output) {
+          return output.phase !== 'final_answer' && output.phase !== 'final';
+        });
+        if (commentary.length) candidates = commentary;
+      }
+
+      for (const output of candidates) {
+        const key = String(threadId || '').toLowerCase() + '\u0000' +
+          r94NormalizeTurnId(turnId) + '\u0000' +
+          (output.itemId || (output.phase + '\u0000' + String(Math.round(output.atMs))));
+        if (claimedOutputEventKeys.has(key)) continue;
+        claimedOutputEventKeys.add(key);
+        return {
+          epoch: output.atMs,
+          source: 'rollout/assistant-output',
+          itemId: output.itemId || '',
+          phase: output.phase || '',
+        };
+      }
+      return null;
     }
 
     function r94OrphanSemanticCandidates(root) {
@@ -2180,6 +2287,13 @@
           } else if (Number.isFinite(completed) && completed > 0) {
             epoch = completed;
             source = 'item/completed';
+          }
+        }
+        if (!Number.isFinite(epoch)) {
+          const claimedOutput = r94ClaimOutputEvent(threadId, turnId, segment);
+          if (claimedOutput && Number.isFinite(claimedOutput.epoch)) {
+            epoch = claimedOutput.epoch;
+            source = claimedOutput.source;
           }
         }
         if (!Number.isFinite(epoch)) {
@@ -2550,6 +2664,7 @@
       visibleTurns.clear();
       visibleEntries.clear();
       visibleSegmentEntries.clear();
+      claimedOutputEventKeys.clear();
       segmentTimeByKey.clear();
       baselineSegmentKeys.clear();
       timelineEntries.clear();

@@ -393,6 +393,20 @@ if (-not $Patched.Contains('R94_EXACT_USAGE_INGEST_EXPORT_RUNTIME')) {
     $Patched = Replace-Required $Patched '  state.refresh = refreshUi;' $R94IngestExport 'r94 exact usage ingest runtime export'
 }
 
+$R94PaneThreadFallbackOld = @'
+      const externalThreadId = normalizePaneId(state.metrics && state.metrics.externalThreadId);
+      if (!threadId && index === 0) threadId = externalThreadId;
+'@
+$R94PaneThreadFallbackNew = @'
+      const externalThreadId = normalizePaneId(state.metrics && state.metrics.externalThreadId);
+      // R94_MULTI_PANE_THREAD_FALLBACK_FAIL_CLOSED_RUNTIME
+      // A process-global/latest externalThreadId is only safe when exactly one
+      // visible composer exists. In split view, an unknown pane must stay
+      // unowned instead of borrowing whichever thread happened to update last.
+      if (!threadId && composers.length === 1 && index === 0) threadId = externalThreadId;
+'@
+$Patched = Replace-Required $Patched $R94PaneThreadFallbackOld $R94PaneThreadFallbackNew 'r94 multi-pane thread fallback fail-closed'
+
 $R94PaneOwnership = @'
   function paneTelemetryOwnership(threadId) {
     const paneThread = r94NormalizePaneId(threadId);

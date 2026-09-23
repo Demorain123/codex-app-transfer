@@ -178,6 +178,9 @@ function outputTelemetryRuntimeSource(proxyPort) {
       activeCount: 0,
       attempt: 0,
       maxRetries: 0,
+      infinite: false,
+      elapsedMs: 0,
+      maxDurationMs: 0,
       delayMs: 0,
       provider: '',
       reason: '',
@@ -217,6 +220,19 @@ function outputTelemetryRuntimeSource(proxyPort) {
     if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(1) + 'M';
     if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'K';
     return String(Math.round(value));
+  }
+
+  function retryHours(ms) {
+    return (Math.max(0, Number(ms) || 0) / 3600000).toFixed(2);
+  }
+
+  function transferRetryLabel(retry) {
+    const denominator = retry && retry.infinite ? '∞' : String(Number(retry && retry.maxRetries) || 0);
+    let label = 'TRANSFER RETRY ' + (Number(retry && retry.attempt) || 0) + '/' + denominator;
+    if (retry && retry.infinite && Number(retry.maxDurationMs) > 0) {
+      label += ' · ' + retryHours(retry.elapsedMs) + 'h/' + retryHours(retry.maxDurationMs) + 'h';
+    }
+    return label;
   }
 
   function ensureStyle() {
@@ -352,7 +368,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
       existing.forEach(function(node) { node.remove(); });
       return 0;
     }
-    const label = 'TRANSFER RETRY ' + retry.attempt + '/' + retry.maxRetries;
+    const label = transferRetryLabel(retry);
     const bars = Array.from(document.querySelectorAll(
       '[data-cas-status-inside-composer="true"][data-cas-status-owner="r94-inline-safe"]'
     ));
@@ -395,7 +411,7 @@ function outputTelemetryRuntimeSource(proxyPort) {
         hud.removeAttribute('title');
         return;
       }
-      const retryText = 'TRANSFER RETRY ' + r.attempt + '/' + r.maxRetries +
+      const retryText = transferRetryLabel(r) +
         (r.activeCount > 1 ? ' · active ' + r.activeCount : '') +
         (r.delayMs ? ' · wait ' + r.delayMs + 'ms' : '');
       if (hud.textContent !== retryText) hud.textContent = retryText;
@@ -456,10 +472,13 @@ function outputTelemetryRuntimeSource(proxyPort) {
       retry.activeCount = Number(value && value.activeCount) || 0;
       retry.attempt = Number(value && value.attempt) || 0;
       retry.maxRetries = Number(value && value.maxRetries) || 0;
+      retry.infinite = value && value.infinite === true;
+      retry.elapsedMs = Number(value && value.elapsedMs) || 0;
+      retry.maxDurationMs = Number(value && value.maxDurationMs) || 0;
       retry.delayMs = Number(value && value.delayMs) || 0;
       retry.provider = String((value && value.provider) || '');
       retry.reason = String((value && value.reason) || '');
-      nextDelay = retry.active ? 200 : (retry.maxRetries > 0 ? 700 : 2000);
+      nextDelay = retry.active ? 200 : ((retry.maxRetries > 0 || retry.infinite) ? 700 : 2000);
       schedule(0);
     } catch {
       state.retry.active = false;

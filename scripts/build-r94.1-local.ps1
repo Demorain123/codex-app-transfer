@@ -61,11 +61,16 @@ Write-Host 'R94_1_PREVIEW_WRAPPER_IDENTITY_PASS' -ForegroundColor Green
 foreach ($Check in @(
     @{ Text = $RetryForwardText; Marker = 'CAS-R94-1-TRANSFER-UPSTREAM-CONNECT-RETRY' },
     @{ Text = $RetryForwardText; Marker = 'error.is_connect()' },
-    @{ Text = $RetryForwardText; Marker = 'MAX_TRANSFER_UPSTREAM_CONNECT_RETRIES: u8 = 15' },
+    @{ Text = $RetryForwardText; Marker = 'set_upstream_connect_retry_policy' },
+    @{ Text = $RetryForwardText; Marker = 'RetryWindowElapsed' },
+    @{ Text = $RetryForwardText; Marker = 'mode=infinite' },
     @{ Text = $RetryServerText; Marker = '/_cas/transfer-retry-status' },
-    @{ Text = $RetrySettingsText; Marker = 'upstreamConnectRetries must be an integer between 0 and 15' },
+    @{ Text = $RetryServerText; Marker = '"maxDurationMs"' },
+    @{ Text = $RetrySettingsText; Marker = 'upstreamConnectRetryInfinite' },
+    @{ Text = $RetrySettingsText; Marker = 'upstreamConnectRetryMaxHours' },
     @{ Text = $RetrySettingsPageText; Marker = "persist({ upstreamConnectRetries: value })" },
-    @{ Text = $RetrySettingsPageText; Marker = 'max="15"' },
+    @{ Text = $RetrySettingsPageText; Marker = 'upstreamConnectRetryInfinite' },
+    @{ Text = $RetrySettingsPageText; Marker = 'upstreamConnectRetryMaxHours' },
     @{ Text = $RetryNoMicroText; Marker = 'CAS_TRANSFER_PROXY_PORT' },
     @{ Text = $RetryLauncherText; Marker = 'CAS-R94-1-TRANSFER-RETRY-CODEX-OVERLAY' },
     @{ Text = $RetryLauncherText; Marker = 'TRANSFER RETRY ' },
@@ -154,5 +159,6 @@ if ($PreflightOnly) {
     Write-Host '  - visible/package identity is r94.1 / 2.4.5+94.1'
     Write-Host '  - Windows title, in-app badge and nested base-builder identity are forced through the visible-identity override hook'
     Write-Host '  - Transfer does not build, patch, replace or launch a private Codex runtime'
-    Write-Host '  - Transfer upstream connect retries are configurable 0..15; No Lagging shows live TRANSFER RETRY status inside Codex'
+    Write-Host '  - Transfer finite retry counts have no artificial 15 cap; timed infinite mode is available'
+    Write-Host '  - No Lagging shows TRANSFER RETRY x/N or x/∞ with elapsed/max time inside Codex'
 }

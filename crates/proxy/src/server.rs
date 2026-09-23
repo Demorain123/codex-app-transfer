@@ -108,7 +108,10 @@ fn build_router_with_state(state: ProxyState) -> Router {
         // Read-only, credential-free local status for the Transfer-owned Codex
         // overlay. CORS is deliberately open because only loopback clients can
         // reach this listener and the payload contains no prompt/body/token data.
-        .route("/_cas/transfer-retry-status", get(transfer_retry_status_handler))
+        .route(
+            "/_cas/transfer-retry-status",
+            get(transfer_retry_status_handler).options(transfer_retry_status_options_handler),
+        )
         // [MOC-125] Codex 远程控制 WS 端点:真 WS 透传(区别于 /responses 的 ws→http 转换)。
         // relay 模式 chatgpt_base_url 指向本 proxy,这条 GET 是 WebSocket 握手 → 透传到
         // wss://chatgpt.com;显式路由优先于 fallback,其余 /backend-api/* 仍走 passthrough。
@@ -145,6 +148,43 @@ async fn transfer_retry_status_handler() -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, OPTIONS"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("*"),
+    );
+    response.headers_mut().insert(
+        header::HeaderName::from_static("access-control-allow-private-network"),
+        HeaderValue::from_static("true"),
+    );
+    response
+}
+
+async fn transfer_retry_status_options_handler() -> Response {
+    let mut response = axum::http::StatusCode::NO_CONTENT.into_response();
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, OPTIONS"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("*"),
+    );
+    response.headers_mut().insert(
+        header::HeaderName::from_static("access-control-allow-private-network"),
+        HeaderValue::from_static("true"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
     response
 }
 

@@ -1086,7 +1086,16 @@
         typeof capability.getItemRecord !== 'function') return null;
     const ids = r94IdsForTurn(turn);
     if (!ids) return null;
-    const itemId = r94ItemIdForSurface(surface);
+
+    // R94_NO_DESCENDANT_EXACT_BORROW_RUNTIME
+    // A prose-bearing assistant wrapper must not borrow the item id/time of an
+    // embedded tool card. Only its own direct identity is exact; otherwise the
+    // live first-observed timestamp remains an explicitly approximate value.
+    const directItemId = r94DirectItemIdForSurface(surface);
+    const kind = r94SemanticKind(surface);
+    const ownsAssistantProse =
+      kind === 'assistant' && r94AssistantWrapperHasOwnProse(surface);
+    const itemId = directItemId || (ownsAssistantProse ? '' : r94ItemIdForSurface(surface));
     if (!itemId) return null;
     const record = capability.getItemRecord(ids.threadId, ids.turnId, itemId);
     if (!record) return null;

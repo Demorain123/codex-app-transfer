@@ -3108,14 +3108,14 @@ model = \"gpt-5.5\"
             .as_deref(),
             Some("15")
         );
-        assert_eq!(
+        assert!(
             snapshot_table_field_literal(
                 &toml,
                 "model_providers.openai",
                 "stream_max_retries"
             )
-            .as_deref(),
-            Some("15")
+            .is_none(),
+            "external-catalog path must not recreate the removed fake built-in openai override: {toml}"
         );
         assert!(
             !toml.lines().any(|line| line.trim_start().starts_with("model_provider =")),

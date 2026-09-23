@@ -740,7 +740,7 @@ export default {
     "开启后忽略上面的次数，持续重试直到达到时间上限。Transfer 日志和 No Lagging Codex 状态会显示累计重试次数与已用时间。",
   "settings.upstreamConnectRetryMaxHours": "无限重试最长持续时间（小时）",
   "settings.upstreamConnectRetryMaxHoursHint":
-    "必须大于 0，可输入小数，例如 1.5 = 最长 1 小时 30 分钟。达到时间上限后停止 Transfer 内部重试并把最后错误交回 Codex。",
+    "必须大于 0，可输入小数，例如 1.5 = 最长 1 小时 30 分钟。达到时间上限后不再发起新的 Transfer 重试；已经发出的请求不会被强行中断，以避免重复执行/重复计费风险。",
   "settings.workbuddyQuotaGuardThreshold": "WorkBuddy 账号切换阈值",
   "settings.workbuddyQuotaGuardThresholdHint":
     "WorkBuddy 账号池剩余积分低于此值时自动切到下一个有额度的账号(默认 20)。",
